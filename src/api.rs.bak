@@ -37,17 +37,8 @@ pub async fn chat_completions_handler(
         requested_model.clone()
     };
 
-    // 2. Transcrever Mensagens Complexas (Multimodal/Arrays) para Strict Strings + Injeção de RAG Nativo
-    let mut purified_messages: Vec<Value> = Vec::new();
-
-    // Injeta o Contexto Físico do Usuário (Se o Vault conter arquivos válidos)
-    if let Some(rag_cortex) = crate::rag::build_rag_context_message(&state.vault_path) {
-        tracing::debug!("📚 RAG Context successfully injected into Prompt.");
-        purified_messages.push(rag_cortex);
-    }
-
-    // Injeta as Mensagens da própria TUI (Código e Prompts)
-    purified_messages.extend(payload.messages.into_iter().map(|msg| {
+    // 2. Transcrever Mensagens Complexas (Multimodal/Arrays) para Strict Strings (Exigência do Ollama)
+    let purified_messages: Vec<Value> = payload.messages.into_iter().map(|msg| {
         let content_str = match msg.content {
             crate::models::MessageContent::Text(t) => t,
             crate::models::MessageContent::Multimodal(parts) => {
@@ -65,7 +56,7 @@ pub async fn chat_completions_handler(
             "role": msg.role,
             "content": content_str
         })
-    }));
+    }).collect();
 
     // 3. Empacotar para o Servidor Local com Streaming Exigido
     let ollama_payload = json!({
@@ -97,12 +88,6 @@ pub async fn chat_completions_handler(
     }
 
     // Criamos o Túnel de Transmissão contínua em Rust
-    // Variáveis locais puras para contabilização na Closure do Stream
-    let tracking_telemetry = state.telemetry.clone();
-    let tracking_model = ollama_model.clone();
-    let start_time = std::time::Instant::now();
-    let mut session_tokens = 0;
-
     // Extraímos os Bytes Chunk a Chunk e mapeamos pro formato OpenAI SSE:
     let stream = res.bytes_stream().map(move |result| {
         match result {
@@ -119,9 +104,6 @@ pub async fn chat_completions_handler(
                         if let Ok(ollama_resp) = serde_json::from_str::<Value>(line) {
                             if let Some(msg_obj) = ollama_resp.get("message") {
                                 if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
-                                    
-                                    // Incremento ingênuo para cada Token yieldado
-                                    session_tokens += 1;
                                     
                                     // Temos o Fragmento! Vamos envelopá-lo no formato OpenAI
                                     let chunk_response = OpenAIChatChunkResponse {
@@ -148,20 +130,9 @@ pub async fn chat_completions_handler(
                             }
                             
                             // Tratar Evento de Fim de Transmissão do Ollama
-                            // (Ollama envia "done": true no último pacote, com as estatísticas embutidas)
+                            // (Ollama envia "done": true no último pacote)
                             if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool()) {
                                 if done {
-                                    // Bater na payload absoluta "eval_count" e "prompt_eval_count" do Ollama final JSON
-                                    let llm_gen_tokens = ollama_resp.get("eval_count").and_then(|e| e.as_u64()).unwrap_or(session_tokens as u64) as usize;
-                                    let llm_prompt_tokens = ollama_resp.get("prompt_eval_count").and_then(|e| e.as_u64()).unwrap_or(0) as usize;
-                                    let total_real_tokens = llm_gen_tokens + llm_prompt_tokens;
-                                    
-                                    // 🚩 Observabilidade: Fim de Interação -> Gravando Métricas Cíbridas!
-                                    let duration = start_time.elapsed().as_millis();
-                                    if let Ok(mut t) = tracking_telemetry.write() {
-                                        t.record_session(total_real_tokens, duration, &tracking_model);
-                                    }
-
                                    let finish_response = OpenAIChatChunkResponse {
                                         id: "chatcmpl-end".to_string(),
                                         object: "chat.completion.chunk".to_string(),
@@ -199,28 +170,4 @@ pub async fn chat_completions_handler(
     Sse::new(stream)
         .keep_alive(axum::response::sse::KeepAlive::new())
         .into_response()
-}
-
-/// A Ponte UI-Core: Endpoint do Front-end Vue.js requisitando a Pressão da Rede
-pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let snapshot = match state.telemetry.read() {
-        Ok(t) => t.get_snapshot(),
-        Err(_) => crate::telemetry::TelemetrySnapshot {
-            total_tokens: 0,
-            avg_tps: 0.0,
-            estimated_cost: 0.0,
-        },
-    };
-    
-    // Devolve formatado igualzinho ao Node Python antigo pra Vue absorver sem refactor!
-    Json(json!({
-        "total_tokens": snapshot.total_tokens,
-        "avg_tps": snapshot.avg_tps,
-        "estimated_cost": snapshot.estimated_cost,
-        "hardware": {
-            "cpu": 0.0, // Preenchidos mockados ou simulados no JS (ou Rust Sysinfo futuro)
-            "ram": 0.0,
-            "io": 0.0
-        }
-    }))
 }

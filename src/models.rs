@@ -23,7 +23,11 @@ pub struct OpenAIChatMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OpenAIChatRequest {
+    #[serde(default)] // Permite falha silenciosa para modelos puros (se ausente)
     pub model: String,
+    
+    // O Vercel AI SDK muitas vezes manda o prompt num campo "input" em vez de "messages" (Endpoint /responses)
+    #[serde(alias = "input")]
     pub messages: Vec<OpenAIChatMessage>,
     
     // Parâmetros de Inferência Opcionais
