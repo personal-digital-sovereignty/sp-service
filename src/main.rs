@@ -7,6 +7,7 @@ mod telemetry;
 use axum::{routing::post, Router};
 use reqwest::Client;
 use std::sync::{Arc, RwLock};
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -15,6 +16,7 @@ pub struct AppState {
     pub http_client: Client,
     pub vault_path: std::path::PathBuf,
     pub telemetry: Arc<RwLock<telemetry::TelemetryState>>,
+    pub log_sender: broadcast::Sender<models::LogEntry>,
 }
 
 #[tokio::main]
@@ -33,16 +35,21 @@ async fn main() {
     // Inicializa as Engrenagens do RAG Indexer nativo (Std::fs)
     let active_vault = rag::init_vault();
 
+    // Inicializa o Corredor de Eventos Cíbridos (Capacidade p/ 100 Logs antes de lag)
+    let (log_tx, _) = broadcast::channel(100);
+
     // Cria o Roteador Axum (A fundação dos Cíbridos) com Contexto Acoplado
     let state = Arc::new(AppState {
         http_client: Client::new(),
         vault_path: active_vault,
         telemetry: Arc::new(RwLock::new(telemetry::TelemetryState::new())),
+        log_sender: log_tx,
     });
 
     let app = Router::new()
-        // ------------------ LLMOps Telemetry ------------------
+        // ------------------ LLMOps Telemetry & Logs ------------------
         .route("/v1/analytics/telemetry", axum::routing::get(api::telemetry_snapshot_handler))
+        .route("/v1/logs", axum::routing::get(api::realtime_logs_handler))
         // ------------------ Chat Endpoints ------------------
         .route("/opencode/v1/chat/completions", post(api::chat_completions_handler))
         .route("/v1/chat/completions", post(api::chat_completions_handler))

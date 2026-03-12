@@ -29,6 +29,13 @@ pub async fn chat_completions_handler(
     
     info!("🔥 [Sovereign Core] Interceptando requisição OpenCode para o modelo: [{}] | Streaming: {}", requested_model, is_stream);
 
+    // Broadcast Log (Cíbrido Live)
+    let _ = state.log_sender.send(crate::models::LogEntry {
+        timestamp: "".to_string(), // O Frontend popula no JS puro
+        level: "agent".to_string(),
+        message: format!("The Nurse acordou (Requisição de Inferência OpenCode para {})", requested_model),
+    });
+
     // O Roteamento de Conversão (OpenAI -> Ollama)
     // 1. Transpilar Nomes de Modelos Proprietários para Modelos Locais
     let ollama_model = if requested_model.to_lowercase().contains("gpt") {
@@ -223,4 +230,24 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
             "io": 0.0
         }
     }))
+}
+
+/// O Canal Cíbrido Ao Vivo: Rota SSE despachando The Sentinel e Agent Logs
+pub async fn realtime_logs_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let rx = state.log_sender.subscribe();
+    
+    let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|res| async move {
+        match res {
+            Ok(log) => {
+                if let Ok(json) = serde_json::to_string(&log) {
+                    Some(Ok::<Event, Infallible>(Event::default().data(json)))
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    });
+
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
 }

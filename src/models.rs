@@ -2,6 +2,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ==========================================
+// Sovereign Ecosystem Log Models
+// ==========================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogEntry {
+    pub timestamp: String,
+    pub level: String, // info, warn, error, agent, rag
+    pub message: String,
+}
+
+// ==========================================
 // OpenAI-Compatible Request Models
 // ==========================================
 
