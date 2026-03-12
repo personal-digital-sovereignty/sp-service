@@ -10,6 +10,7 @@ mod api_vault;
 mod api_projects;
 mod api_settings;
 mod api_tools;
+pub mod kms;
 
 use axum::{routing::post, Router};
 use reqwest::Client;

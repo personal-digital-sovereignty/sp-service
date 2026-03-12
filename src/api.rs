@@ -97,11 +97,16 @@ pub async fn chat_completions_handler(
         })
     }));
 
-    // 3. Empacotar para o Servidor Local com Streaming Exigido
+    // 3. Empacotar para o Servidor Local com Controle Rigoroso de VRAM (Sovereign Enterprise - B2B)
     let mut ollama_payload = json!({
         "model": ollama_model,
         "messages": purified_messages,
-        "stream": true
+        "stream": true,
+        "keep_alive": -1, // Previne Cold Boots brutais da The Mom em Rotações
+        "options": {
+            "num_keep": 4, // Forçar Lock do System Prompt na VRAM
+            "num_ctx": 16384 // Teto Estendido Seguro p/ Workflows Agentic Cíbridos
+        }
     });
 
     // Injeção de Tools Requisitadas pelo Frontend (Vercel AI SDK JSON Schema)

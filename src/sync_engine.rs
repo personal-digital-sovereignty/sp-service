@@ -4,6 +4,7 @@ use tokio::sync::broadcast;
 use serde::Serialize;
 use tracing::{info, warn, error};
 use std::time::Duration;
+use std::fs;
 use uuid::Uuid;
 use tokio::time::sleep;
 
@@ -55,6 +56,16 @@ impl SyncEngine {
                 for row in rows {
                     let ws_path = Path::new(&row.path);
                     if ws_path.exists() && ws_path.is_dir() {
+                        // 2. Proteção de Polling Limitado (Config)
+                        // A crate notify resolve internamente se precisa fazer fallback p/ Polling (em NFS/Network Drives).
+                        // Setamos explicitly o poll_interval para ser gentil com o IO IOPS do Hardware!
+                        let config = Config::default()
+                            .with_poll_interval(Duration::from_millis(5000))
+                            .with_compare_contents(true);
+                            
+                        // Re-criando o watcher com a config gentil (se falhar, mantém)
+                        let _ = watcher.configure(config.clone());
+                        
                         if let Err(e) = watcher.watch(ws_path, RecursiveMode::Recursive) {
                             error!("🚨 [Sensus Sync] Falha ao assistir drive secundário {:?}: {}", ws_path, e);
                         } else {
@@ -72,9 +83,27 @@ impl SyncEngine {
                     for path in event.paths {
                         if path.is_file() {
                             let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                            let path_str = path.to_string_lossy().to_string();
                             
-                            // Impede re-processamento de backups e arquivos ocultos
-                            if filename.starts_with('.') || filename.ends_with('~') {
+                            // 3. Parser do .sovereignignore on-the-fly + Hardcoded (Segurança Extrema)
+                            let mut ignored_patterns = vec!["node_modules".to_string(), ".venv".to_string(), ".git".to_string(), "target".to_string()];
+                            let ignore_file = path.ancestors().find(|a| a.join(".sovereignignore").exists());
+                            if let Some(root) = ignore_file {
+                                if let Ok(content) = fs::read_to_string(root.join(".sovereignignore")) {
+                                    for line in content.lines() {
+                                        let trimmed = line.trim();
+                                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                                            ignored_patterns.push(trimmed.replace("/", ""));
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Verifica se o caminho absoluto contém qualquer diretório proibido
+                            let is_ignored = ignored_patterns.iter().any(|pattern| path_str.contains(pattern));
+                            
+                            // Impede re-processamento de backups, arquivos ocultos e Pastas Bloqueadas
+                            if is_ignored || filename.starts_with('.') || filename.ends_with('~') {
                                 continue;
                             }
 
