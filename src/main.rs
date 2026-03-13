@@ -12,7 +12,7 @@ mod api_settings;
 mod api_tools;
 pub mod kms;
 
-use axum::{routing::post, Router};
+use axum::{routing::post, Router, response::IntoResponse};
 use reqwest::Client;
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
@@ -75,7 +75,21 @@ async fn main() {
             .post(api_vault::create_workspace_handler))
         .route("/v1/workspaces/:workspace_id", axum::routing::delete(api_vault::delete_workspace_handler))
         .route("/v1/workspaces/:workspace_id/tree", axum::routing::get(api_vault::workspace_tree_handler))
-        .route("/v1/vault/document/:id", axum::routing::get(api_vault::vault_document_read)
+        .route("/v1/vault/graph", axum::routing::get(|| async {
+            // Forward para o The Mom (Python FastAPI RAG Database Network)
+            let client = reqwest::Client::new();
+            match client.get("http://127.0.0.1:8000/v1/vault/graph").send().await {
+                Ok(resp) => {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        axum::Json(json).into_response()
+                    } else {
+                        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Invalid JSON from The Mom").into_response()
+                    }
+                },
+                Err(_) => (axum::http::StatusCode::BAD_GATEWAY, "Graph Engine (The Mom) Offline").into_response(),
+            }
+        }))
+        .route("/v1/vault/document/*id", axum::routing::get(api_vault::vault_document_read)
             .put(api_vault::vault_document_write))
         .route("/v1/vault/fs/create", axum::routing::post(api_vault::vault_fs_create_handler))
         .route("/v1/vault/fs/rename", axum::routing::put(api_vault::vault_fs_rename_handler))
@@ -88,8 +102,9 @@ async fn main() {
         .route("/v1/projects", axum::routing::get(api_projects::get_projects_handler)
             .post(api_projects::create_project_handler))
         .route("/v1/projects/:id", axum::routing::delete(api_projects::delete_project_handler))
-        .route("/v1/projects/:project_id/tasks", axum::routing::get(api_projects::get_project_tasks_handler))
-        .route("/v1/tasks/:id", axum::routing::delete(api_projects::delete_task_handler))
+        .route("/v1/projects/:project_id/tasks", axum::routing::get(api_projects::get_project_tasks_handler).post(api_projects::create_task_handler))
+        .route("/v1/tasks/:id", axum::routing::delete(api_projects::delete_task_handler)
+            .put(api_projects::update_task_handler))
         // ------------------ Settings & Identity O.S -----------
         .route("/v1/settings", axum::routing::get(api_settings::get_system_settings_handler)
             .post(api_settings::set_system_settings_handler))

@@ -154,3 +154,110 @@ pub async fn delete_task_handler(
     let _ = sqlx::query("DELETE FROM tasks WHERE id = ?").bind(id).execute(&state.db).await;
     Json(serde_json::json!({"status": "deleted"})).into_response()
 }
+
+#[derive(Deserialize)]
+pub struct UpdateTaskRequest {
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub order_index: Option<i64>,
+    pub deadline: Option<String>,
+}
+
+pub async fn update_task_handler(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<UpdateTaskRequest>,
+) -> impl IntoResponse {
+    // Busca os dados antigos como baseline para update parcial
+    let old_task = sqlx::query_as::<_, TaskRow>("SELECT id, project_id, tenant_id, title, description, status, priority, order_index, deadline FROM tasks WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await;
+
+    if let Ok(Some(task)) = old_task {
+        let final_title = payload.title.unwrap_or(task.title);
+        let final_desc = payload.description.or(task.description);
+        let final_status = payload.status.or(task.status);
+        let final_priority = payload.priority.or(task.priority);
+        let final_order = payload.order_index.or(task.order_index).unwrap_or(0);
+        let final_deadline = payload.deadline.or(task.deadline);
+
+        let _ = sqlx::query(
+            "UPDATE tasks SET title = ?, description = ?, status = ?, priority = ?, order_index = ?, deadline = ? WHERE id = ?"
+        )
+        .bind(&final_title)
+        .bind(&final_desc)
+        .bind(&final_status)
+        .bind(&final_priority)
+        .bind(final_order)
+        .bind(&final_deadline)
+        .bind(&id)
+        .execute(&state.db)
+        .await;
+
+        return Json(serde_json::json!({
+            "id": id,
+            "project_id": task.project_id,
+            "tenant_id": task.tenant_id,
+            "title": final_title,
+            "description": final_desc,
+            "status": final_status,
+            "priority": final_priority,
+            "order_index": final_order,
+            "deadline": final_deadline
+        })).into_response()
+    }
+    
+    (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"error": true, "message": "Task not found."}))).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct CreateTaskRequest {
+    pub title: String,
+    pub description: Option<String>,
+    pub status: Option<String>,
+    pub priority: Option<String>,
+    pub deadline: Option<String>,
+}
+
+pub async fn create_task_handler(
+    Path(project_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<CreateTaskRequest>,
+) -> impl IntoResponse {
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let tenant = "default".to_string();
+
+    let final_status = payload.status.clone().unwrap_or_else(|| "TODO".to_string());
+    let final_priority = payload.priority.clone().unwrap_or_else(|| "Medium".to_string());
+
+    let _ = sqlx::query(
+        r#"INSERT INTO tasks (id, project_id, tenant_id, title, description, status, priority, order_index, deadline) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"#
+    )
+    .bind(&task_id)
+    .bind(&project_id)
+    .bind(&tenant)
+    .bind(&payload.title)
+    .bind(&payload.description)
+    .bind(&final_status)
+    .bind(&final_priority)
+    .bind(0)
+    .bind(&payload.deadline)
+    .execute(&state.db)
+    .await;
+
+    Json(serde_json::json!({
+        "id": task_id,
+        "project_id": project_id,
+        "tenant_id": tenant,
+        "title": payload.title,
+        "description": payload.description,
+        "status": final_status,
+        "priority": final_priority,
+        "order_index": 0,
+        "deadline": payload.deadline
+    })).into_response()
+}

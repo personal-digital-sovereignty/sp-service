@@ -12,7 +12,7 @@ use tokio::fs;
 #[derive(Serialize)]
 pub struct VaultNode {
     pub id: String,
-    pub filename: String,
+    pub name: String,
     #[serde(rename = "is_dir")]
     pub is_dir: bool,
     pub r#type: String, // "file" or "directory"
@@ -44,7 +44,7 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                 let children = scan_directory(&abs_path, root_path).await;
                 nodes.push(VaultNode {
                     id: rel_id.clone(),
-                    filename,
+                    name: filename.clone(),
                     is_dir: true,
                     r#type: "directory".to_string(),
                     path: abs_path.to_string_lossy().to_string(),
@@ -53,7 +53,7 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
             } else {
                 nodes.push(VaultNode {
                     id: rel_id.clone(),
-                    filename,
+                    name: filename.clone(),
                     is_dir: false,
                     r#type: "file".to_string(),
                     path: abs_path.to_string_lossy().to_string(),
@@ -66,7 +66,7 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
     // Ordenar: Pastas Primeiro, depois Arquivos alfabeticamente
     nodes.sort_by(|a, b| {
         if a.r#type == b.r#type {
-            a.filename.cmp(&b.filename)
+            a.name.cmp(&b.name)
         } else if a.r#type == "directory" {
             std::cmp::Ordering::Less
         } else {
@@ -160,7 +160,7 @@ pub async fn delete_workspace_handler(
             // Isso previne alucinações fantasmagóricas no LlamaIndex de Arquivos do Workspace que sumiram!
             tokio::spawn(async move {
                 let client = reqwest::Client::new();
-                match client.delete("http://127.0.0.1:8001/v1/chroma/flush")
+                match client.delete("http://127.0.0.1:8000/v1/chroma/flush")
                     .timeout(std::time::Duration::from_secs(10))
                     .send()
                     .await {
@@ -193,9 +193,9 @@ pub async fn workspace_tree_handler(
         .fetch_optional(&state.db)
         .await;
 
-    let target_path_str = match ws {
-        Ok(Some(row)) => row.path,
-        _ => return (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!([{"id": "error", "filename": "Workspace Não Encontrado", "is_dir": true, "type": "directory", "path": "", "children": []}]))).into_response(),
+    let (target_path_str, target_name) = match ws {
+        Ok(Some(row)) => (row.path, row.name),
+        _ => return (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!([{"id": "error", "name": "Workspace Não Encontrado", "is_dir": true, "type": "directory", "path": "", "children": []}]))).into_response(),
     };
 
     let root = PathBuf::from(&target_path_str);
@@ -206,7 +206,7 @@ pub async fn workspace_tree_handler(
     // A raiz do diretório pro Front Vue
     let root_node = VaultNode {
         id: "root".to_string(), // Manteve root pro UI n quebrar
-        filename: target_path_str,
+        name: target_name,
         is_dir: true,
         r#type: "directory".to_string(),
         path: root.to_string_lossy().to_string(),
@@ -221,14 +221,24 @@ pub async fn vault_document_read(
     AxumPath(file_id): AxumPath<String>,
     State(state): State<Arc<AppState>>
 ) -> impl IntoResponse {
-    // Decodifica a URL String e monta no Root
+    // Decodifica a URL String
     let decoded_id = urlencoding::decode(&file_id).unwrap_or(std::borrow::Cow::Borrowed(&file_id)).to_string();
-    let abs_path = state.vault_path.join(&decoded_id);
+    
+    // Se o frontend enviar um Path Absoluto da Base de Dados Cíbrida, nós lemos ele puramente.
+    // Senão, nós atrelamos ao Vault Default.
+    let abs_path = if std::path::Path::new(&decoded_id).is_absolute() {
+        PathBuf::from(&decoded_id)
+    } else {
+        state.vault_path.join(&decoded_id)
+    };
 
     match fs::read_to_string(&abs_path).await {
         Ok(content) => {
+            let file_name = abs_path.file_name().unwrap_or_default().to_string_lossy().to_string();
             let res = serde_json::json!({
                 "id": decoded_id,
+                "name": file_name,
+                "path": abs_path.to_string_lossy().to_string(),
                 "file_path": abs_path.to_string_lossy().to_string(),
                 "content": content,
             });

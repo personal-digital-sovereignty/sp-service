@@ -44,7 +44,6 @@ pub async fn chat_completions_handler(
         requested_model.clone()
     };
 
-    // Extraindo o Prompt do User p/ Persistir
     let human_prompt = payload.messages.last()
         .map(|msg| match &msg.content {
             Some(crate::models::MessageContent::Text(t)) => t.clone(),
@@ -61,6 +60,60 @@ pub async fn chat_completions_handler(
         })
         .unwrap_or_else(|| "Interação O.S".to_string());
 
+    // ===== THE NURSE (WEB & SYS AGENTIC BYPASS) =====
+    let mut web_context = String::new();
+    let mut sys_context = String::new();
+    
+    let is_web = human_prompt.to_lowercase().starts_with("/web");
+    let is_sys = human_prompt.to_lowercase().starts_with("/sys");
+
+    if is_web {
+        let query = human_prompt[4..].trim();
+        info!("🌐 [The Nurse - Sovereign Core] Agentic Task detectada: /web -> Buscando '{}' na World Wide Web nativamente...", query);
+        
+        let ddg_url = format!("https://html.duckduckgo.com/html/?q={}", urlencoding::encode(query));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Sovereign/1.0")
+            .build()
+            .unwrap_or_default();
+            
+        if let Ok(resp) = client.get(&ddg_url).send().await {
+            if let Ok(html) = resp.text().await {
+                let document = scraper::Html::parse_document(&html);
+                let result_sel = scraper::Selector::parse(".result").unwrap();
+                let title_sel = scraper::Selector::parse(".result__title").unwrap();
+                let link_sel = scraper::Selector::parse(".result__url").unwrap();
+                let snippet_sel = scraper::Selector::parse(".result__snippet").unwrap();
+                
+                let mut results = Vec::new();
+                for node in document.select(&result_sel).take(5) {
+                    let title = node.select(&title_sel).next().map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string()).unwrap_or_default();
+                    let link = node.select(&link_sel).next().map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string()).unwrap_or_default();
+                    let snippet = node.select(&snippet_sel).next().map(|el| el.text().collect::<Vec<_>>().join("").trim().to_string()).unwrap_or_default();
+                    
+                    if !title.is_empty() && !snippet.is_empty() {
+                        results.push(format!("- **{}** ({}): {}", title, link, snippet));
+                    }
+                }
+                
+                if !results.is_empty() {
+                    web_context = format!("INSTRUÇÃO SISTÊMICA (THE NURSE): O usuário solicitou uma pesquisa Web em tempo real. Você está operando como proxy. Seguem os últimos resultados mais quentes do motor de busca sobre o assunto:\n\n{}\n\nRESPONDA À PERGUNTA INICIAL DO USUÁRIO BASEANDO-SE EXCLUSIVAMENTE NOS FATOS ACIMA. FOQUE NOS FATOS.", results.join("\n"));
+                    info!("✅ [The Nurse] Sucesso! {} resultados extraídos da Web e injetados no Pipeline RAG.", results.len());
+                } else {
+                    web_context = "A busca web falhou em extrair dados dos seletores DOM ou foi bloqueada pelo firewall do motor de busca.".to_string();
+                }
+            }
+        } else {
+            web_context = "Timeout de Rede: Não foi possível alcançar os nós de busca da Web externa.".to_string();
+        }
+    } else if is_sys {
+        let query = human_prompt[4..].trim();
+        info!("⚙️ [The Nurse] Agentic Task detectada: /sys -> Analisando '{}'", query);
+        sys_context = format!("INSTRUÇÃO SISTÊMICA (THE NURSE): O usuário solicitou análise profunda sobre a arquitetura 'Sovereign Pair'. Somos um sistema Cíbrido. Usamos Rust (The Nurse/Axum), Vue 3 + Tailwind (UI), LLMs Locais (Ollama), Python API. Foque em responder a seguinte dúvida de Engenharia: '{}'", query);
+    }
+    // =========================================================
+
     let active_session_id = crate::api_chat::get_or_create_session(&state.db, payload.session_id, &human_prompt).await;
     
     // Grava no Banco a pergunta Humana
@@ -68,6 +121,21 @@ pub async fn chat_completions_handler(
 
     // 2. Transcrever Mensagens Complexas (Multimodal/Arrays) para Strict Strings + Injeção de RAG Nativo
     let mut purified_messages: Vec<Value> = Vec::new();
+
+    // Injeta o Contexto Web ou Sys gerados nativamente pelo Rust The Nurse (Agent Tasks)
+    if !web_context.is_empty() {
+        purified_messages.push(json!({
+            "role": "system",
+            "content": web_context
+        }));
+    }
+    
+    if !sys_context.is_empty() {
+        purified_messages.push(json!({
+            "role": "system",
+            "content": sys_context
+        }));
+    }
 
     // Injeta o Contexto Físico do Usuário (Se o Vault conter arquivos válidos)
     if let Some(rag_cortex) = crate::rag::build_rag_context_message(&state.vault_path) {
@@ -102,10 +170,9 @@ pub async fn chat_completions_handler(
         "model": ollama_model,
         "messages": purified_messages,
         "stream": true,
-        "keep_alive": -1, // Previne Cold Boots brutais da The Mom em Rotações
         "options": {
             "num_keep": 4, // Forçar Lock do System Prompt na VRAM
-            "num_ctx": 16384 // Teto Estendido Seguro p/ Workflows Agentic Cíbridos
+            "num_ctx": 8192 // Desidratação do Nurse (16GB RAM overhead fix resolvido pra RPI/OracleA1)
         }
     });
 
@@ -117,27 +184,91 @@ pub async fn chat_completions_handler(
         ollama_payload["tool_choice"] = tool_choice;
     }
 
+    // Resgate Masterplan da Tabela de Configurações
+    let mut ollama_base_url = "http://127.0.0.1:11434".to_string();
+    let mut is_custom_cluster = false;
+    if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'ollama_clusters'").fetch_optional(&state.db).await {
+        let val: String = sqlx::Row::get(&row, "value_json");
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
+            let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
+                for c in clusters {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                            ollama_base_url = url.trim_end_matches('/').to_string();
+                            is_custom_cluster = ollama_base_url != "http://localhost:11434" && ollama_base_url != "http://127.0.0.1:11434";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let endpoint = format!("{}/api/chat", ollama_base_url);
+
     let res = match state
         .http_client
-        .post("http://127.0.0.1:11434/api/chat")
+        .post(&endpoint)
         .json(&ollama_payload)
         .send()
         .await
     {
-        Ok(r) => r,
+        Ok(r) if r.status().is_success() => r,
+        Ok(r) => {
+            error!("❌ Ollama recusou a requisição HTTP. Status: {}", r.status());
+            let err_msg = format!("*(Protocolo de Fallback)* 🚨 Falha no nó LLM configurado ({}). Status HTTP: {}", endpoint, r.status());
+            
+            let err_chunk = crate::models::OpenAIChatChunkResponse {
+                id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Utc::now().timestamp(),
+                model: ollama_model.clone(),
+                choices: vec![crate::models::OpenAIChatChunkChoice {
+                    index: 0,
+                    delta: crate::models::OpenAIChatChunkDelta {
+                        role: Some("assistant".to_string()),
+                        content: Some(err_msg),
+                        tool_calls: None,
+                    },
+                    finish_reason: Some("error".to_string()),
+                }],
+            };
+            let stream = futures_util::stream::iter(vec![
+                Ok::<Event, Infallible>(Event::default().data(serde_json::to_string(&err_chunk).unwrap_or_default())),
+                Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+            ]);
+            return Sse::new(stream).into_response();
+        },
         Err(e) => {
             error!("🚨 Falha FATAL ao encontrar o motor LLM: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Motor Cognitive Air-Gapped não está respondendo na porta 11434.",
-            ).into_response();
+            let err_msg = if is_custom_cluster {
+                format!("*(Sovereign Core)* 🚨 **Severidade Máxima: A1 Oracle Offline**\nO cluster remoto mapeado em `{}` não respondeu. Certifique-se de que a VM está ligada e acessível na rede.\n\nDetalhe do Gateway: `{}`", endpoint, e)
+            } else {
+                format!("*(The Nurse Local)* ⚠️ Serviço de IA Local (Ollama) inacessível na porta 11434. O daemon está rodando?\n\nErro: `{}`", e)
+            };
+
+            let err_chunk = crate::models::OpenAIChatChunkResponse {
+                id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Utc::now().timestamp(),
+                model: ollama_model.clone(),
+                choices: vec![crate::models::OpenAIChatChunkChoice {
+                    index: 0,
+                    delta: crate::models::OpenAIChatChunkDelta {
+                        role: Some("assistant".to_string()),
+                        content: Some(err_msg),
+                        tool_calls: None,
+                    },
+                    finish_reason: Some("error".to_string()),
+                }],
+            };
+            let stream = futures_util::stream::iter(vec![
+                Ok::<Event, Infallible>(Event::default().data(serde_json::to_string(&err_chunk).unwrap_or_default())),
+                Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+            ]);
+            return Sse::new(stream).into_response();
         }
     };
-
-    if !res.status().is_success() {
-        error!("❌ Ollama recusou a requisição HTTP. Status: {}", res.status());
-        return (StatusCode::BAD_GATEWAY, "Erro no gateway interno LLM.").into_response();
-    }
 
     // Criamos o Túnel de Transmissão contínua em Rust
     // Variáveis locais puras para contabilização na Closure do Stream
