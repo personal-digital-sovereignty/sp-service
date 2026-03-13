@@ -93,6 +93,7 @@ async fn main() {
             .put(api_vault::vault_document_write))
         .route("/v1/vault/fs/create", axum::routing::post(api_vault::vault_fs_create_handler))
         .route("/v1/vault/fs/rename", axum::routing::put(api_vault::vault_fs_rename_handler))
+        .route("/v1/vault/fs/move", axum::routing::put(api_vault::vault_fs_move_handler))
         .route("/v1/vault/fs/delete", axum::routing::delete(api_vault::vault_fs_delete_handler))
         // ------------------ Historical Chat API (Sovereign O.S) ------
         .route("/v1/sessions", axum::routing::get(api_chat::get_sessions_handler))

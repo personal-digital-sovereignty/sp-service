@@ -391,6 +391,61 @@ pub async fn vault_fs_delete_handler(
 }
 
 #[derive(Deserialize)]
+pub struct FsMoveReq {
+    pub workspace_id: i64,
+    pub path: String, // String Relativa do Componente Vue `folder/file.txt` da ORIGEM
+    pub target_path: String, // Destino relativo `folder/nova_pasta`
+}
+
+pub async fn vault_fs_move_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<FsMoveReq>,
+) -> impl IntoResponse {
+    let ws = sqlx::query_as::<_, WorkspaceRow>("SELECT id, name, path, created_at FROM workspaces WHERE id = ?")
+        .bind(req.workspace_id)
+        .fetch_optional(&state.db)
+        .await;
+
+    let target_path_str = match ws {
+        Ok(Some(row)) => row.path,
+        _ => return (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"detail":"Workspace Não Encontrado"}))).into_response(),
+    };
+
+    let ws_root = PathBuf::from(&target_path_str);
+    
+    // Path original (absoluto host-O.S)
+    let source = ws_root.join::<PathBuf>(req.path.strip_prefix('/').unwrap_or(&req.path).into());
+    
+    // Pasta raiz destino
+    let dest_dir = if req.target_path.is_empty() {
+        ws_root.clone()
+    } else {
+        ws_root.join::<PathBuf>(req.target_path.strip_prefix('/').unwrap_or(&req.target_path).into())
+    };
+
+    if !source.starts_with(&ws_root) || !dest_dir.starts_with(&ws_root) {
+        return (axum::http::StatusCode::FORBIDDEN, Json(serde_json::json!({"detail":"Path manipulation prevented O.S"}))).into_response();
+    }
+
+    if !source.exists() {
+        return (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"detail":"Source O.S file not found"}))).into_response();
+    }
+    
+    if !dest_dir.exists() || !dest_dir.is_dir() {
+        return (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({"detail":"Target must be a valid existing directory"}))).into_response();
+    }
+
+    let file_name = source.file_name().unwrap_or_default();
+    let target = dest_dir.join(file_name);
+
+    if let Err(e) = fs::rename(&source, &target).await {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"detail": format!("Failed to move: {}", e)}))).into_response();
+    }
+
+    (axum::http::StatusCode::OK, Json(serde_json::json!({"status":"moved"}))).into_response()
+}
+
+#[derive(Deserialize)]
 pub struct WriteDocReq {
     pub workspace_id: Option<i64>, // Opcional garantindo fallback caso UI velha quebre 
     pub content: String,
