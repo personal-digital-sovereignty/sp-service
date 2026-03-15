@@ -215,8 +215,15 @@ let res = match state
 {
     Ok(r) if r.status().is_success() => r,
     Ok(r) => {
-        error!("❌ Ollama recusou a requisição HTTP. Status: {}", r.status());
-        let err_msg = format!("*(Protocolo de Fallback)* 🚨 Falha no nó LLM configurado ({}). Status HTTP: {}", endpoint, r.status());
+        let status = r.status();
+        let err_body = r.text().await.unwrap_or_default();
+        error!("❌ Ollama recusou a requisição HTTP. Status: {} - Body: {}", status, err_body);
+        
+        let err_msg = if status == reqwest::StatusCode::NOT_FOUND && err_body.contains("not found") {
+            format!("*(Conexão Remota)* 🚨 **Falha: Modelo Ausente na Oracle (OCI)**\nO modelo `{}` não está instalado no seu nó remoto (`{}`).\n\n**Solução:** Vá em 'Gerenciar Nós' nas configurações e execute o Download/Pull deste modelo para que a AWS/Oracle possa usá-lo.", ollama_model, endpoint)
+        } else {
+            format!("*(Protocolo de Fallback)* 🚨 Falha no nó LLM configurado ({}). Status HTTP: {} - Body: {}", endpoint, status, err_body)
+        };
         
         let err_chunk = crate::models::OpenAIChatChunkResponse {
             id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
