@@ -20,15 +20,12 @@ pub async fn get_system_settings_handler(State(state): State<Arc<AppState>>) -> 
             let keys_to_decrypt = vec!["openai_api_key", "anthropic_api_key", "groq_api_key", "gemini_api_key"];
             if let Some(obj) = parsed.as_object_mut() {
                 for key in keys_to_decrypt {
-                    if let Some(val) = obj.get(key) {
-                        if let Some(str_val) = val.as_str() {
-                            if !str_val.is_empty() {
-                                if let Some(decrypted) = kms::decrypt_vault_secret(str_val) {
+                    if let Some(val) = obj.get(key)
+                        && let Some(str_val) = val.as_str()
+                            && !str_val.is_empty()
+                                && let Some(decrypted) = kms::decrypt_vault_secret(str_val) {
                                     obj.insert(key.to_string(), serde_json::json!(decrypted));
                                 }
-                            }
-                        }
-                    }
                 }
             }
             
@@ -48,15 +45,12 @@ pub async fn set_system_settings_handler(
     let keys_to_encrypt = vec!["openai_api_key", "anthropic_api_key", "groq_api_key", "gemini_api_key"];
     if let Some(obj) = payload.as_object_mut() {
         for key in keys_to_encrypt {
-            if let Some(val) = obj.get(key) {
-                if let Some(str_val) = val.as_str() {
-                    if !str_val.is_empty() {
-                        if let Some(encrypted) = kms::encrypt_vault_secret(str_val) {
+            if let Some(val) = obj.get(key)
+                && let Some(str_val) = val.as_str()
+                    && !str_val.is_empty()
+                        && let Some(encrypted) = kms::encrypt_vault_secret(str_val) {
                             obj.insert(key.to_string(), serde_json::json!(encrypted));
                         }
-                    }
-                }
-            }
         }
     }
 

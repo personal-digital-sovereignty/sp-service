@@ -6,7 +6,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use crate::AppState;
-use tracing::{error, info};
+use tracing::error;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Debug, sqlx::FromRow)]
@@ -54,7 +54,7 @@ pub async fn get_projects_handler(State(state): State<Arc<AppState>>) -> impl In
     .await;
 
     match rows {
-        Ok(mut projects) => {
+        Ok(projects) => {
             // Frontend Pinia Espera 'links' e 'logs' no objeto, injectamos o MOCK pra evitar crash do VueJS
             let mut enhanced = Vec::new();
             for p in projects {

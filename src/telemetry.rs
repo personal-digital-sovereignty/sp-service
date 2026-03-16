@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::time::Instant;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {

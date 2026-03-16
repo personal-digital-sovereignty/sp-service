@@ -2,7 +2,7 @@ use axum::{
     extract::{State, Json},
     response::IntoResponse,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use crate::AppState;
 use tracing::{info, warn, error};
@@ -38,8 +38,7 @@ pub async fn read_vault_file_handler(
         .bind(&payload.workspace_id)
         .fetch_optional(&state.db)
         .await
-    {
-        if let Some(w) = workspace {
+        && let Some(w) = workspace {
             let full_path = PathBuf::from(&w.path).join(&payload.relative_path);
             
             // Verificação Anti-Traversal
@@ -61,7 +60,6 @@ pub async fn read_vault_file_handler(
                 }
             }
         }
-    }
     
     Json(serde_json::json!({"error": "Workspace not found"})).into_response()
 }

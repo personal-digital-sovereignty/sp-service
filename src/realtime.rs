@@ -28,11 +28,10 @@ pub async fn realtime_responses_handler(
     let mut db_model_fallback = "llama3.2".to_string();
     if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(&state.db).await {
         let val: String = sqlx::Row::get(&row, "value_json");
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
-            if let Some(m) = parsed.get("llm_model").and_then(|v| v.as_str()) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val)
+            && let Some(m) = parsed.get("llm_model").and_then(|v| v.as_str()) {
                 db_model_fallback = m.to_string();
             }
-        }
     }
 
     let ollama_model = if requested_model.to_lowercase().contains("gpt") {
@@ -100,8 +99,8 @@ pub async fn realtime_responses_handler(
                         if line.is_empty() { continue; }
 
                         if let Ok(ollama_resp) = serde_json::from_str::<Value>(line) {
-                            if let Some(msg_obj) = ollama_resp.get("message") {
-                                if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
+                            if let Some(msg_obj) = ollama_resp.get("message")
+                                && let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
                                     // Zod Array Mutation ("response.output_text.delta")
                                     let json_str = serde_json::to_string(&json!({
                                         "type": "response.output_text.delta",
@@ -111,11 +110,10 @@ pub async fn realtime_responses_handler(
                                     })).unwrap_or_default();
                                     return Ok::<Event, Infallible>(Event::default().data(json_str));
                                 }
-                            }
                             
                             // Sinalizadores de Fim
-                            if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool()) {
-                                if done {
+                            if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool())
+                                && done {
                                     // Zod Closure Unions
                                     let done_event = serde_json::to_string(&json!({
                                         "type": "response.output_item.done",
@@ -135,7 +133,6 @@ pub async fn realtime_responses_handler(
 
                                     return Ok::<Event, Infallible>(Event::default().data(magic_combo));
                                 }
-                            }
                         }
                     }
                 }

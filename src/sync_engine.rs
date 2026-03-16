@@ -1,12 +1,11 @@
-use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher, Config};
-use std::path::{Path, PathBuf};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher, Config};
+use std::path::Path;
 use tokio::sync::broadcast;
 use serde::Serialize;
 use tracing::{info, warn, error};
 use std::time::Duration;
 use std::fs;
 use uuid::Uuid;
-use tokio::time::sleep;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct IngestionJob {
@@ -64,7 +63,7 @@ impl SyncEngine {
                             .with_compare_contents(true);
                             
                         // Re-criando o watcher com a config gentil (se falhar, mantém)
-                        let _ = watcher.configure(config.clone());
+                        let _ = watcher.configure(config);
                         
                         if let Err(e) = watcher.watch(ws_path, RecursiveMode::Recursive) {
                             error!("🚨 [Sensus Sync] Falha ao assistir drive secundário {:?}: {}", ws_path, e);
@@ -88,8 +87,8 @@ impl SyncEngine {
                             // 3. Parser do .sovereignignore on-the-fly + Hardcoded (Segurança Extrema)
                             let mut ignored_patterns = vec!["node_modules".to_string(), ".venv".to_string(), ".git".to_string(), "target".to_string()];
                             let ignore_file = path.ancestors().find(|a| a.join(".sovereignignore").exists());
-                            if let Some(root) = ignore_file {
-                                if let Ok(content) = fs::read_to_string(root.join(".sovereignignore")) {
+                            if let Some(root) = ignore_file
+                                && let Ok(content) = fs::read_to_string(root.join(".sovereignignore")) {
                                     for line in content.lines() {
                                         let trimmed = line.trim();
                                         if !trimmed.is_empty() && !trimmed.starts_with('#') {
@@ -97,7 +96,6 @@ impl SyncEngine {
                                         }
                                     }
                                 }
-                            }
 
                             // Verifica se o caminho absoluto contém qualquer diretório proibido
                             let is_ignored = ignored_patterns.iter().any(|pattern| path_str.contains(pattern));
@@ -184,14 +182,11 @@ impl SyncEngine {
                 "stream": false
             }))
             .timeout(Duration::from_secs(30))
-            .send().await 
-        {
-            if let Ok(json) = resp.json::<serde_json::Value>().await {
-                if let Some(res_text) = json.get("response").and_then(|r| r.as_str()) {
+            .send().await
+            && let Ok(json) = resp.json::<serde_json::Value>().await
+                && let Some(res_text) = json.get("response").and_then(|r| r.as_str()) {
                     final_summary = res_text.trim().to_string();
                 }
-            }
-        }
 
         // Step 4: SQLite Store (Atomic Write O(1))
         job.current_step = 3;

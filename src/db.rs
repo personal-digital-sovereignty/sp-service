@@ -1,6 +1,5 @@
 use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::env;
-use std::path::PathBuf;
 use tracing::info;
 
 pub async fn init_pool() -> SqlitePool {
