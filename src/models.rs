@@ -115,6 +115,7 @@ pub struct OpenAIChatRequest {
 // ==========================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OpenAIChatChoiceMessage {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -124,6 +125,7 @@ pub struct OpenAIChatChoiceMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OpenAIChatChoice {
     pub index: i32,
     pub message: OpenAIChatChoiceMessage,
@@ -132,6 +134,7 @@ pub struct OpenAIChatChoice {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct OpenAITokenUsage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
@@ -139,6 +142,7 @@ pub struct OpenAITokenUsage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OpenAIChatResponse {
     pub id: String,
     pub object: String,

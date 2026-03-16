@@ -35,10 +35,10 @@ pub fn parse_vault_documents(vault_path: &PathBuf) -> String {
         let path = entry.path();
         
         // Pula arquivos invisíveis e sub-arquiteturas (impede que leia o git ou os nós do app)
-        if path.is_file() {
-            if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-                if ext == "md" || ext == "txt" {
-                    if let Ok(content) = fs::read_to_string(&path) {
+        if path.is_file()
+            && let Some(ext) = path.extension().and_then(|s| s.to_str())
+                && (ext == "md" || ext == "txt")
+                    && let Ok(content) = fs::read_to_string(path) {
                         let filename = path.file_name().unwrap_or_default().to_string_lossy();
                         
                         // Limitador de Profiling Crítico: Evitar OOM/Context Bombing no Servidor
@@ -54,9 +54,6 @@ pub fn parse_vault_documents(vault_path: &PathBuf) -> String {
                             doc_count += 1;
                         }
                     }
-                }
-            }
-        }
     }
 
     info!("🧠 [Sovereign RAG/Mock] Indexou {} documentos crus (Safe Limit) na memória em nanosegundos.", doc_count);

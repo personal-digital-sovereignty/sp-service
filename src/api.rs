@@ -1,4 +1,4 @@
-use axum::{ extract::{Json, State}, response::{ sse::{Event, Sse}, IntoResponse, Response, }, }; use futures_util::StreamExt; use reqwest::{Client, StatusCode}; use serde_json::{json, Value}; use std::convert::Infallible; use std::sync::Arc; use tracing::{error, info, warn};
+use axum::{ extract::{Json, State}, response::{ sse::{Event, Sse}, IntoResponse, Response, }, }; use futures_util::StreamExt;  use serde_json::{json, Value}; use std::convert::Infallible; use std::sync::Arc; use tracing::{error, info};
 
 use crate::models::{ OpenAIChatChunkChoice, OpenAIChatChunkDelta, OpenAIChatChunkResponse, OpenAIChatRequest, }; use crate::AppState;
 
@@ -179,8 +179,8 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
         if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
             for c in clusters {
-                if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
-                    if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
+                    && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                         let cluster_url = url.trim_end_matches('/').to_string();
                         // Se a URL na UI não for nula nem vazia, adotamos:
                         if !cluster_url.is_empty() {
@@ -188,7 +188,6 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
                             is_custom_cluster = ollama_base_url != "http://localhost:11434" && ollama_base_url != "http://127.0.0.1:11434" && ollama_base_url != "http://host.docker.internal:11434";
                         }
                     }
-                }
             }
         }
     }
@@ -306,14 +305,13 @@ let stream = res.bytes_stream().map(move |result| {
                             let mut extracted_content = None;
                             let mut extracted_tool_calls: Option<Vec<crate::models::ChunkToolCall>> = None;
 
-                            if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
-                                if !content.is_empty() {
+                            if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str())
+                                && !content.is_empty() {
                                     session_tokens += 1;
                                     accumulator.push_str(content);
                                     extracted_content = Some(content.to_string());
                                     has_content_or_tools = true;
                                 }
-                            }
 
                             if let Some(tool_calls_arr) = msg_obj.get("tool_calls").and_then(|tc| tc.as_array()) {
                                 let mut tcs = Vec::new();
@@ -370,8 +368,8 @@ let stream = res.bytes_stream().map(move |result| {
                         
                         // Tratar Evento de Fim de Transmissão do Ollama
                         // (Ollama envia "done": true no último pacote, com as estatísticas embutidas)
-                        if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool()) {
-                            if done {
+                        if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool())
+                            && done {
                                 // Bater na payload absoluta "eval_count" e "prompt_eval_count" do Ollama final JSON
                                 let llm_gen_tokens = ollama_resp.get("eval_count").and_then(|e| e.as_u64()).unwrap_or(session_tokens as u64) as usize;
                                 let llm_prompt_tokens = ollama_resp.get("prompt_eval_count").and_then(|e| e.as_u64()).unwrap_or(0) as usize;
@@ -409,7 +407,6 @@ let stream = res.bytes_stream().map(move |result| {
                                     return Ok::<Event, Infallible>(Event::default().data(json_str));
                                 }
                             }
-                        }
                     }
                 }
             }
@@ -517,6 +514,7 @@ pub async fn realtime_logs_handler(State(state): State<Arc<AppState>>) -> impl I
 }
 
 /// Stream Cíbrido SSE para o Sensus Sync Engine (RAG Pipeline Ocular)
+#[allow(dead_code)]
 pub async fn rag_sync_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let rx = state.sync_sender.subscribe();
 
