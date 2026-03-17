@@ -140,12 +140,12 @@ async fn main() {
 
     // Parsing CLI arguments to allow dynamic Host binding (Desktop vs Hub Mode)
     let args: Vec<String> = std::env::args().collect();
-    let mut host_address = "127.0.0.1:8001".to_string(); // Default to secure localhost
+    let mut host_address = "127.0.0.1:38001".to_string(); // Default to secure localhost
 
     let mut i = 1;
     while i < args.len() {
         if args[i] == "--host" && i + 1 < args.len() {
-            host_address = format!("{}:8001", args[i + 1]);
+            host_address = format!("{}:38001", args[i + 1]);
             i += 1;
         }
         i += 1;
@@ -153,11 +153,11 @@ async fn main() {
 
     // Configura o TcpListener com Port Escaping progressivo (Evita colisão EADDRINUSE no Desktop)
     let mut listener = None;
-    let mut final_port = 8001;
+    let mut final_port = 38001;
 
-    for port in 8001..=8010 {
+    for port in 38001..=38010 {
         let bind_target = if host_address.contains(":") {
-            // Se via CLI vier "0.0.0.0:8001", a gente fatia e substitui pela porta da iteração
+            // Se via CLI vier "0.0.0.0:38001", a gente fatia e substitui pela porta da iteração
             let base_ip = host_address.split(':').next().unwrap_or("127.0.0.1");
             format!("{}:{}", base_ip, port)
         } else {
@@ -176,7 +176,7 @@ async fn main() {
         }
     }
 
-    let listener = listener.expect("Sovereign Error: Todas as portas de 8001 a 8010 estão ocupadas!");
+    let listener = listener.expect("Sovereign Error: Todas as portas de 38001 a 38010 estão ocupadas!");
     
     tracing::info!("🚀 Sovereign Core Listening Resiliently on {}", listener.local_addr().unwrap());
     
