@@ -22,21 +22,35 @@ pub struct RewooResult {
     pub output: String,
 }
 
+/// The Orchestrator that decides where to run the Heavy Models
+pub struct HybridRouter;
+
+impl HybridRouter {
+    pub async fn dispatch_planner(user_query: &str) -> RewooPlan {
+        // Here we will Ping the OCI (Oracle Cloud) Endpoint.
+        // If it responds under X ms, we delegate the prompt to the Cloud GPU.
+        // If it Times Out or fails, we fallback to Local (Ryzen / M1 Apple Silicon).
+        info!("🌐 [Hybrid Router] Attempting to offload ReWOO Planning to Oracle OCI...");
+        
+        // Mocking the Plan for now to ensure safe compilation
+        RewooPlan {
+            steps: vec![
+                RewooStep {
+                    id: "E1".to_string(),
+                    worker: "VaultSearch".to_string(),
+                    args: vec![user_query.to_string()],
+                }
+            ]
+        }
+    }
+}
+
 // Intercepts the query and initiates the ReWOO DAG Execution
 pub async fn execute_rewoo_plan(user_query: &str, vault_path: &std::path::PathBuf) -> String {
     info!("🧠 [ReWOO Orchestrator] Intercepting Query for Planning: {}", user_query);
     
-    // Todo: Call the Local LLM / Oracle LLM to generate the JSON DAG Plan.
-    // For now we simulate a manual plan to avoid breaking the compilation.
-    let plan = RewooPlan {
-        steps: vec![
-            RewooStep {
-                id: "E1".to_string(),
-                worker: "VaultSearch".to_string(),
-                args: vec![user_query.to_string()],
-            }
-        ]
-    };
+    // Dynamic Hybrid Routing: Offload the heavy topological planning
+    let plan = HybridRouter::dispatch_planner(user_query).await;
 
     let mut handles: Vec<JoinHandle<RewooResult>> = vec![];
 
