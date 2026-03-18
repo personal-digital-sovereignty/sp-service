@@ -49,7 +49,13 @@ pub fn init_network_identity() -> NetworkIdentity {
 }
 
 pub fn start_mdns_beacon(alias: &str, port: u16) {
-    let mdns = ServiceDaemon::new().expect("Failed to create mDNS daemon");
+    let mdns = match ServiceDaemon::new() {
+        Ok(daemon) => daemon,
+        Err(e) => {
+            tracing::error!("🚨 Falha Crítica ao alocar o Daemon mDNS da LAN: {}. O Modo Pareamento falhará, mas o Engine continuará rodando offline.", e);
+            return;
+        }
+    };
     let service_type = "_http._tcp.local.";
     let instance_name = alias;
     let host_name = format!("{}.local.", alias);
@@ -96,7 +102,7 @@ pub async fn lan_auth_guard(
     // For local network traffic, require JWT
     let auth_header = req.headers().get(axum::http::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
-        .and_then(|h| if h.starts_with("Bearer ") { Some(&h[7..]) } else { None });
+        .and_then(|h| h.strip_prefix("Bearer "));
         
     let identity = NETWORK_IDENTITY.get().expect("Sovereign Identity not initialized on boot");
     
