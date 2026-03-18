@@ -46,7 +46,7 @@ impl HybridRouter {
 }
 
 // Intercepts the query and initiates the ReWOO DAG Execution
-pub async fn execute_rewoo_plan(user_query: &str, vault_path: &std::path::PathBuf) -> String {
+pub async fn execute_rewoo_plan(user_query: &str, vault_path: &std::path::PathBuf, db: &sqlx::SqlitePool) -> String {
     info!("🧠 [ReWOO Orchestrator] Intercepting Query for Planning: {}", user_query);
     
     // Dynamic Hybrid Routing: Offload the heavy topological planning
@@ -61,6 +61,7 @@ pub async fn execute_rewoo_plan(user_query: &str, vault_path: &std::path::PathBu
         let step_id = step.id.clone();
         
         let v_path = vault_path.clone();
+        let pool_clone = db.clone();
 
         let handle = tokio::spawn(async move {
             let output = match worker_cmd.as_str() {
@@ -72,7 +73,7 @@ pub async fn execute_rewoo_plan(user_query: &str, vault_path: &std::path::PathBu
                 "OracleSandbox" => {
                     info!("💻 [ReWOO Worker {}] Invoking The Coder on Oracle Cloud Sandbox...", step_id);
                     let payload = args.join("\n");
-                    match crate::ssh_gateway::SshGateway::execute_sandboxed_script(&payload).await {
+                    match crate::ssh_gateway::SshGateway::execute_sandboxed_script(&payload, pool_clone).await {
                         Ok(res) => res,
                         Err(e) => e,
                     }

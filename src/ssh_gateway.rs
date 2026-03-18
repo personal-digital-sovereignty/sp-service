@@ -2,6 +2,8 @@ use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{info, error, debug};
 use std::env;
+use sqlx::Row;
+use serde_json::Value;
 
 /// The structure that abstracts the OCI Sandbox connection.
 pub struct SshGateway;
@@ -9,20 +11,31 @@ pub struct SshGateway;
 impl SshGateway {
     /// Executes a strictly isolated bash/python script on the Oracle Cloud VM.
     /// Captures Stdout and Stderr to feed back into the Sovereign Pair 'ReWOO Solver'.
-    pub async fn execute_sandboxed_script(script_payload: &str) -> Result<String, String> {
-        let target_ip = match env::var("OCI_HOST") {
-            Ok(ip) => ip,
-            Err(_) => {
-                error!("❌ [Zero-Trust Gateway] OCI_HOST não está configurado na variável de ambiente.");
-                return Err("Missing OCI_HOST in .env variables.".to_string());
-            }
-        };
-        let target_user = env::var("OCI_USER").unwrap_or_else(|_| "ubuntu".to_string());
-        let key_path = env::var("OCI_SSH_KEY").unwrap_or_else(|_| {
-            let mut p = dirs::home_dir().unwrap_or_default();
-            p.push(".ssh/id_ed25519");
-            p.to_string_lossy().to_string()
-        });
+    pub async fn execute_sandboxed_script(script_payload: &str, db: sqlx::SqlitePool) -> Result<String, String> {
+        
+        // Fetch Zero-Trust Configs from Sovereign KMS (sqlite global_settings)
+        let row = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'")
+            .fetch_optional(&db)
+            .await
+            .map_err(|e| format!("Database connection err: {}", e))?;
+
+        let mut target_ip = String::new();
+        let mut target_user = String::new();
+        let mut key_path = String::new();
+
+        if let Some(r) = row {
+            let val: String = r.get("value_json");
+            let parsed: Value = serde_json::from_str(&val).unwrap_or(serde_json::json!({}));
+            
+            target_ip = parsed.get("oci_sandbox_ip").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            target_user = parsed.get("oci_sandbox_user").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            key_path = parsed.get("oci_sandbox_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        }
+
+        if target_ip.is_empty() || target_user.is_empty() || key_path.is_empty() {
+            error!("❌ [Zero-Trust Gateway] Credenciais OCI não estão declaradas no KMS do Banco.");
+            return Err("Missing Oracle Cloud Connection Parameters in Sovereign KMS Settings.".to_string());
+        }
 
         let target_uri = format!("{}@{}", target_user, target_ip);
 
