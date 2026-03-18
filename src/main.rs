@@ -12,6 +12,7 @@ mod api_settings;
 mod api_tools;
 pub mod kms;
 pub mod network;
+pub mod rewoo;
 
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;

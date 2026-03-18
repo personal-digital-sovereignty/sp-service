@@ -133,11 +133,13 @@ if !sys_context.is_empty() {
     }));
 }
 
-// Injeta o Contexto Físico do Usuário (Se o Vault conter arquivos válidos)
-if let Some(rag_cortex) = crate::rag::build_rag_context_message(&state.vault_path) {
-    tracing::debug!("📚 RAG Context successfully injected into Prompt.");
-    purified_messages.push(rag_cortex);
-}
+// Injeta a Orquestração do ReWOO (Reasoning Without Observation)
+let rewoo_observations = crate::rewoo::execute_rewoo_plan(&human_prompt, &state.vault_path).await;
+tracing::debug!("🧠 ReWOO Workflow Executed. Injecting compiled DAG observations.");
+purified_messages.push(json!({
+    "role": "system",
+    "content": rewoo_observations
+}));
 
 // Injeta as Mensagens da própria TUI (Código e Prompts)
 purified_messages.extend(payload.messages.into_iter().map(|msg| {
