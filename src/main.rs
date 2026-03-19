@@ -19,6 +19,7 @@ pub mod plan_execute;
 pub mod mcp;
 pub mod ssh_mesh_connector;
 pub mod mesh_installer;
+pub mod mesh_router;
 
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;

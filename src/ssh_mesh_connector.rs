@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 
 lazy_static::lazy_static! {
-    // Map with Local Port as key and Node Info as value (IP, Status)
-    pub static ref ACTIVE_MESH_TUNNELS: Arc<Mutex<HashMap<u16, String>>> = Arc::new(Mutex::new(HashMap::<u16, String>::new()));
+    // Map with Local Port as key and Node Info as value ((IP, KeyPath))
+    pub static ref ACTIVE_MESH_TUNNELS: Arc<Mutex<HashMap<u16, (String, String)>>> = Arc::new(Mutex::new(HashMap::<u16, (String, String)>::new()));
 }
 
 pub struct MeshConnector;
@@ -45,11 +45,12 @@ impl MeshConnector {
             Ok(mut child) => {
                 info!("✅ [Sovereign Mesh] Túnel de Cobre Ativado. Endpoint {} da Malha conectado de forma invisível via porta {}.", target_uri, local_port);
                 
-                // Grava o túnel no Estado Global
+                // Grava o túnel no Estado Global (Tuple com Chave)
                 tokio::spawn({
                     let t_uri = target_uri.clone();
+                    let t_key = key_path.clone(); // O.S Identifiers
                     async move {
-                        ACTIVE_MESH_TUNNELS.lock().await.insert(local_port, t_uri);
+                        ACTIVE_MESH_TUNNELS.lock().await.insert(local_port, (t_uri, t_key));
                     }
                 });
 

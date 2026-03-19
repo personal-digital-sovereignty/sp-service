@@ -4,6 +4,8 @@ use tracing::{info, error, debug};
 use std::env;
 use sqlx::Row;
 use serde_json::Value;
+use reqwest::Client;
+use crate::mesh_router::MeshRouter;
 
 /// The structure that abstracts the OCI Sandbox connection.
 pub struct SshGateway;
@@ -12,34 +14,42 @@ impl SshGateway {
     /// Executes a strictly isolated bash/python script on the Oracle Cloud VM.
     /// Captures Stdout and Stderr to feed back into the Sovereign Pair 'ReWOO Solver'.
     pub async fn execute_sandboxed_script(script_payload: &str, db: sqlx::SqlitePool) -> Result<String, String> {
-        
-        // Fetch Zero-Trust Configs from Sovereign KMS (sqlite global_settings)
-        let row = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'")
-            .fetch_optional(&db)
-            .await
-            .map_err(|e| format!("Database connection err: {}", e))?;
-
-        let mut target_ip = String::new();
-        let mut target_user = String::new();
+        let mut target_uri = String::new();
         let mut key_path = String::new();
 
-        if let Some(r) = row {
-            let val: String = r.get("value_json");
-            let parsed: Value = serde_json::from_str(&val).unwrap_or(serde_json::json!({}));
-            
-            target_ip = parsed.get("oci_sandbox_ip").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            target_user = parsed.get("oci_sandbox_user").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            key_path = parsed.get("oci_sandbox_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let client = Client::new();
+        // 1. TENTA ROTEAMENTO INTELIGENTE NA MALHA (Mesh Router P2P)
+        if let Some((mesh_uri, mesh_key)) = MeshRouter::find_best_coder_node(&client).await {
+            info!("🌐 [Zero-Trust Gateway] O Orquestrador P2P sequestrou o deploy! Executando Job no Nó da Malha: {}", mesh_uri);
+            target_uri = mesh_uri;
+            key_path = mesh_key;
+        } else {
+            // 2. FALLBACK PARA O BANCO DE DADOS LOCAL OCI (Legacy Bypass)
+            let row = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'")
+                .fetch_optional(&db)
+                .await
+                .map_err(|e| format!("Database connection err: {}", e))?;
+
+            let mut target_ip = String::new();
+            let mut target_user = String::new();
+
+            if let Some(r) = row {
+                let val: String = r.get("value_json");
+                let parsed: Value = serde_json::from_str(&val).unwrap_or(serde_json::json!({}));
+                
+                target_ip = parsed.get("oci_sandbox_ip").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                target_user = parsed.get("oci_sandbox_user").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                key_path = parsed.get("oci_sandbox_key").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            }
+
+            if target_ip.is_empty() || target_user.is_empty() || key_path.is_empty() {
+                error!("❌ [Zero-Trust Gateway] Nenhum Nó de Malha Sandboxed encontrado E credenciais OCI do KMS ausentes.");
+                return Err("Missing Zero-Trust Sandbox Parameters. No Mesh Nodes available and no KMS configs.".to_string());
+            }
+            target_uri = format!("{}@{}", target_user, target_ip);
+            info!("🛡️ [Zero-Trust Gateway] Opening Legacy SSH Pipe to Central Oracle VM: {}", target_uri);
         }
 
-        if target_ip.is_empty() || target_user.is_empty() || key_path.is_empty() {
-            error!("❌ [Zero-Trust Gateway] Credenciais OCI não estão declaradas no KMS do Banco.");
-            return Err("Missing Oracle Cloud Connection Parameters in Sovereign KMS Settings.".to_string());
-        }
-
-        let target_uri = format!("{}@{}", target_user, target_ip);
-
-        info!("🛡️ [Zero-Trust Gateway] Opening SSH Pipe to Oracle VM: {}", target_uri);
         debug!("🛡️ [Zero-Trust Gateway] SSH Key Auth: {}", key_path);
 
         // Dispara o subprocesso CLI do OpenSSH de forma nativa e injeta o Payload via Stdin
