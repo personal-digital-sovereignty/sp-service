@@ -10,12 +10,14 @@ mod api_vault;
 mod api_projects;
 mod api_settings;
 mod api_tools;
+mod api_mesh;
 pub mod kms;
 pub mod network;
 pub mod rewoo;
 pub mod ssh_gateway;
 pub mod plan_execute;
 pub mod mcp;
+pub mod ssh_mesh_connector;
 
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;
@@ -145,6 +147,8 @@ async fn main() {
         .route("/v1/tools/read_vault_file", post(api_tools::read_vault_file_handler))
         .route("/v1/tools/create_kanban_task", post(api_tools::create_kanban_task_handler))
         .route("/responses", post(realtime::realtime_responses_handler))
+        // ------------------ MESH P2P ROOTS --------------------------
+        .route("/v1/mesh/handshake", axum::routing::get(api_mesh::mesh_handshake_handler))
         // Bypass pacificador para TUI que tenta carregar modelos disponíveis antes da call
         .route("/v1/models", axum::routing::get(|| async {
             axum::Json(serde_json::json!({
