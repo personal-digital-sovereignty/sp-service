@@ -541,13 +541,21 @@ struct SensusDocRow {
     extracted_links: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct VaultGraphQuery {
+    pub workspace_id: Option<String>,
+}
+
 pub async fn vault_graph_handler(
-    State(state): State<Arc<AppState>>
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<VaultGraphQuery>
 ) -> impl IntoResponse {
-    // Busca todos os documentos do banco (tenant default -> workspace_id 'default' initially)
+    let workspace_id = query.workspace_id.unwrap_or_else(|| "default".to_string());
+
     let rows_res = sqlx::query_as::<_, SensusDocRow>(
-        "SELECT id, file_path, extracted_tags, extracted_links FROM sensus_documents WHERE workspace_id = 'default'"
+        "SELECT id, file_path, extracted_tags, extracted_links FROM sensus_documents WHERE workspace_id = ?"
     )
+    .bind(&workspace_id)
     .fetch_all(&state.db)
     .await;
 

@@ -5,6 +5,57 @@ use crate::AppState;
 use sqlx::Row;
 use crate::kms;
 
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+pub struct WorkspaceMetadata {
+    pub id: String,
+    pub name: String,
+    pub absolute_path: String,
+    pub created_at: Option<String>,
+}
+
+/// Rota GET /v1/workspaces - Lista todos os espaços isolados
+pub async fn get_workspaces_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let mut w_list = Vec::new();
+    if let Ok(rows) = sqlx::query("SELECT id, name, absolute_path, created_at FROM workspaces").fetch_all(&state.db).await {
+        for row in rows {
+            w_list.push(WorkspaceMetadata {
+                id: row.get("id"),
+                name: row.get("name"),
+                absolute_path: row.get("absolute_path"),
+                created_at: row.try_get("created_at").ok(),
+            });
+        }
+    }
+    Json(serde_json::json!({"workspaces": w_list})).into_response()
+}
+
+/// Rota POST /v1/workspaces - Cria um novo container lógico
+pub async fn create_workspace_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<WorkspaceMetadata>
+) -> impl IntoResponse {
+    let id = if payload.id.is_empty() { uuid::Uuid::new_v4().to_string() } else { payload.id.clone() };
+    
+    // Create physical directory safely
+    if !payload.absolute_path.is_empty() {
+        let _ = std::fs::create_dir_all(&payload.absolute_path);
+    }
+
+    let res = sqlx::query("INSERT INTO workspaces (id, name, absolute_path) VALUES (?, ?, ?)")
+        .bind(&id)
+        .bind(&payload.name)
+        .bind(&payload.absolute_path)
+        .execute(&state.db)
+        .await;
+
+    if res.is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database Error").into_response();
+    }
+    Json(serde_json::json!({"status": "created", "workspace_id": id})).into_response()
+}
+
 /// Rota GET /v1/settings - Retorna Chaves Essenciais do Hub
 pub async fn get_system_settings_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let result = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'")
@@ -119,8 +170,6 @@ pub async fn set_ollama_clusters_handler(
 // ==========================================
 // THE ROAMING ARCHITECTURE: O.S IMP/EXP
 // ==========================================
-
-use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct CybridConfigExport {

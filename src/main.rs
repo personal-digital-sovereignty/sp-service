@@ -150,6 +150,8 @@ async fn main() {
         .route("/v1/tasks/:id", axum::routing::delete(api_projects::delete_task_handler)
             .put(api_projects::update_task_handler))
         // ------------------ Settings & Identity O.S -----------
+        .route("/v1/workspaces", axum::routing::get(api_settings::get_workspaces_handler)
+            .post(api_settings::create_workspace_handler))
         .route("/v1/settings", axum::routing::get(api_settings::get_system_settings_handler)
             .post(api_settings::set_system_settings_handler))
         .route("/v1/settings/ollama_clusters", axum::routing::get(api_settings::get_ollama_clusters_handler)
