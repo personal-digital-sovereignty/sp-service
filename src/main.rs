@@ -30,7 +30,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
-#[folder = "../web-ui/dist/"]
+#[folder = "../svelte-ui/build/"]
 struct BackendWebUI;
 
 async fn spa_static_handler(uri: Uri) -> impl IntoResponse {
