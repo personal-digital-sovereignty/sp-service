@@ -164,11 +164,6 @@ async fn main() {
         // ------------------ Tools & Agentic Capabilities ----
         .route("/v1/tools/read_vault_file", post(api_tools::read_vault_file_handler))
         .route("/v1/tools/create_kanban_task", post(api_tools::create_kanban_task_handler))
-        .route("/responses", post(realtime::realtime_responses_handler))
-        // ------------------ MESH P2P ROOTS --------------------------
-        .route("/v1/mesh/handshake", axum::routing::get(api_mesh::mesh_handshake_handler))
-        .route("/v1/mesh/connect", post(api_mesh::mesh_connect_handler))
-        .route("/v1/mesh/tunnels", axum::routing::get(api_mesh::mesh_tunnels_status_handler))
         // Bypass pacificador para TUI que tenta carregar modelos disponíveis antes da call
         .route("/v1/models", axum::routing::get(|| async {
             axum::Json(serde_json::json!({
