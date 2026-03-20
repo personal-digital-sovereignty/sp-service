@@ -1,6 +1,6 @@
 [package]
 name = "sovereign-core"
-version = "0.7.2"
+version = "0.7.3"
 edition = "2024"
 license = "MIT"
 
@@ -44,3 +44,4 @@ jsonwebtoken = { version = "10.3.0", features = ["rust_crypto"] }
 rust-embed = "8.11.0"
 mime_guess = "2.0.5"
 lazy_static = "1.4.0"
+tower = { version = "0.5.3", features = ["util"] }

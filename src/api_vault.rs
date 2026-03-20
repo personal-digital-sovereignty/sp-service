@@ -699,4 +699,70 @@ mod tests {
         let list_resp = list_workspaces_handler(State(state.clone())).await.into_response();
         assert_eq!(list_resp.status(), StatusCode::OK, "Failed asserting execution of the workpsaces query");
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn hyper_stress_sqlite_wal_ingestion() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+        use futures_util::future::join_all;
+        use std::time::Instant;
+
+        println!("🔥 [Hyper Stress] Iniciando Benchmarking Extremo da Engine Cíbrida Rust...");
+        
+        let db = setup_test_db().await;
+        let (log_sender, _) = tokio::sync::broadcast::channel(16);
+        let (sync_sender, _) = tokio::sync::broadcast::channel(16);
+
+        let state = Arc::new(crate::AppState {
+            db,
+            http_client: reqwest::Client::new(),
+            vault_path: std::path::PathBuf::from("/mock/stress"),
+            telemetry: std::sync::Arc::new(std::sync::RwLock::new(crate::telemetry::TelemetryState::new())),
+            log_sender,
+            sync_sender,
+        });
+
+        let app = axum::Router::new()
+            .route("/v1/workspaces", axum::routing::get(list_workspaces_handler).post(create_workspace_handler))
+            .with_state(state.clone());
+
+        let total_requests = 10_000;
+        println!("⚔️  Disparando {} requisições HTTP GET assíncronas simultâneas contra o Router Axum -> SQLite...", total_requests);
+        
+        let start_time = Instant::now();
+        let mut tasks = Vec::with_capacity(total_requests);
+
+        for _ in 0..total_requests {
+            let app_clone = app.clone();
+            
+            let task = tokio::spawn(async move {
+                let request = Request::builder()
+                    .uri("/v1/workspaces")
+                    .method("GET")
+                    .body(Body::empty())
+                    .unwrap();
+
+                let response = app_clone.oneshot(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::OK);
+            });
+
+            tasks.push(task);
+        }
+
+        join_all(tasks).await;
+
+        let elapsed = start_time.elapsed();
+        let rps = (total_requests as f64) / elapsed.as_secs_f64();
+
+        println!("======================================================");
+        println!("🚀 [Hyper Stress] Resultado do Benchmarking Axum+SQLite");
+        println!("======================================================");
+        println!("✅ Requisições Completadas  : {}", total_requests);
+        println!("⏱️ Tempo Total de Execução  : {:.2?}", elapsed);
+        println!("⚡ Throughput Máximo (RPS)  : {:.2} requisições/segundo", rps);
+        println!("======================================================");
+        
+        assert!(rps > 1000.0, "O Motor Híbrido Cíbrido falhou no target de 1000 RPS!");
+    }
 }

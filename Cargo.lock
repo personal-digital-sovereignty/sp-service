@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "sovereign-core"
-version = "0.7.1"
+version = "0.7.2"
 dependencies = [
  "aes-gcm",
  "async-recursion",
@@ -2834,6 +2834,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tokio-stream",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
