@@ -219,7 +219,7 @@ impl SyncEngine {
         
         let mut final_summary = fallback_summary.clone();
         
-        // Chamada direta pro Ollama para desvio de fila do API Python Cíbrido
+        // Chamada direta pro Ollama garantindo autonomia do Rust Core
         if let Ok(resp) = client.post("http://127.0.0.1:11434/api/generate")
             .json(&serde_json::json!({
                 "model": "llama3.2:latest", // Exemplo fixo por segurança

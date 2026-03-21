@@ -21,6 +21,8 @@ pub struct ProjectRow {
     pub progress_percent: Option<i64>,
     pub friction_radar: Option<String>,
     pub deadline: Option<String>,
+    pub is_archived: Option<bool>,
+    pub columns_json: Option<String>,
     // Omitimos links e logs do frontend por performance bruta, Front aceita vazio.
 }
 
@@ -48,32 +50,14 @@ pub struct CreateProjectRequest {
 
 pub async fn get_projects_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let rows = sqlx::query_as::<_, ProjectRow>(
-        "SELECT id, tenant_id, name, purpose, traction_status, next_action, energy_level, progress_percent, friction_radar, deadline FROM projects ORDER BY created_at DESC"
+        "SELECT id, tenant_id, name, purpose, traction_status, next_action, energy_level, progress_percent, friction_radar, deadline, is_archived, columns_json FROM projects ORDER BY created_at DESC"
     )
     .fetch_all(&state.db)
     .await;
 
     match rows {
         Ok(projects) => {
-            // Frontend Pinia Espera 'links' e 'logs' no objeto, injectamos o MOCK pra evitar crash do VueJS
-            let mut enhanced = Vec::new();
-            for p in projects {
-                enhanced.push(serde_json::json!({
-                    "id": p.id,
-                    "tenant_id": p.tenant_id,
-                    "name": p.name,
-                    "purpose": p.purpose,
-                    "traction_status": p.traction_status,
-                    "next_action": p.next_action,
-                    "energy_level": p.energy_level,
-                    "progress_percent": p.progress_percent,
-                    "friction_radar": p.friction_radar,
-                    "deadline": p.deadline,
-                    "links": [],
-                    "logs": []
-                }));
-            }
-            Json(serde_json::Value::Array(enhanced)).into_response()
+            Json(projects).into_response()
         },
         Err(e) => {
             error!("SQLx Error lendo Projects: {}", e);
@@ -90,8 +74,8 @@ pub async fn create_project_handler(
     let tenant = "default".to_string();
 
     let _ = sqlx::query(
-        r#"INSERT INTO projects (id, tenant_id, name, purpose, traction_status, energy_level, progress_percent) 
-           VALUES (?, ?, ?, ?, ?, ?, ?)"#
+        r#"INSERT INTO projects (id, tenant_id, name, purpose, traction_status, energy_level, progress_percent, is_archived, columns_json) 
+           VALUES (?, ?, ?, ?, ?, ?, ?, 0, '["To Do", "In Progress", "Done"]')"#
     )
     .bind(&proj_id)
     .bind(&tenant)
@@ -103,7 +87,7 @@ pub async fn create_project_handler(
     .execute(&state.db)
     .await;
 
-    // Responde com o objeto recém criado simulado para o Pinia Add Store
+    // Responde com o objeto recém criado para o Svelte Store
     Json(serde_json::json!({
         "id": proj_id,
         "tenant_id": tenant,
@@ -112,8 +96,8 @@ pub async fn create_project_handler(
         "traction_status": "Ideation",
         "energy_level": "Med",
         "progress_percent": 0,
-        "links": [],
-        "logs": []
+        "is_archived": false,
+        "columns_json": "[\"To Do\", \"In Progress\", \"Done\"]"
     })).into_response()
 }
 
@@ -123,6 +107,137 @@ pub async fn delete_project_handler(
 ) -> impl IntoResponse {
     let _ = sqlx::query("DELETE FROM projects WHERE id = ?").bind(id).execute(&state.db).await;
     Json(serde_json::json!({"status": "deleted"})).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub purpose: Option<String>,
+    pub traction_status: Option<String>,
+    pub next_action: Option<String>,
+    pub energy_level: Option<String>,
+    pub progress_percent: Option<i64>,
+    pub friction_radar: Option<String>,
+    pub deadline: Option<String>,
+    pub is_archived: Option<bool>,
+    pub columns_json: Option<String>,
+}
+
+pub async fn update_project_handler(
+    Path(id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<UpdateProjectRequest>,
+) -> impl IntoResponse {
+    let old_proj = sqlx::query_as::<_, ProjectRow>("SELECT id, tenant_id, name, purpose, traction_status, next_action, energy_level, progress_percent, friction_radar, deadline, is_archived, columns_json FROM projects WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&state.db)
+        .await;
+
+    if let Ok(Some(proj)) = old_proj {
+        let final_name = payload.name.unwrap_or(proj.name);
+        let final_purpose = payload.purpose.or(proj.purpose);
+        let final_traction = payload.traction_status.or(proj.traction_status);
+        let final_action = payload.next_action.or(proj.next_action);
+        let final_energy = payload.energy_level.or(proj.energy_level);
+        let final_progress = payload.progress_percent.or(proj.progress_percent).unwrap_or(0);
+        let final_friction = payload.friction_radar.or(proj.friction_radar);
+        let final_deadline = payload.deadline.or(proj.deadline);
+        let final_archived = payload.is_archived.or(proj.is_archived).unwrap_or(false);
+        let final_columns = payload.columns_json.or(proj.columns_json).unwrap_or_else(|| "[\"To Do\", \"In Progress\", \"Done\"]".to_string());
+
+        let _ = sqlx::query(
+            "UPDATE projects SET name = ?, purpose = ?, traction_status = ?, next_action = ?, energy_level = ?, progress_percent = ?, friction_radar = ?, deadline = ?, is_archived = ?, columns_json = ? WHERE id = ?"
+        )
+        .bind(&final_name)
+        .bind(&final_purpose)
+        .bind(&final_traction)
+        .bind(&final_action)
+        .bind(&final_energy)
+        .bind(final_progress)
+        .bind(&final_friction)
+        .bind(&final_deadline)
+        .bind(final_archived)
+        .bind(&final_columns)
+        .bind(&id)
+        .execute(&state.db)
+        .await;
+
+        return Json(serde_json::json!({
+            "id": id,
+            "tenant_id": proj.tenant_id,
+            "name": final_name,
+            "purpose": final_purpose,
+            "traction_status": final_traction,
+            "next_action": final_action,
+            "energy_level": final_energy,
+            "progress_percent": final_progress,
+            "friction_radar": final_friction,
+            "deadline": final_deadline,
+            "is_archived": final_archived,
+            "columns_json": final_columns
+        })).into_response()
+    }
+    
+    (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"error": true, "message": "Project not found."}))).into_response()
+}
+
+// ----------------- PROJECT DOCUMENTS ------------------------
+
+#[derive(Serialize, Deserialize, Debug, sqlx::FromRow)]
+pub struct ProjectDocumentRow {
+    pub project_id: String,
+    pub file_path: String,
+}
+
+pub async fn get_project_documents_handler(
+    Path(project_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let rows = sqlx::query_as::<_, ProjectDocumentRow>("SELECT project_id, file_path FROM project_documents WHERE project_id = ?")
+        .bind(&project_id)
+        .fetch_all(&state.db)
+        .await;
+
+    match rows {
+        Ok(docs) => Json(docs).into_response(),
+        Err(e) => {
+            tracing::error!("SQLx Error lendo Project Documents: {}", e);
+            Json(serde_json::json!([])).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct LinkDocumentRequest {
+    pub file_path: String,
+}
+
+pub async fn link_project_document_handler(
+    Path(project_id): Path<String>,
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<LinkDocumentRequest>,
+) -> impl IntoResponse {
+    let _ = sqlx::query("INSERT OR IGNORE INTO project_documents (project_id, file_path) VALUES (?, ?)")
+        .bind(&project_id)
+        .bind(&payload.file_path)
+        .execute(&state.db)
+        .await;
+
+    Json(serde_json::json!({"status": "linked", "file_path": payload.file_path})).into_response()
+}
+
+pub async fn unlink_project_document_handler(
+    Path((project_id, encoded_path)): Path<(String, String)>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let file_path = urlencoding::decode(&encoded_path).unwrap_or(std::borrow::Cow::Borrowed(&encoded_path)).to_string();
+    let _ = sqlx::query("DELETE FROM project_documents WHERE project_id = ? AND file_path = ?")
+        .bind(&project_id)
+        .bind(&file_path)
+        .execute(&state.db)
+        .await;
+
+    Json(serde_json::json!({"status": "unlinked"})).into_response()
 }
 
 // ----------------- TASKS (Kanban) ---------------------------

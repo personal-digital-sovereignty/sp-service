@@ -148,8 +148,10 @@ async fn main() {
         // ------------------ Projects & Tasks (Kanban O.S) ------------
         .route("/v1/projects", axum::routing::get(api_projects::get_projects_handler)
             .post(api_projects::create_project_handler))
-        .route("/v1/projects/:id", axum::routing::delete(api_projects::delete_project_handler))
+        .route("/v1/projects/:id", axum::routing::delete(api_projects::delete_project_handler).put(api_projects::update_project_handler))
         .route("/v1/projects/:project_id/tasks", axum::routing::get(api_projects::get_project_tasks_handler).post(api_projects::create_task_handler))
+        .route("/v1/projects/:project_id/documents", axum::routing::get(api_projects::get_project_documents_handler).post(api_projects::link_project_document_handler))
+        .route("/v1/projects/:project_id/documents/:encoded_path", axum::routing::delete(api_projects::unlink_project_document_handler))
         .route("/v1/tasks/:id", axum::routing::delete(api_projects::delete_task_handler)
             .put(api_projects::update_task_handler))
         // ------------------ Settings & Identity O.S -----------

@@ -30,8 +30,8 @@ pub async fn init_pool() -> SqlitePool {
         .await
         .expect("Sovereign Error: Falha crassa ao abrir a gaveta de memória SQLite");
 
-    // Ativa PRAGMA WAL para velocidade Extrema igual ao Node Python antigo.
-    let _ = sqlx::query("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;")
+    // Ativa PRAGMA WAL para velocidade Extrema igual ao Node Python antigo e Foreign Keys.
+    let _ = sqlx::query("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;")
         .execute(&pool)
         .await;
 
@@ -42,10 +42,6 @@ pub async fn init_pool() -> SqlitePool {
             value_json TEXT NOT NULL
         );
     ").execute(&pool).await;
-
-    // Seção de HIGIENIZAÇÃO (Drop Legacy Tables do Python Migration)
-    let _ = sqlx::query("DROP TABLE IF EXISTS sensus_documents;").execute(&pool).await;
-    let _ = sqlx::query("DROP TABLE IF EXISTS sovereign_chunks;").execute(&pool).await;
 
     // Garante a existência da Multi-Drive Tabela
     let _ = sqlx::query("
@@ -103,6 +99,46 @@ pub async fn init_pool() -> SqlitePool {
         );
                  "
     ).execute(&pool).await;
+
+    // Garante Tabelas de Kanban (Projects e Tasks)
+    let _ = sqlx::query("
+        CREATE TABLE IF NOT EXISTS projects (
+            id TEXT PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            purpose TEXT,
+            traction_status TEXT,
+            next_action TEXT,
+            energy_level TEXT,
+            progress_percent INTEGER DEFAULT 0,
+            friction_radar TEXT,
+            deadline TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS tasks (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT,
+            priority TEXT,
+            order_index INTEGER DEFAULT 0,
+            deadline TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS project_documents (
+            project_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            PRIMARY KEY(project_id, file_path),
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+    ").execute(&pool).await;
+
+    // Migrations to support Custom Columns and Archiving on existing databases (fail silently if already exists)
+    let _ = sqlx::query("ALTER TABLE projects ADD COLUMN is_archived BOOLEAN DEFAULT 0;").execute(&pool).await;
+    let _ = sqlx::query("ALTER TABLE projects ADD COLUMN columns_json TEXT DEFAULT '[\"To Do\", \"In Progress\", \"Done\"]';").execute(&pool).await;
 
     let path_str = env::var("RAG_VAULT_PATH").unwrap_or_else(|_| {
         let mut path = env::current_dir().expect("Hostile Environment");

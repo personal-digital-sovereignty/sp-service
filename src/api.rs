@@ -251,7 +251,7 @@ if is_web {
 } else if is_sys {
     let query = human_prompt[4..].trim();
     info!("⚙️ [The Nurse] Agentic Task detectada: /sys -> Analisando '{}'", query);
-    sys_context = format!("INSTRUÇÃO SISTÊMICA (THE NURSE): O usuário solicitou análise profunda sobre a arquitetura 'Sovereign Pair'. Somos um sistema Cíbrido. Usamos Rust (The Nurse/Axum), Vue 3 + Tailwind (UI), LLMs Locais (Ollama), Python API. Foque em responder a seguinte dúvida de Engenharia: '{}'", query);
+    sys_context = format!("INSTRUÇÃO SISTÊMICA (THE NURSE): O usuário solicitou análise profunda sobre a arquitetura 'Sovereign Pair'. Somos um sistema Cíbrido puramente em Rust (The Nurse/Axum) e Svelte 5 + Tailwind na UI. Usamos LLMs Locais (Ollama) mapeados via SQL. Foque em responder a seguinte dúvida de Engenharia: '{}'", query);
 }
 // =========================================================
 
@@ -262,6 +262,69 @@ crate::api_chat::save_message(&state.db, active_session_id, "user", &human_promp
 
 // 2. Transcrever Mensagens Complexas (Multimodal/Arrays) para Strict Strings + Injeção de RAG Nativo
 let mut purified_messages: Vec<Value> = Vec::new();
+
+// --- SOVEREIGN CONTEXT INJECTOR (RAG V2 - KANBAN) ---
+let mut project_context = String::new();
+if let Some(pid) = payload.project_id {
+    if let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
+        .bind(&pid)
+        .fetch_optional(&state.db)
+        .await
+    {
+        let p_name: String = sqlx::Row::get(&proj_info, "name");
+        let p_purpose: Option<String> = sqlx::Row::get(&proj_info, "purpose");
+        
+        project_context.push_str(&format!("INSTRUÇÃO SISTÊMICA MÁXIMA (SOVEREIGN PROJECT ASSISTANT): 🧠 O usuário está focando absolutamente no Projeto Kanban: '{}'.\n", p_name));
+        if let Some(purp) = p_purpose {
+            project_context.push_str(&format!("🎯 O PROPÓSITO raiz desse projeto é: '{}'. Seu comportamento deve orbitar este propósito.\n", purp));
+        }
+
+        if let Ok(tasks) = sqlx::query("SELECT title, status FROM tasks WHERE project_id = ? AND status != 'Done'")
+            .bind(&pid)
+            .fetch_all(&state.db)
+            .await
+        {
+            if !tasks.is_empty() {
+                project_context.push_str("\n📌 TAREFAS ATIVAS NO KANBAN:\n");
+                for row in tasks {
+                    let t_title: String = sqlx::Row::get(&row, "title");
+                    let t_status: String = sqlx::Row::get(&row, "status");
+                    project_context.push_str(&format!("- [{}] {}\n", t_status, t_title));
+                }
+            }
+        }
+
+        if let Ok(docs) = sqlx::query("SELECT file_path FROM project_documents WHERE project_id = ?")
+            .bind(&pid)
+            .fetch_all(&state.db)
+            .await
+        {
+            if !docs.is_empty() {
+                project_context.push_str("\n📚 DOCUMENTOS CÍBRIDOS VINCULADOS AO PROJETO (RAG NATIVO ABSOLUTO):\n");
+                for row in docs {
+                    let mut doc_path: String = sqlx::Row::get(&row, "file_path");
+                    if !doc_path.starts_with('/') {
+                        doc_path = format!("{}/{}", state.vault_path.display(), doc_path);
+                    }
+                    
+                    if let Ok(content) = std::fs::read_to_string(&doc_path) {
+                        let truncated: String = content.chars().take(6000).collect(); // 6K ch limit to spare VRAM
+                        project_context.push_str(&format!("\n--- Arquivo: {} ---\n{}\n---\n", doc_path, truncated));
+                    }
+                }
+            }
+        }
+    }
+}
+
+if !project_context.is_empty() {
+    purified_messages.push(json!({
+        "role": "system",
+        "content": project_context
+    }));
+}
+// --- FIM DO PROJECT CONTEXT ---
+
 
 // Injeta o Contexto Web ou Sys gerados nativamente pelo Rust The Nurse (Agent Tasks)
 if !web_context.is_empty() {
@@ -646,13 +709,6 @@ Sse::new(stream)
     .into_response()
 }
 
-#[derive(serde::Serialize, sqlx::FromRow)]
-struct QuarantineItem {
-    id: i64,
-    file_path: String,
-    reason: String,
-}
-
 pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let snapshot = match state.telemetry.read() {
         Ok(t) => t.get_snapshot(),
@@ -663,17 +719,9 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         },
     };
 
-    let quarantine_count = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM quarantine_logs WHERE status = 'QUARANTINED'")
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
-
-    let quarantined_files = sqlx::query_as::<_, QuarantineItem>(
-        "SELECT id, file_path, reason FROM quarantine_logs WHERE status = 'QUARANTINED' ORDER BY created_at DESC LIMIT 5"
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+    // Quarantine is removed from backend; Mocking 0 for legacy UI
+    let quarantine_count = 0;
+    let quarantined_files: Vec<serde_json::Value> = vec![];
 
     let pending_tasks = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM tasks WHERE status != 'completed'")
         .fetch_one(&state.db)
@@ -706,7 +754,7 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         }
     }
 
-    // Devolve formatado igualzinho ao Node Python antigo pra Vue absorver sem refactor!
+    // Devolve formatado para o Dashboard Svelte
     Json(serde_json::json!({
         "total_tokens": snapshot.total_tokens,
         "avg_tps": snapshot.avg_tps,

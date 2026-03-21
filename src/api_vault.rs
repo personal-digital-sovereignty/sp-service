@@ -39,7 +39,7 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
             if filename.starts_with('.') || filename.ends_with('~') { continue; }
 
             let abs_path = entry.path();
-            // Id relativo para a navegação do Vue
+            // Id relativo para a navegação do Svelte
             let rel_id = abs_path.strip_prefix(root_path).unwrap_or(&abs_path).to_string_lossy().to_string();
 
             if metadata.is_dir() {
@@ -162,12 +162,23 @@ pub async fn create_workspace_handler(
     }
 }
 
-/// Rota DELETE /v1/workspaces/:id - Desatrela um Workspace e Invoca O.S RAG Flush (Fase 33)
+/// Rota DELETE /v1/workspaces/:id - Desatrela um Workspace e limpa Cíbrido Localmente
 pub async fn delete_workspace_handler(
     AxumPath(workspace_id): AxumPath<i64>,
     State(state): State<Arc<AppState>>
 ) -> impl IntoResponse {
-    // 1. Remove Fisicamente da Tabela Workspaces do Banco de Dados
+    // 1. Clean up child documents and chunks (Native Rust Engine Cascade)
+    let _ = sqlx::query("DELETE FROM sensus_documents WHERE workspace_id = ?")
+        .bind(workspace_id.to_string())
+        .execute(&state.db)
+        .await;
+
+    let _ = sqlx::query("DELETE FROM sovereign_chunks WHERE workspace_id = ?")
+        .bind(workspace_id.to_string())
+        .execute(&state.db)
+        .await;
+
+    // 2. Remove Fisicamente da Tabela Workspaces do Banco de Dados
     let res = sqlx::query("DELETE FROM workspaces WHERE id = ?")
         .bind(workspace_id)
         .execute(&state.db)
@@ -175,25 +186,7 @@ pub async fn delete_workspace_handler(
 
     match res {
         Ok(exec) if exec.rows_affected() > 0 => {
-            // 2. Dispara o Míssil Assíncrono para o Backend Python (FastAPI porta 8001) para executar o Flush Vetorial
-            // Isso previne alucinações fantasmagóricas no LlamaIndex de Arquivos do Workspace que sumiram!
-            tokio::spawn(async move {
-                let client = reqwest::Client::new();
-                match client.delete("http://127.0.0.1:8000/v1/chroma/flush")
-                    .timeout(std::time::Duration::from_secs(10))
-                    .send()
-                    .await {
-                    Ok(resp) => {
-                        if !resp.status().is_success() {
-                            tracing::error!("🚨 [Sovereign Core] O RAG Flush falhou no Backend Python. Vetores Fantasmas podem estar ativos! HTTP {}", resp.status());
-                        } else {
-                            tracing::info!("💥 [Sovereign Core] RAG Flush Vectorial executado com SUCESSO via The Gateway (Python API Destruiu Coleção).");
-                        }
-                    },
-                    Err(e) => tracing::error!("🚨 [Sovereign Core] Conexão com Backend Python Perdida ao Erradicar Workspace: {}", e),
-                }
-            });
-
+            tracing::info!("💥 [Sovereign Core] Workspace {} aniquilado com sucesso.", workspace_id);
             (axum::http::StatusCode::OK, Json(serde_json::json!({"status": "deleted"}))).into_response()
         },
         Ok(_) => (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"error": true, "message": "Workspace não encontrado"}))).into_response(),
@@ -222,7 +215,7 @@ pub async fn workspace_tree_handler(
     // Constrói a Arvore Assincronamente ancorada SOMENTE na raiz aprovada
     let children = scan_directory(&root, &root).await;
 
-    // A raiz do diretório pro Front Vue
+    // A raiz do diretório pro Svelte
     let root_node = VaultNode {
         id: "root".to_string(), // Manteve root pro UI n quebrar
         name: target_name,
@@ -348,7 +341,7 @@ pub async fn vault_fs_create_handler(
 #[derive(Deserialize)]
 pub struct FsRenameReq {
     pub workspace_id: i64,
-    pub path: String, // String Relativa do Componente Vue `folder/file.txt`
+    pub path: String, // String Relativa do Componente Svelte `folder/file.txt`
     pub new_name: String,
 }
 
@@ -386,7 +379,7 @@ pub async fn vault_fs_rename_handler(
 #[derive(Deserialize)]
 pub struct FsDeleteReq {
     pub workspace_id: i64,
-    pub path: String, // Relativo (`node.id`) provido pela TreeVue
+    pub path: String, // Relativo (`node.id`) provido pela UI
 }
 
 pub async fn vault_fs_delete_handler(
@@ -431,7 +424,7 @@ pub async fn vault_fs_delete_handler(
 #[derive(Deserialize)]
 pub struct FsMoveReq {
     pub workspace_id: i64,
-    pub path: String, // String Relativa do Componente Vue `folder/file.txt` da ORIGEM
+    pub path: String, // String Relativa do Componente Svelte `folder/file.txt` da ORIGEM
     pub target_path: String, // Destino relativo `folder/nova_pasta`
 }
 
