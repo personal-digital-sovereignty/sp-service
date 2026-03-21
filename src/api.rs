@@ -691,6 +691,20 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     } else {
         0
     };
+    let mut total_ram_gb = 24.0;
+    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
+        for line in meminfo.lines() {
+            if line.starts_with("MemTotal:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<f64>() {
+                        total_ram_gb = (kb / 1024.0 / 1024.0).round();
+                    }
+                }
+                break;
+            }
+        }
+    }
 
     // Devolve formatado igualzinho ao Node Python antigo pra Vue absorver sem refactor!
     Json(serde_json::json!({
@@ -701,6 +715,7 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         "hardware": {
             "cpu": 0.0, // Preenchidos mockados ou simulados no JS (ou Rust Sysinfo futuro)
             "ram": 0.0,
+            "ram_total_gb": total_ram_gb,
             "io": 0.0
         },
         "cronos": {

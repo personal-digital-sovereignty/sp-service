@@ -130,6 +130,7 @@ async fn main() {
         .route("/v1/vault/graph", axum::routing::get(api_vault::vault_graph_handler))
         .route("/v1/vault/document/*id", axum::routing::get(api_vault::vault_document_read)
             .put(api_vault::vault_document_write))
+        .route("/v1/vault/media", axum::routing::get(api_vault::vault_media_handler))
         .route("/v1/vault/fs/create", axum::routing::post(api_vault::vault_fs_create_handler))
         .route("/v1/vault/fs/rename", axum::routing::put(api_vault::vault_fs_rename_handler))
         .route("/v1/vault/fs/move", axum::routing::put(api_vault::vault_fs_move_handler))

@@ -31,15 +31,19 @@ impl HybridRouter {
         // If it Times Out or fails, we fallback to Local (Ryzen / M1 Apple Silicon).
         info!("🌐 [Hybrid Router] Attempting to offload ReWOO Planning to Oracle OCI...");
         
-        // Mocking the Plan for now to ensure safe compilation
-        RewooPlan {
-            steps: vec![
-                RewooStep {
-                    id: "E1".to_string(),
-                    worker: "VaultSearch".to_string(),
-                    args: vec![user_query.to_string()],
-                }
-            ]
+        // Only trigger heavy Vault parsing if explicitly requested
+        if user_query.to_lowercase().contains("@vault") {
+            RewooPlan {
+                steps: vec![
+                    RewooStep {
+                        id: "E1".to_string(),
+                        worker: "VaultSearch".to_string(),
+                        args: vec![user_query.to_string()],
+                    }
+                ]
+            }
+        } else {
+            RewooPlan { steps: vec![] }
         }
     }
 }

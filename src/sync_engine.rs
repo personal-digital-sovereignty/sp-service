@@ -67,6 +67,11 @@ impl SyncEngine {
                                     continue;
                                 }
                                 
+                                let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+                                if ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "mp4", "mp3", "zip", "tar", "gz", "rar"].contains(&ext.as_str()) {
+                                    continue;
+                                }
+                                
                                 let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sensus_documents WHERE file_path = ?)")
                                     .bind(&path_str)
                                     .fetch_one(&db).await.unwrap_or(false);
@@ -137,6 +142,11 @@ impl SyncEngine {
                             
                             // Impede re-processamento de backups, arquivos ocultos e Pastas Bloqueadas
                             if is_ignored || filename.starts_with('.') || filename.ends_with('~') {
+                                continue;
+                            }
+                            
+                            let ext = path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+                            if ["png", "jpg", "jpeg", "gif", "webp", "svg", "pdf", "mp4", "mp3", "zip", "tar", "gz", "rar"].contains(&ext.as_str()) {
                                 continue;
                             }
 

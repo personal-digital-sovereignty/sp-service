@@ -9,7 +9,7 @@ use crate::AppState;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct VaultNode {
     pub id: String,
     pub name: String,
@@ -17,6 +17,8 @@ pub struct VaultNode {
     pub is_dir: bool,
     pub r#type: String, // "file" or "directory"
     pub path: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub wikilinks: Vec<String>,
     pub children: Vec<VaultNode>,
 }
 
@@ -48,15 +50,32 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                     is_dir: true,
                     r#type: "directory".to_string(),
                     path: abs_path.to_string_lossy().to_string(),
+                    wikilinks: vec![],
                     children,
                 });
             } else {
+                let mut wikilinks = vec![];
+                if filename.ends_with(".md") {
+                    if let Ok(content) = fs::read_to_string(&abs_path).await {
+                        // Extração Simples de Obsidian Synapses/Tags [[...]]
+                        for chunk in content.split("[[").skip(1) {
+                            if let Some(end_idx) = chunk.find("]]") {
+                                let link_content = &chunk[..end_idx];
+                                let target_name = link_content.split('|').next().unwrap_or("").trim().to_string();
+                                if !target_name.is_empty() && !wikilinks.contains(&target_name) {
+                                    wikilinks.push(target_name);
+                                }
+                            }
+                        }
+                    }
+                }
                 nodes.push(VaultNode {
                     id: rel_id.clone(),
                     name: filename.clone(),
                     is_dir: false,
                     r#type: "file".to_string(),
                     path: abs_path.to_string_lossy().to_string(),
+                    wikilinks,
                     children: vec![],
                 });
             }
@@ -210,6 +229,7 @@ pub async fn workspace_tree_handler(
         is_dir: true,
         r#type: "directory".to_string(),
         path: root.to_string_lossy().to_string(),
+        wikilinks: vec![],
         children,
     };
 
@@ -633,6 +653,58 @@ pub async fn vault_graph_handler(
 
     let res = GraphResponse { nodes, links };
     (axum::http::StatusCode::OK, Json(res)).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct MediaQuery {
+    pub path: String,
+    pub workspace_id: Option<i64>,
+}
+
+pub async fn vault_media_handler(
+    Query(query): Query<MediaQuery>,
+    State(state): State<Arc<AppState>>
+) -> impl IntoResponse {
+    let mut ws_root = state.vault_path.clone();
+    if let Some(w_id) = query.workspace_id {
+        let ws = sqlx::query_as::<_, WorkspaceRow>("SELECT id, name, path, created_at FROM workspaces WHERE id = ?")
+            .bind(w_id)
+            .fetch_optional(&state.db)
+            .await;
+        if let Ok(Some(row)) = ws {
+            ws_root = PathBuf::from(row.path);
+        }
+    }
+
+    let decoded_path = urlencoding::decode(&query.path).unwrap_or(std::borrow::Cow::Borrowed(&query.path)).to_string();
+    let abs_path = if Path::new(&decoded_path).is_absolute() {
+        PathBuf::from(&decoded_path)
+    } else {
+        ws_root.join::<PathBuf>(decoded_path.strip_prefix('/').unwrap_or(&decoded_path).into())
+    };
+
+    if !abs_path.starts_with(&ws_root) {
+        return (axum::http::StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+
+    match fs::read(&abs_path).await {
+        Ok(bytes) => {
+            let mut headers = axum::http::header::HeaderMap::new();
+            let ext = abs_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let content_type = match ext.as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                "pdf" => "application/pdf",
+                _ => "application/octet-stream",
+            };
+            headers.insert(axum::http::header::CONTENT_TYPE, content_type.parse().unwrap());
+            (headers, bytes).into_response()
+        },
+        Err(_) => (axum::http::StatusCode::NOT_FOUND, "Not Found").into_response(),
+    }
 }
 
 #[cfg(test)]
