@@ -562,7 +562,7 @@ pub async fn vault_graph_handler(
         .map(|r| r.get::<String, _>("name"))
         .unwrap_or_else(|_| "Local Vault".to_string());
 
-    let docs = sqlx::query("SELECT id, file_path FROM sensus_documents WHERE workspace_id = ?")
+    let docs = sqlx::query("SELECT id, file_path, content_raw FROM sensus_documents WHERE workspace_id = ?")
         .bind(&ws_id_str)
         .fetch_all(&state.db)
         .await
@@ -581,25 +581,58 @@ pub async fn vault_graph_handler(
         tags: vec![],
     });
 
-    for doc in docs {
+    use std::collections::HashMap;
+    let mut name_to_id = HashMap::new();
+    let mut doc_contents = HashMap::new();
+
+    for doc in &docs {
+        use sqlx::Row;
         let doc_id: String = doc.get("id");
         let doc_path: String = doc.get("file_path");
+        let content_raw: Option<String> = doc.try_get("content_raw").ok();
+        
         let node_id = format!("doc_{}", doc_id);
+        let filename = doc_path.split('/').last().unwrap_or(&doc_path).to_string();
+        let doc_basename = filename.strip_suffix(".md").unwrap_or(&filename).to_string();
+        
+        name_to_id.insert(doc_basename.clone(), node_id.clone());
+        if let Some(c) = content_raw {
+            doc_contents.insert(node_id.clone(), c);
+        }
         
         nodes.push(GraphNode {
             id: node_id.clone(),
-            name: doc_path.split('/').last().unwrap_or(&doc_path).to_string(), // Better visual: just the filename instead of giant absolute path
+            name: filename,
             path: Some(doc_path.clone()),
             val: 3.0,
             r#type: "file".to_string(),
             tags: vec![],
         });
 
+        // Hierarchy links (The thin structural tethers in the background)
         links.push(GraphLink {
             source: "root".to_string(),
-            target: node_id,
+            target: node_id.clone(),
             r#type: "hierarchy".to_string(),
         });
+    }
+
+    // Dynamic Obsidian Synapse Extraction (Memory Regex-less Split)
+    for (node_id, content) in &doc_contents {
+        for chunk in content.split("[[").skip(1) {
+            if let Some(end_idx) = chunk.find("]]") {
+                let link_content = &chunk[..end_idx];
+                let target_name = link_content.split('|').next().unwrap_or("").trim().to_string();
+                
+                if let Some(target_id) = name_to_id.get(&target_name) {
+                    links.push(GraphLink {
+                        source: node_id.clone(),
+                        target: target_id.clone(),
+                        r#type: "synapse".to_string(),
+                    });
+                }
+            }
+        }
     }
 
     let res = GraphResponse { nodes, links };
