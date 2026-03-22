@@ -97,6 +97,15 @@ pub async fn init_pool() -> SqlitePool {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
         );
+        CREATE TABLE IF NOT EXISTS security_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            blocked BOOLEAN NOT NULL DEFAULT 1,
+            message TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
                  "
     ).execute(&pool).await;
 

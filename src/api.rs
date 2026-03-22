@@ -2,7 +2,7 @@ use axum::{ extract::{Json, State}, response::{ sse::{Event, Sse}, IntoResponse,
 
 use crate::models::{ OpenAIChatChunkChoice, OpenAIChatChunkDelta, OpenAIChatChunkResponse, OpenAIChatRequest, }; use crate::AppState;
 use std::path::Path;
-use scraper::{Html, Selector};
+// removed unused explicit scraper import
 
 // -------------------------------------------------------------
 // Autonomous Multi-Scraper Helperc
@@ -82,6 +82,53 @@ let human_prompt = payload.messages.last()
         None => "".to_string(),
     })
     .unwrap_or_else(|| "Interação O.S".to_string());
+
+// ======= DevSecOps Guardrails (Phase 17) =======
+if let Err(security_alert) = crate::guardrails::evaluate_prompt(&human_prompt) {
+    tracing::warn!("🛡️ [Sovereign Guardrails] Ameaça Bloqueada: {}", security_alert.message);
+    
+    let db_clone = state.db.clone();
+    let alert_clone = security_alert.clone();
+    tokio::spawn(async move {
+        let _ = sqlx::query("INSERT INTO security_logs (event_type, severity, blocked, message, source) VALUES (?, ?, ?, ?, ?)")
+            .bind(alert_clone.event_type)
+            .bind(alert_clone.severity)
+            .bind(alert_clone.blocked)
+            .bind(alert_clone.message)
+            .bind(alert_clone.source)
+            .execute(&db_clone)
+            .await;
+    });
+
+    let _ = state.log_sender.send(crate::models::LogEntry {
+        timestamp: "".to_string(),
+        level: "security".to_string(),
+        message: format!("Threat Intel Blocked: {}", security_alert.message),
+    });
+
+    let chunk = crate::models::OpenAIChatChunkResponse {
+        id: format!("chatcmpl-sec-{}", uuid::Uuid::new_v4()),
+        object: "chat.completion.chunk".to_string(),
+        created: chrono::Utc::now().timestamp(),
+        model: requested_model.clone(),
+        choices: vec![crate::models::OpenAIChatChunkChoice {
+            index: 0,
+            delta: crate::models::OpenAIChatChunkDelta {
+                role: Some("assistant".to_string()),
+                content: Some(format!("🚨 **Sovereign Guardrails Interception**\n\nSua requisição feriu as políticas do Nexus Command Center.\n\n- **Tipo:** {}\n- **Severidade:** {}\n- **Motivo:** {}", security_alert.event_type, security_alert.severity, security_alert.message)),
+                tool_calls: None,
+            },
+            finish_reason: Some("stop".to_string()),
+        }],
+        usage: None,
+    };
+    
+    let stream = futures_util::stream::iter(vec![
+        Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data(serde_json::to_string(&chunk).unwrap_or_default())),
+        Ok::<axum::response::sse::Event, std::convert::Infallible>(axum::response::sse::Event::default().data("[DONE]")),
+    ]);
+    return axum::response::Sse::new(stream).into_response();
+}
 
 let mut sys_temperature: Option<f64> = None;
 let mut sys_top_k: Option<i64> = None;
@@ -739,9 +786,27 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         },
     };
 
-    // Quarantine is removed from backend; Mocking 0 for legacy UI
-    let quarantine_count = 0;
-    let quarantined_files: Vec<serde_json::Value> = vec![];
+    let security_logs = sqlx::query("SELECT event_type, severity, blocked, message, source, strftime('%Y-%m-%d %H:%M:%S', created_at) as created_at FROM security_logs ORDER BY id DESC LIMIT 5")
+        .fetch_all(&state.db)
+        .await
+        .map(|rows| {
+            rows.into_iter().map(|row| {
+                serde_json::json!({
+                    "event_type": sqlx::Row::get::<String, _>(&row, "event_type"),
+                    "severity": sqlx::Row::get::<String, _>(&row, "severity"),
+                    "blocked": sqlx::Row::get::<bool, _>(&row, "blocked"),
+                    "message": sqlx::Row::get::<String, _>(&row, "message"),
+                    "source": sqlx::Row::get::<String, _>(&row, "source"),
+                    "created_at": sqlx::Row::get::<String, _>(&row, "created_at"),
+                })
+            }).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let security_blocks_count = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM security_logs")
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(0);
 
     let pending_tasks = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM tasks WHERE status != 'completed'")
         .fetch_one(&state.db)
@@ -785,6 +850,8 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         "estimated_cost": snapshot.estimated_cost,
         "models_usage": snapshot.models_usage,
         "active_models": snapshot.models_usage.keys().len(), 
+        "security_blocks": security_blocks_count,
+        "security_logs": security_logs,
         "hardware": {
             "cpu_cores": snapshot.hardware.cpu_cores,
             "ram": snapshot.hardware.ram_usage_mb,
@@ -795,8 +862,6 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
             "gpu_vram_total_mb": snapshot.hardware.gpu_vram_total_mb
         },
         "cronos": {
-            "gaps": quarantine_count,
-            "gaps_list": quarantined_files,
             "tasks_today": pending_tasks,
             "progress": progress,
             "vaults_count": vaults_count,
