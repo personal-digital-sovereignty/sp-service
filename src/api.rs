@@ -263,11 +263,10 @@ if payload.deep_research.unwrap_or(false) {
                 let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
                 if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                     for c in clusters {
-                        if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
-                            if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                        if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
+                            && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                                 sub_ollama_url = url.trim_end_matches('/').to_string();
                             }
-                        }
                     }
                 }
             }
@@ -279,15 +278,12 @@ if payload.deep_research.unwrap_or(false) {
         let query_endpoint = format!("{}/api/chat", sub_ollama_url);
         let mut extracted_queries = Vec::new();
 
-        if let Ok(res) = state.http_client.post(&query_endpoint).json(&llm_payload).timeout(std::time::Duration::from_secs(30)).send().await {
-            if let Ok(json_res) = res.json::<serde_json::Value>().await {
-                if let Some(content) = json_res.get("message").and_then(|m| m.get("content").and_then(|c| c.as_str())) {
-                    if let Ok(queries) = serde_json::from_str::<Vec<String>>(content) {
+        if let Ok(res) = state.http_client.post(&query_endpoint).json(&llm_payload).timeout(std::time::Duration::from_secs(30)).send().await
+            && let Ok(json_res) = res.json::<serde_json::Value>().await
+                && let Some(content) = json_res.get("message").and_then(|m| m.get("content").and_then(|c| c.as_str()))
+                    && let Ok(queries) = serde_json::from_str::<Vec<String>>(content) {
                         extracted_queries = queries;
                     }
-                }
-            }
-        }
 
         if extracted_queries.is_empty() {
             tracing::warn!("⚠️ [WAG Multi-Hop] Sub-LLM falhou no Strict JSON. Fallback para Query Direta.");
@@ -339,13 +335,12 @@ if payload.deep_research.unwrap_or(false) {
 
         let mut master_dossier = String::new();
         for res in futures_util::future::join_all(scrape_handles).await {
-            if let Ok((link, mut markdown)) = res {
-                if markdown.len() > 100 {
+            if let Ok((link, mut markdown)) = res
+                && markdown.len() > 100 {
                     markdown.truncate(4000); // 4KB por página x 6 = 24KB seguro dentro da GPU local (8B Contexto Mínimo Llama3).
                     // Cortar quebra uma formatação. Tratamento leviano p/ velocidade.
                     master_dossier.push_str(&format!("## Origem Escaneada Profundamente: {}\n{}\n\n", link, markdown));
                 }
-            }
         }
 
         let _ = state.log_sender.send(crate::models::LogEntry {

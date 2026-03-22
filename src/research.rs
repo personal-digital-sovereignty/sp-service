@@ -113,14 +113,14 @@ impl DeepResearchEngine {
         match self.search_searxng_public(query).await {
             Ok(links) if !links.is_empty() => {
                 tracing::info!("✅ [WAG] Busca Cíbrida SearxNG Bem-Sucedida! ({}) links ancorados.", links.len());
-                return Ok(links);
+                Ok(links)
             },
             Err(e) => {
                 tracing::error!("❌ [WAG Fim de Linha] WAF Absoluto. Nenhuma instância pública do SearxNG sobreviveu. Erro: {}", e);
-                return Err(format!("Dual-Engine Crash. WAF Block total ativo na malha. {}", e));
+                Err(format!("Dual-Engine Crash. WAF Block total ativo na malha. {}", e))
             },
             _ => {
-                return Err("Dual-Engine não achou nenhum resultado útil para a query.".to_string());
+                Err("Dual-Engine não achou nenhum resultado útil para a query.".to_string())
             }
         }
     }
@@ -183,19 +183,15 @@ impl DeepResearchEngine {
         ];
 
         // Se o banco Cíbrido estiver acoplado, verifique os IPs configurados pelo usuário
-        if let Some(pool) = &self.db_pool {
-            if let Ok(json_str) = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'searxng_nodes'")
+        if let Some(pool) = &self.db_pool
+            && let Ok(json_str) = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'searxng_nodes'")
                 .fetch_one(pool)
-                .await 
-            {
-                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&json_str) {
-                    if !parsed.is_empty() {
+                .await
+                && let Ok(parsed) = serde_json::from_str::<Vec<String>>(&json_str)
+                    && !parsed.is_empty() {
                         instances = parsed;
                         tracing::info!("🔗 [SearxNG] {} Nodes Customizados de Busca carregados do Sensus Vault!", instances.len());
                     }
-                }
-            }
-        }
 
         let mut last_error = String::new();
 
@@ -208,8 +204,8 @@ impl DeepResearchEngine {
             match req {
                 Ok(response) => {
                     if response.status().is_success() {
-                        if let Ok(json_data) = response.json::<serde_json::Value>().await {
-                            if let Some(results) = json_data.get("results").and_then(|r| r.as_array()) {
+                        if let Ok(json_data) = response.json::<serde_json::Value>().await
+                            && let Some(results) = json_data.get("results").and_then(|r| r.as_array()) {
                                 let mut links = Vec::new();
                                 for res in results {
                                     if let Some(url_str) = res.get("url").and_then(|u| u.as_str()) {
@@ -219,7 +215,6 @@ impl DeepResearchEngine {
                                 links.truncate(5);
                                 return Ok(links);
                             }
-                        }
                     } else {
                         tracing::debug!("Instância {} fechou as portas HTTP {}", base_url, response.status());
                         last_error = format!("HTTP {}", response.status());

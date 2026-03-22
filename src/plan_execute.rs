@@ -1,6 +1,5 @@
 use crate::models::{LogEntry, PlanExecuteBlueprint};
 use serde_json::json;
-use tokio::sync::broadcast;
 use tracing::error;
 
 pub async fn start_plan_and_execute(
