@@ -716,12 +716,25 @@ Sse::new(stream)
 }
 
 pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let snapshot = match state.telemetry.read() {
-        Ok(t) => t.get_snapshot(),
+    let snapshot = match state.telemetry.write() {
+        Ok(mut t) => {
+            t.refresh_hardware();
+            t.get_snapshot()
+        },
         Err(_) => crate::telemetry::TelemetrySnapshot {
             total_tokens: 0,
             avg_tps: 0.0,
+            avg_latency_ms: 0,
             estimated_cost: 0.0,
+            hardware: crate::telemetry::HardwareSnapshot {
+                cpu_cores: vec![],
+                ram_usage_mb: 0.0,
+                ram_total_gb: 24.0,
+                io_rx_bytes: 0,
+                io_tx_bytes: 0,
+                gpu_name: "GPU Compute".to_string(),
+                gpu_vram_total_mb: 0,
+            }
         },
     };
 
@@ -745,17 +758,20 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     } else {
         0
     };
-    let mut total_ram_gb = 24.0;
-    if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
-        for line in meminfo.lines() {
-            if line.starts_with("MemTotal:") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    if let Ok(kb) = parts[1].parse::<f64>() {
-                        total_ram_gb = (kb / 1024.0 / 1024.0).round();
+
+    let vaults_count = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM workspaces").fetch_one(&state.db).await.unwrap_or(1);
+    let synced_files = sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM sensus_documents").fetch_one(&state.db).await.unwrap_or(0);
+    
+    let mut vault_categories = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&state.vault_path) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    if !name.starts_with('.') {
+                        vault_categories.push(name);
                     }
                 }
-                break;
             }
         }
     }
@@ -767,16 +783,22 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         "estimated_cost": snapshot.estimated_cost,
         "active_models": 1, 
         "hardware": {
-            "cpu": 0.0, // Preenchidos mockados ou simulados no JS (ou Rust Sysinfo futuro)
-            "ram": 0.0,
-            "ram_total_gb": total_ram_gb,
-            "io": 0.0
+            "cpu_cores": snapshot.hardware.cpu_cores,
+            "ram": snapshot.hardware.ram_usage_mb,
+            "ram_total_gb": snapshot.hardware.ram_total_gb,
+            "io_rx": snapshot.hardware.io_rx_bytes,
+            "io_tx": snapshot.hardware.io_tx_bytes,
+            "gpu_name": snapshot.hardware.gpu_name,
+            "gpu_vram_total_mb": snapshot.hardware.gpu_vram_total_mb
         },
         "cronos": {
             "gaps": quarantine_count,
             "gaps_list": quarantined_files,
             "tasks_today": pending_tasks,
-            "progress": progress
+            "progress": progress,
+            "vaults_count": vaults_count,
+            "synced_files": synced_files,
+            "vault_categories": vault_categories
         }
     }))
 }

@@ -1,27 +1,94 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use sysinfo::{System, Networks};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HardwareSnapshot {
+    pub cpu_cores: Vec<f32>,
+    pub ram_usage_mb: f64,
+    pub ram_total_gb: f64,
+    pub io_rx_bytes: u64,
+    pub io_tx_bytes: u64,
+    pub gpu_name: String,
+    pub gpu_vram_total_mb: u64,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetrySnapshot {
     pub total_tokens: usize,
     pub avg_tps: f64,
+    pub avg_latency_ms: u128,
     pub estimated_cost: f64,
+    pub hardware: HardwareSnapshot,
 }
 
-#[derive(Debug, Clone)]
 pub struct TelemetryState {
     pub total_tokens: usize,
     pub estimated_cost: f64,
     // Buffer para armazenar as ultimas N sessoes (tokens, millis)
     recent_sessions: VecDeque<(usize, u128)>,
+    
+    // Hardware Sensors (Requires mutable access for diffing)
+    pub sys: System,
+    pub networks: Networks,
+    pub gpu_name: String,
+    pub gpu_vram_total_mb: u64,
 }
 
 impl TelemetryState {
     pub fn new() -> Self {
+        let mut sys = System::new_all();
+        sys.refresh_all();
+        let mut networks = Networks::new_with_refreshed_list();
+        networks.refresh(true);
+
+        let mut gpu_name = String::from("GPU Compute");
+        let mut gpu_vram_total_mb = 0;
+
+        #[cfg(target_os = "linux")]
+        if let Ok(output) = std::process::Command::new("glxinfo").arg("-B").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let text = line.trim();
+                if text.starts_with("Device: ") {
+                    if let Some(name) = text.split(" (").next() {
+                        gpu_name = name.replace("Device: ", "").to_string();
+                    }
+                } else if text.starts_with("Dedicated video memory: ") {
+                    if let Some(mb_str) = text.split(':').nth(1) {
+                        if let Ok(val) = mb_str.replace("MB", "").trim().parse::<u64>() {
+                            gpu_vram_total_mb = val;
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        if let Ok(output) = std::process::Command::new("system_profiler").arg("SPDisplaysDataType").output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let text = line.trim();
+                if text.starts_with("Chipset Model: ") {
+                    gpu_name = text.replace("Chipset Model: ", "").to_string();
+                } else if text.starts_with("VRAM (Total): ") || text.starts_with("VRAM (Dynamic, Max): ") {
+                    if let Some(gb_str) = text.split(':').nth(1) {
+                        if let Ok(val) = gb_str.replace("GB", "").trim().parse::<u64>() {
+                            gpu_vram_total_mb = val * 1024;
+                        }
+                    }
+                }
+            }
+        }
+
         Self {
             total_tokens: 0,
             estimated_cost: 0.0,
             recent_sessions: VecDeque::with_capacity(10),
+            sys,
+            networks,
+            gpu_name,
+            gpu_vram_total_mb,
         }
     }
 
@@ -41,27 +108,65 @@ impl TelemetryState {
         self.recent_sessions.push_back((tokens, duration_ms));
     }
 
+    pub fn refresh_hardware(&mut self) {
+        self.sys.refresh_cpu_usage();
+        self.sys.refresh_memory();
+        self.networks.refresh(true); // Refreshes network usage stats
+    }
+
     pub fn get_snapshot(&self) -> TelemetrySnapshot {
         let mut tps = 0.0;
+        let mut avg_latency = 0;
         if !self.recent_sessions.is_empty() {
             let mut sum_tps = 0.0;
+            let mut sum_lat = 0;
             let mut count = 0;
             for (t, d) in &self.recent_sessions {
                 if *d > 0 {
                     let sec = *d as f64 / 1000.0;
                     sum_tps += *t as f64 / sec;
+                    sum_lat += *d;
                     count += 1;
                 }
             }
             if count > 0 {
                 tps = sum_tps / count as f64;
+                avg_latency = sum_lat / count as u128;
             }
         }
         
+        // Extract CPU Cores Array
+        let mut cpu_cores = Vec::new();
+        for core in self.sys.cpus() {
+            cpu_cores.push((core.cpu_usage() * 10.0).round() / 10.0);
+        }
+
+        // Memory Conversion
+        let ram_usage_mb = self.sys.used_memory() as f64 / 1024.0 / 1024.0;
+        let ram_total_gb = self.sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
+
+        // Network Aggregate
+        let mut io_rx_bytes = 0;
+        let mut io_tx_bytes = 0;
+        for (_interface_name, data) in &self.networks {
+            io_rx_bytes += data.received();
+            io_tx_bytes += data.transmitted();
+        }
+
         TelemetrySnapshot {
             total_tokens: self.total_tokens,
             avg_tps: (tps * 100.0).round() / 100.0, // Arredonda 2 casas
+            avg_latency_ms: avg_latency,
             estimated_cost: (self.estimated_cost * 10000.0).round() / 10000.0,
+            hardware: HardwareSnapshot {
+                cpu_cores,
+                ram_usage_mb: (ram_usage_mb * 100.0).round() / 100.0,
+                ram_total_gb: (ram_total_gb * 100.0).round() / 100.0,
+                io_rx_bytes,
+                io_tx_bytes,
+                gpu_name: self.gpu_name.clone(),
+                gpu_vram_total_mb: self.gpu_vram_total_mb,
+            }
         }
     }
 }
