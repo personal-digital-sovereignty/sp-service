@@ -132,3 +132,51 @@ pub async fn execute_mcp_tool(vault_root: &Path, tool_name: &str, args: &serde_j
         _ => format!("MCP Tool unrecognized by Engine: {}", tool_name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::{self, File};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_sandbox_allows_valid_paths() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        
+        // Create a dummy file inside the pseudo-vault
+        let file_path = root.join("allow_me.txt");
+        File::create(&file_path).unwrap();
+
+        let result = validate_safe_path(root, "allow_me.txt");
+        assert!(result.is_ok(), "Sandbox should allow direct files inside the root");
+        assert_eq!(result.unwrap(), fs::canonicalize(&file_path).unwrap());
+    }
+
+    #[test]
+    fn test_sandbox_blocks_directory_traversal() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        
+        let result = validate_safe_path(root, "../../../../etc/passwd");
+        assert!(result.is_err(), "Sandbox MUST BLOCK relative directory traversal");
+        
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn test_sandbox_allows_new_nested_file_creation() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        
+        let nested_dir = root.join("src").join("internal");
+        fs::create_dir_all(&nested_dir).unwrap();
+        
+        // Target is a file that doesn't exist yet, but in an allowed folder.
+        let target = "src/internal/new_file.rs";
+        
+        let result = validate_safe_path(root, target);
+        assert!(result.is_ok(), "Sandbox should allow future files if parent dir is safe");
+    }
+}
