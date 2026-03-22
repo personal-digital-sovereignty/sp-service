@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 use futures_util::stream::{self, Stream, StreamExt};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use crate::AppState;
 use std::time::Duration;
@@ -17,6 +17,7 @@ lazy_static! {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct DistillationReq {
     pub teacher_model: String,
     pub student_model: String,
@@ -25,6 +26,7 @@ pub struct DistillationReq {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub struct FineTuningReq {
     pub base_model: String,
     pub dataset_name: String,
@@ -41,14 +43,13 @@ async fn get_ollama_base_url(state: Arc<AppState>) -> String {
             let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                 for c in clusters {
-                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
-                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
+                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                             let clean_url = url.trim_end_matches('/').to_string();
                             if !clean_url.is_empty() {
                                 ollama_base_url = clean_url;
                             }
                         }
-                    }
                 }
             }
         }
@@ -93,13 +94,11 @@ pub async fn run_distillation_handler(
                         Ok(bytes) => {
                             if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                 for line in text.lines() {
-                                    if !line.trim().is_empty() {
-                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                                            if let Some(status) = json.get("status").and_then(|s| s.as_str()) {
+                                    if !line.trim().is_empty()
+                                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
+                                            && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
                                                 let _ = TRAINER_LOGS.send(format!("📦 [Layer Sync]: {}", status));
                                             }
-                                        }
-                                    }
                                 }
                             }
                         },
@@ -162,13 +161,11 @@ pub async fn run_finetuning_handler(
                         Ok(bytes) => {
                             if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                 for line in text.lines() {
-                                    if !line.trim().is_empty() {
-                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
-                                            if let Some(status) = json.get("status").and_then(|s| s.as_str()) {
+                                    if !line.trim().is_empty()
+                                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
+                                            && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
                                                 let _ = TRAINER_LOGS.send(format!("⚙️ [Epoch Tensor Swap]: {}", status));
                                             }
-                                        }
-                                    }
                                 }
                             }
                         },

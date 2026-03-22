@@ -55,8 +55,8 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                 });
             } else {
                 let mut wikilinks = vec![];
-                if filename.ends_with(".md") {
-                    if let Ok(content) = fs::read_to_string(&abs_path).await {
+                if filename.ends_with(".md")
+                    && let Ok(content) = fs::read_to_string(&abs_path).await {
                         // Extração Simples de Obsidian Synapses/Tags [[...]]
                         for chunk in content.split("[[").skip(1) {
                             if let Some(end_idx) = chunk.find("]]") {
@@ -68,7 +68,6 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                             }
                         }
                     }
-                }
                 nodes.push(VaultNode {
                     id: rel_id.clone(),
                     name: filename.clone(),
@@ -598,6 +597,7 @@ pub struct GraphResponse {
 }
 
 #[derive(sqlx::FromRow)]
+#[allow(dead_code)]
 struct SensusDocRow {
     id: String,
     file_path: String,
@@ -656,7 +656,7 @@ pub async fn vault_graph_handler(
         let content_raw: Option<String> = doc.try_get("content_raw").ok();
         
         let node_id = format!("doc_{}", doc_id);
-        let filename = doc_path.split('/').last().unwrap_or(&doc_path).to_string();
+        let filename = doc_path.split('/').next_back().unwrap_or(&doc_path).to_string();
         let doc_basename = filename.strip_suffix(".md").unwrap_or(&filename).to_string();
         
         name_to_id.insert(doc_basename.clone(), node_id.clone());

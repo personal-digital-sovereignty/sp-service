@@ -259,14 +259,13 @@ pub async fn get_available_models_handler(State(state): State<Arc<crate::AppStat
             let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                 for c in clusters {
-                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
-                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
+                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                             let clean_url = url.trim_end_matches('/').to_string();
                             if !clean_url.is_empty() {
                                 ollama_base_url = clean_url;
                             }
                         }
-                    }
                 }
             }
         }

@@ -1,4 +1,3 @@
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -18,8 +17,8 @@ pub async fn evaluate_prompt(prompt: &str, db: &sqlx::SqlitePool) -> Result<(), 
     // DB-Driven Custom Guardrails
     if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(db).await {
         let val: String = row.get("value_json");
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
-            if let Some(guardrails) = parsed.get("guardrails").and_then(|v| v.as_array()) {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val)
+            && let Some(guardrails) = parsed.get("guardrails").and_then(|v| v.as_array()) {
                 for rule in guardrails {
                     let rule_type = rule.get("type").and_then(|v| v.as_str()).unwrap_or("");
                     let rule_value = rule.get("value").and_then(|v| v.as_str()).unwrap_or("");
@@ -37,9 +36,9 @@ pub async fn evaluate_prompt(prompt: &str, db: &sqlx::SqlitePool) -> Result<(), 
                                 source: "DevSecOps".to_string()
                             });
                         }
-                    } else if rule_type == "regex" {
-                        if let Ok(re) = regex::Regex::new(rule_value) {
-                            if re.is_match(prompt) {
+                    } else if rule_type == "regex"
+                        && let Ok(re) = regex::Regex::new(rule_value)
+                            && re.is_match(prompt) {
                                 return Err(SecurityEvent {
                                     event_type: "Regex Blocked".to_string(),
                                     severity: "Critical".to_string(),
@@ -48,11 +47,8 @@ pub async fn evaluate_prompt(prompt: &str, db: &sqlx::SqlitePool) -> Result<(), 
                                     source: "DevSecOps".to_string()
                                 });
                             }
-                        }
-                    }
                 }
             }
-        }
     }
 
     let prompt_lower = prompt.to_lowercase();
@@ -83,8 +79,8 @@ pub async fn evaluate_prompt(prompt: &str, db: &sqlx::SqlitePool) -> Result<(), 
 
     // 2. PII Detection (CPF / SSN / Credenciais)
     // Regex simples para capturar formato de CPF em texto pt-br ou chaves genéricas AWS/Tokens.
-    if let Ok(cpf_regex) = regex::Regex::new(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b") {
-        if cpf_regex.is_match(prompt) {
+    if let Ok(cpf_regex) = regex::Regex::new(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")
+        && cpf_regex.is_match(prompt) {
             return Err(SecurityEvent {
                 event_type: "PII Detected CPF".to_string(),
                 severity: "High".to_string(),
@@ -93,7 +89,6 @@ pub async fn evaluate_prompt(prompt: &str, db: &sqlx::SqlitePool) -> Result<(), 
                 source: "Sovereign Guardrails".to_string(),
             });
         }
-    }
     
     // 3. Toxicity (Heurísticas Simples de Violação de Compliance Exemplo)
     let toxic_words = [

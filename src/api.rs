@@ -1,7 +1,6 @@
 use axum::{ extract::{Json, State}, response::{ sse::{Event, Sse}, IntoResponse, Response, }, }; use futures_util::StreamExt;  use serde_json::{json, Value}; use std::convert::Infallible; use std::sync::Arc; use tracing::{error, info};
 
 use crate::models::{ OpenAIChatChunkChoice, OpenAIChatChunkDelta, OpenAIChatChunkResponse, OpenAIChatRequest, }; use crate::AppState;
-use std::path::Path;
 // removed unused explicit scraper import
 
 // -------------------------------------------------------------
@@ -166,9 +165,8 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         
         if let Some(t) = parsed.get("temperature").and_then(|v| v.as_f64()) { sys_temperature = Some(t); }
         if let Some(k) = parsed.get("top_k").and_then(|v| v.as_i64()) { sys_top_k = Some(k); }
-        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str()) {
-            if !p.is_empty() { global_system_prompt = Some(p.to_string()); }
-        }
+        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str())
+            && !p.is_empty() { global_system_prompt = Some(p.to_string()); }
     }
 }
 let ollama_model = resolved_model;
@@ -312,8 +310,8 @@ let mut purified_messages: Vec<Value> = Vec::new();
 
 // --- SOVEREIGN CONTEXT INJECTOR (RAG V2 - KANBAN) ---
 let mut project_context = String::new();
-if let Some(pid) = payload.project_id {
-    if let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
+if let Some(pid) = payload.project_id
+    && let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
         .bind(&pid)
         .fetch_optional(&state.db)
         .await
@@ -330,8 +328,7 @@ if let Some(pid) = payload.project_id {
             .bind(&pid)
             .fetch_all(&state.db)
             .await
-        {
-            if !tasks.is_empty() {
+            && !tasks.is_empty() {
                 project_context.push_str("\n📌 TAREFAS ATIVAS NO KANBAN (Com Cronologia):\n");
                 for row in tasks {
                     let t_title: String = sqlx::Row::get(&row, "title");
@@ -345,14 +342,12 @@ if let Some(pid) = payload.project_id {
                     project_context.push_str(&format!("- [{}] {} (Criada: {} | Prazo: {})\n", t_status, t_title, c, d));
                 }
             }
-        }
 
         if let Ok(docs) = sqlx::query("SELECT file_path FROM project_documents WHERE project_id = ?")
             .bind(&pid)
             .fetch_all(&state.db)
             .await
-        {
-            if !docs.is_empty() {
+            && !docs.is_empty() {
                 project_context.push_str("\n📚 DOCUMENTOS CÍBRIDOS VINCULADOS AO PROJETO (RAG NATIVO ABSOLUTO):\n");
                 for row in docs {
                     let mut doc_path: String = sqlx::Row::get(&row, "file_path");
@@ -366,9 +361,7 @@ if let Some(pid) = payload.project_id {
                     }
                 }
             }
-        }
     }
-}
 
 if !project_context.is_empty() {
     purified_messages.push(json!({
@@ -831,14 +824,13 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     let mut vault_categories = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&state.vault_path) {
         for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_dir() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_dir() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if !name.starts_with('.') {
                         vault_categories.push(name);
                     }
                 }
-            }
         }
     }
 
@@ -941,11 +933,13 @@ pub async fn feedback_handler(
 }
 
 #[derive(serde::Deserialize)]
+#[allow(dead_code)]
 pub struct VaultGraphQuery {
     pub workspace_id: Option<String>,
 }
 
 /// Sensus Document Topology Builder (Vault Hub & Dashboard Graph Engine)
+#[allow(dead_code)]
 pub async fn vault_graph_handler(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(query): axum::extract::Query<VaultGraphQuery>,

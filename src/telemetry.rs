@@ -56,13 +56,11 @@ impl TelemetryState {
                     if let Some(name) = text.split(" (").next() {
                         gpu_name = name.replace("Device: ", "").to_string();
                     }
-                } else if text.starts_with("Dedicated video memory: ") {
-                    if let Some(mb_str) = text.split(':').nth(1) {
-                        if let Ok(val) = mb_str.replace("MB", "").trim().parse::<u64>() {
+                } else if text.starts_with("Dedicated video memory: ")
+                    && let Some(mb_str) = text.split(':').nth(1)
+                        && let Ok(val) = mb_str.replace("MB", "").trim().parse::<u64>() {
                             gpu_vram_total_mb = val;
                         }
-                    }
-                }
             }
         }
 
@@ -95,6 +93,7 @@ impl TelemetryState {
         }
     }
 
+    #[allow(unused_assignments)]
     pub fn record_session(&mut self, tokens: usize, duration_ms: u128, model: &str) {
         self.total_tokens += tokens;
         

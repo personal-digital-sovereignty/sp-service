@@ -3,7 +3,7 @@ use axum::{
     response::{IntoResponse, sse::{Event, Sse}},
     Json,
 };
-use futures_util::stream::{self, Stream};
+use futures_util::stream::Stream;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -155,8 +155,8 @@ async fn handle_rpc_method(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRp
     }
 
     // Execução Dinâmica de Ferramentas
-    if req.method == "tools/call" {
-        if let Some(params) = req.params {
+    if req.method == "tools/call"
+        && let Some(params) = req.params {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
             
@@ -174,7 +174,6 @@ async fn handle_rpc_method(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRp
                 error: None,
             };
         }
-    }
 
     // Ping e Respostas não suportadas
     if req.method == "ping" {
