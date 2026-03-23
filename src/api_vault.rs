@@ -132,9 +132,15 @@ pub async fn create_workspace_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreateWorkspaceReq>,
 ) -> impl IntoResponse {
-    let raw_path = PathBuf::from(&req.path);
+    let mut clean_path = req.path.trim().to_string();
+    // Fase 42: Sanitização Transversal Universal (Retira aspas do Windows Copy Path)
+    if clean_path.starts_with('"') && clean_path.ends_with('"') {
+        clean_path = clean_path[1..clean_path.len()-1].to_string();
+    }
+
+    let raw_path = PathBuf::from(&clean_path);
     if !raw_path.exists() || !raw_path.is_dir() {
-        return (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": true, "message": "O caminho fornecido não existe ou não é um diretório no Host Linux."}))).into_response();
+        return (axum::http::StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": true, "message": "O caminho fornecido não existe ou não é um diretório acessível no Host Local Pessoal."}))).into_response();
     }
 
     let absolute_str = raw_path.canonicalize().unwrap_or(raw_path).to_string_lossy().to_string();
