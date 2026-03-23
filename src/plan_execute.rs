@@ -5,6 +5,7 @@ use tracing::error;
 pub async fn start_plan_and_execute(
     query: String,
     state: std::sync::Arc<crate::AppState>,
+    model: String,
 ) {
     let log_sender = state.log_sender.clone();
     let db = state.db.clone();
@@ -31,7 +32,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
 "#;
 
     let plan_payload = json!({
-        "model": "qwen2.5:3b",
+        "model": model.clone(),
         "messages": [
             { "role": "system", "content": planner_system },
             { "role": "user", "content": format!("Desmanche a seguinte meta em no máximo 3 etapas: {}", query) }
@@ -82,7 +83,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
 
                         // Fase 2: O Executor (Roda cada step e junta no contexto)
                         let executor_payload = json!({
-                            "model": "qwen2.5:3b",
+                            "model": model.clone(),
                             "messages": [
                                 { "role": "system", "content": "Você é o Agente Executor Cíbrido. Realize a ação imperativamente. Responda APENAS com o resultado puro da ação. Se precisar ler ou escrever arquivos no projeto local, use as TOOLS disponibilizadas pelo protocolo MCP." },
                                 { "role": "user", "content": format!("Contexto Anterior Acumulado:\n{}\n\nAção a tomar AGORA: ({}) -> {}", aggregated_results, step.action, step.task) }

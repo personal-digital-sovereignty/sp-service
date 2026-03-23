@@ -134,6 +134,14 @@ let mut sys_top_k: Option<i64> = None;
 let mut global_system_prompt: Option<String> = None;
 let mut resolved_model = requested_model.clone();
 
+// 🛑 THE SOVEREIGN FIREWALL (Zero-Day Model Fallback) 🛑
+// If OpenCode (or the IDE) injects commercial models blindly, we forcefully hijack 
+// them down to the Sovereign Private Mesh locally, ensuring NO 404 Ollama Panics on Factory Installs.
+if requested_model.to_lowercase().contains("gpt") || requested_model.to_lowercase().contains("claude") {
+    resolved_model = "llama3.2:latest".to_string(); // Safest local Default (1B/3B)
+    tracing::info!("🔄 Proxy OpenCode/IDE enviou modelo comercial [{}]. Hijacking forçado para Endpoint Soberano: [{}]", requested_model, resolved_model);
+}
+
 if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(&state.db).await {
     let val: String = sqlx::Row::get(&row, "value_json");
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
@@ -151,16 +159,14 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         if let Some(specific_model) = parsed.get(target_key).and_then(|v| v.as_str()) {
             if !specific_model.is_empty() { 
                 resolved_model = specific_model.to_string(); 
-                tracing::info!("🧠 [Sovereign Router] Roteando intenção '{}' para o Agente Dedicado: {}", target_key, resolved_model);
+                tracing::info!("🧠 [Sovereign Router] Roteando intenção '{}' para o Agente Dedicado Mestre: {}", target_key, resolved_model);
             }
-        } else if requested_model.to_lowercase().contains("gpt") {
-            // Fallback Legacy
-            if let Some(model_str) = parsed.get("llm_model").and_then(|v| v.as_str()) {
-                if !model_str.is_empty() { resolved_model = model_str.to_string(); }
-            } else {
-                resolved_model = "qwen2.5:3b".to_string(); // Fallback de segurança
+        } else if let Some(model_str) = parsed.get("llm_model").and_then(|v| v.as_str()) {
+            // Restore legacy fallback explicitly from DB if Sovereign Routing failed, BUT the DB has a default engine.
+            if !model_str.is_empty() { 
+                resolved_model = model_str.to_string(); 
+                tracing::info!("🔄 [Sovereign Router] Usando Motor Estático da Base de Dados: {}", resolved_model);
             }
-            tracing::info!("🔄 Proxy OpenCode/Desktop enviou {}. Remapeando via Router para: {}", requested_model, resolved_model);
         }
         
         if let Some(t) = parsed.get("temperature").and_then(|v| v.as_f64()) { sys_temperature = Some(t); }
@@ -177,9 +183,10 @@ if human_prompt.to_lowercase().starts_with("/plan") {
     info!("🧠 [Sovereign Core] Plan & Execute Task detectada: /plan -> Iniciando Macro Orquestração em Background...");
     
     let state_clone = state.clone();
+    let model_to_use = resolved_model.clone();
     
     tokio::spawn(async move {
-        crate::plan_execute::start_plan_and_execute(query, state_clone).await;
+        crate::plan_execute::start_plan_and_execute(query, state_clone, model_to_use).await;
     });
 
     let msg = "🧭 **Plan & Execute (Macro-Orquestração) Iniciado!**\nSua tarefa foi inserida no Threadpool Assíncrono do Cíbrido. O Planner irá quebrar seu pedido em etapas menores, validará nativamente na formatação strict JSON, e o Executor cuidará de cada etapa seqüencialmente sem travar seu terminal. \n\n*Acompanhe o Plasma Widget ou Logs para ver a orquestração em andamento!*".to_string();
