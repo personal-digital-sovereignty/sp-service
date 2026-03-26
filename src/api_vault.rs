@@ -483,10 +483,14 @@ pub async fn vault_fs_delete_handler(
         if let Err(e) = fs::remove_dir_all(&target).await {
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"detail": format!("Failed to delete folder: {}", e)}))).into_response();
         }
+        let abs_path_pattern = format!("{}%", target.to_string_lossy());
+        let _ = sqlx::query("DELETE FROM sensus_documents WHERE file_path LIKE ?").bind(&abs_path_pattern).execute(&state.db).await;
     } else {
         if let Err(e) = fs::remove_file(&target).await {
             return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"detail": format!("Failed to delete file: {}", e)}))).into_response();
         }
+        let abs_path_str = target.to_string_lossy().to_string();
+        let _ = sqlx::query("DELETE FROM sensus_documents WHERE file_path = ?").bind(&abs_path_str).execute(&state.db).await;
     }
 
     (axum::http::StatusCode::OK, Json(serde_json::json!({"status":"deleted"}))).into_response()

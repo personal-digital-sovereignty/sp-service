@@ -2,7 +2,6 @@ use reqwest::Client;
 use scraper::{Html, Selector};
 use std::time::Duration;
 use regex::Regex;
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -95,8 +94,8 @@ impl DeepResearchEngine {
         // Isso é uma filtragem em memória antes da decodificação.
         let mut text_blocks = Vec::new();
         
-        // Vamos capturar apenas elementos atômicos contendo texto orgânico
-        let selector = Selector::parse("p, h1, h2, h3, h4, h5, h6, li").unwrap();
+        // Vamos capturar apenas elementos atômicos contendo texto orgânico e dados tabulares
+        let selector = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, td, th").unwrap();
         
         for element in document.select(&selector) {
             // Filtro 1: Genética (Ancestors)
@@ -116,6 +115,7 @@ impl DeepResearchEngine {
 
             let tag_name = element.value().name();
             let is_header = tag_name.starts_with('h');
+            let is_table_data = tag_name == "td" || tag_name == "th";
             
             // Foca o inner text, ignorando scripts implícitos
             let inner_text = element.text().collect::<Vec<_>>().join(" ");
@@ -127,8 +127,8 @@ impl DeepResearchEngine {
 
             // Filtro 2: Comprimento Semântico
             // Ignorar textos minúsculos como "Fazer Login", "Categorias", "iPhone 15", etc.
-            // Exceção: Cabeçalhos podem ser curtos (Ex: "Resumo", "Conclusão").
-            if !is_header && clean_text.len() < 30 && clean_text.split_whitespace().count() < 5 {
+            // Exceção: Cabeçalhos e Data Cells (td/th) podem ser curtos (Ex: "Resumo", "Conclusão", "R$ 5,30").
+            if !is_header && !is_table_data && clean_text.len() < 30 && clean_text.split_whitespace().count() < 5 {
                 continue;
             }
             
@@ -141,6 +141,7 @@ impl DeepResearchEngine {
                 "h5" => format!("##### {}\n", clean_text),
                 "h6" => format!("###### {}\n", clean_text),
                 "li" => format!("- {}", clean_text),
+                "td" | "th" => format!("| {} |", clean_text),
                 _ => format!("{}\n", clean_text), // <p>
             };
             
@@ -158,20 +159,20 @@ impl DeepResearchEngine {
     }
 
     /// Dispara a busca Multi-Hop com tolerância impecável a falhas WAF/Cloudflare.
-    /// Estratégia 1: DuckDuckGo HTML Nativo (Light DOM)
+    /// Estratégia 1: Sovereign Meta-Search (Proxy Nativo)
     /// Estratégia 2: Rotação Cíbrida Global de SearxNGs
     pub async fn search_web(&self, query: &str) -> Result<Vec<String>, String> {
-        tracing::info!("🔍 [WAG] Inicializando Busca Autônoma Deep Research (Dual-Engine) por: '{}'", query);
+        tracing::info!("🔍 [WAG] Inicializando Busca Autônoma Sovereign Meta-Search por: '{}'", query);
         
-        // 1. O SOVEREIGN PARSER: Tenta raspar a página retro do DuckDuckGo (Estratégia 1)
-        match self.search_ddg_html(query).await {
+        // 1. O SOVEREIGN PARSER: Tenta raspar via Proxy Native com User-Agent Rotativo
+        match self.search_sovereign_meta(query).await {
             Ok(links) if !links.is_empty() => {
                 let clean_links = self.apply_pi_hole_filter(links).await;
-                tracing::info!("✅ [WAG] Busca Nativa DGG HTML Bem-Sucedida! ({}) links orgânicos purificados.", clean_links.len());
+                tracing::info!("✅ [WAG] Sovereign Meta-Search Bem-Sucedido! ({}) links orgânicos purificados.", clean_links.len());
                 return Ok(clean_links);
             },
             Err(e) => {
-                let msg = format!("⚠️ [WAG Fallback] Falha catastrófica ou bloqueio WAF agressivo no DuckDuckGo: {}", e);
+                let msg = format!("⚠️ [WAG Fallback] O motor primário tomou WAF Block. Rotacionando para SearXNG P2P. Erro: {}", e);
                 tracing::warn!("{}", msg);
                 if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("deep_research_waf_audit.log") {
                     use std::io::Write;
@@ -179,7 +180,7 @@ impl DeepResearchEngine {
                 }
             },
             _ => {
-                let msg = "⚠️ [WAG Fallback] DuckDuckGo retornou 0 links limpos (WAF/Cloudflare invisível travou a listagem).";
+                let msg = "⚠️ [WAG Fallback] O motor primário encontrou 0 resultados ou tomou proxy reset.";
                 tracing::warn!("{}", msg);
                 if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open("deep_research_waf_audit.log") {
                     use std::io::Write;
@@ -237,11 +238,11 @@ impl DeepResearchEngine {
             let mut score = 0;
             let url_lower = url.to_lowercase();
             
-            // Check Trust Matrix
+            // Check Trust Matrix (Epistemology Rule)
             if self.trust_matrix.tier1.iter().any(|d| url_lower.contains(d)) {
-                score += 100;
+                score += 200; // Tier 1: Guardian of Raw Numbers (gov.br, ibge)
             } else if self.trust_matrix.tier2.iter().any(|d| url_lower.contains(d)) {
-                score += 50;
+                score += 200; // Tier 2: Guardian of the Narrative (Equal Epistemic weight!)
             } else if self.trust_matrix.encyclopedia.iter().any(|d| url_lower.contains(d)) {
                 score += 30;
             } else if url_lower.contains(".org") || url_lower.contains(".io") {
@@ -263,16 +264,39 @@ impl DeepResearchEngine {
         scored_links.into_iter().map(|s| s.url).collect()
     }
 
-    /// Extrator 100% Nativo no Rust que burla bloqueios massivos do DDG acessando sua rede retro HTML.
-    async fn search_ddg_html(&self, query: &str) -> Result<Vec<String>, String> {
-        let url = format!("https://html.duckduckgo.com/html/?q={}", urlencoding::encode(query));
+    /// Rotacionador de Identidade (Sovereign Cloak)
+    fn get_random_user_agent() -> &'static str {
+        let uas = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.2420.65",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        ];
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+        uas[(now as usize) % uas.len()]
+    }
+
+    /// Extrator Cíbrido Nativo no Rust que utiliza Motores abertos como Proxy para bypass de WAF.
+    async fn search_sovereign_meta(&self, query: &str) -> Result<Vec<String>, String> {
+        let url = format!("https://search.yahoo.com/search?p={}", urlencoding::encode(query));
         
         let req = self.client.get(&url)
-            .header("Accept-Language", "en-US,en;q=0.5")
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .header("DNT", "1")
+            .header(reqwest::header::USER_AGENT, Self::get_random_user_agent())
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7")
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header(reqwest::header::DNT, "1")
+            .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"123\", \"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"123\"")
+            .header("Sec-Ch-Ua-Mobile", "?0")
+            .header("Sec-Ch-Ua-Platform", "\"Windows\"")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-User", "?1")
+            .header("Upgrade-Insecure-Requests", "1")
             .send()
-            .await.map_err(|e| format!("Network Erro ao contatar html.duckduckgo.com: {}", e))?;
+            .await.map_err(|e| format!("Proxy Nativo Erro de Rede: {}", e))?;
 
         if !req.status().is_success() {
             return Err(format!("Interceptado por HTTP Status {}", req.status()));
@@ -280,27 +304,29 @@ impl DeepResearchEngine {
 
         let html = req.text().await.map_err(|e| format!("Falha de Decodificação DOM: {}", e))?;
         
-        if html.contains("CAPTCHA") || html.contains("To continue") || html.contains("cloudflare") {
-            return Err("Honeypot/Captcha nativo engatilhado na camada HTML do DuckDuckGo".to_string());
+        if html.contains("To proceed, please verify that you are not a robot.") {
+            return Err("Honeypot/Captcha nativo engatilhado na camada HTML do Engine Primário".to_string());
         }
 
-        let document = Html::parse_document(&html);
-        let selector = Selector::parse("a.result__snippet").unwrap_or_else(|_| Selector::parse("a.result__url").unwrap());
+        let document = scraper::Html::parse_document(&html);
+        let selector = scraper::Selector::parse("a").unwrap();
         
         let mut links = Vec::new();
         for element in document.select(&selector) {
             if let Some(href_attr) = element.value().attr("href") {
-                if href_attr.starts_with("http") && !href_attr.contains("duckduckgo.com") {
-                    links.push(href_attr.to_string());
-                } else if href_attr.contains("uddg=") {
-                    // Reverse-engineering do token de redirecionamento nativo do DuckDuckGo
-                    let parts: Vec<&str> = href_attr.split("uddg=").collect();
+                if href_attr.contains("RU=") {
+                    let parts: Vec<&str> = href_attr.split("RU=").collect();
                     if parts.len() > 1 {
-                        let inner = parts[1].split('&').next().unwrap_or("");
+                        let inner = parts[1].split("/RK=").next().unwrap_or("");
                         if let Ok(decoded) = urlencoding::decode(inner) {
-                            links.push(decoded.into_owned());
+                            let clean_link = decoded.into_owned();
+                            if clean_link.starts_with("http") && !clean_link.contains("yahoo.com") {
+                                links.push(clean_link);
+                            }
                         }
                     }
+                } else if href_attr.starts_with("http") && !href_attr.contains("yahoo.com") && !href_attr.contains("r.search.yahoo.com") {
+                    links.push(href_attr.to_string());
                 }
             }
         }

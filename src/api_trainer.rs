@@ -205,6 +205,7 @@ pub async fn run_finetuning_handler(
     }))
 }
 
+#[allow(dead_code)]
 #[derive(serde::Deserialize)]
 pub struct DeepResearchReq {
     pub directive: String,
@@ -224,24 +225,70 @@ async fn wait_or_cancel(ms: u64, token: &CancellationToken) -> bool {
     }
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|&x| x * x).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|&x| x * x).sum::<f32>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 { 0.0 } else { dot_product / (norm_a * norm_b) }
-}
 
-async fn get_embedding(client: &reqwest::Client, text: &str, model: &str) -> Option<Vec<f32>> {
-    let payload = serde_json::json!({ "model": model, "prompt": text });
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/embeddings").json(&payload).send().await {
+async fn execute_sub_analyst(
+    query: String,
+    engine_arc: Arc<crate::research::DeepResearchEngine>,
+    client: reqwest::Client,
+    sub_agent_model: String
+) -> String {
+    let mut search_query = query.clone();
+    
+    // Condenser to help bypassing
+    let cond_prompt = format!("Reduza a pergunta a seguir em uma string de busca enxuta (max 5 palavras). Responda apenas com a string pura. Pergunta: '{}'", query);
+    let cond_payload = serde_json::json!({"model": sub_agent_model, "messages": [{"role": "user", "content": cond_prompt}], "stream": false, "options": {"temperature": 0.0}});
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&cond_payload).send().await {
         if let Ok(json) = res.json::<serde_json::Value>().await {
-            if let Some(embed) = json.get("embedding").and_then(|v| v.as_array()) {
-                let vec: Vec<f32> = embed.iter().filter_map(|num| num.as_f64().map(|f| f as f32)).collect();
-                return Some(vec);
+            if let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                let clean = c.replace("\"", "").replace("'", "").trim().to_string();
+                if clean.len() < 80 { search_query = clean; }
             }
         }
     }
-    None
+
+    let mut raw_student_md = String::new();
+    if let Ok(links) = engine_arc.search_web(&search_query).await {
+        for link in links.into_iter().take(3) {
+            if let Ok(md) = engine_arc.scrape_url(&link).await {
+                if md.len() > 100 {
+                    raw_student_md.push_str(&format!("## Source: {}\n{}\n\n", link, md.chars().take(2500).collect::<String>()));
+                }
+            }
+        }
+    }
+
+    if raw_student_md.trim().is_empty() { return "Nenhum dado retornado da web para esta query.".to_string(); }
+
+    let extractor_prompt = format!(
+        "Responda à pergunta abaixo baseando-se APENAS e RESTRITAMENTE no contexto histórico fornecido raspado da web. \n\
+        Se a resposta não puder ser extraída do texto, responda estritamente: 'DADO NÃO ENCONTRADO no contexto raspado'.\n\
+        CITE A FONTE URL DE ONDE TIROU CADA NÚMERO DIRETAMENTE DO TEXTO. Mantenha resposta curta, direta, jornalística.\n\n\
+        PERGUNTA A SER RESOLVIDA:\n{}\n\n\
+        CONTEXTO RASPADO PELO SEU CRAWLER (FONTES ABAIXO):\n{}", query, raw_student_md
+    );
+
+    let ext_payload = serde_json::json!({
+        "model": sub_agent_model,
+        "messages": [{"role": "user", "content": extractor_prompt}],
+        "stream": false,
+        "options": { "temperature": 0.0, "num_ctx": 4096 }
+    });
+
+    let mut distilled_text = "Falha do aluno ao purificar.".to_string();
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                distilled_text = content.to_string();
+            }
+        }
+    }
+    
+    let mut sources_used = String::new();
+    for line in raw_student_md.lines().filter(|l| l.starts_with("## Source: ")) {
+        sources_used.push_str(&format!("{}\n", line));
+    }
+    
+    format!("{}\n\n[Fontes processadas por este sub-analista]:\n{}", distilled_text, sources_used)
 }
 
 pub async fn run_deep_research_handler(
@@ -260,243 +307,85 @@ pub async fn run_deep_research_handler(
     }
 
     let vault_ptr = state.vault_path.clone();
+    let telemetry_ptr = state.telemetry.clone();
     let prompt = req.directive.clone();
-    let target_model_name = req.model.clone().unwrap_or_else(|| "llama3.2:latest".to_string());
-    
     tokio::spawn(async move {
-        // [STEP 0]: Query Vectorization
-        let _ = TRAINER_LOGS.send("[STEP 0] Query Vectorization Initialized...".to_string());
-        if wait_or_cancel(2000, &token).await { return; }
+        // --- PHASE 33: Agentic Loop (ReAct / Tool Calling) ---
+        let embed_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
 
-        // [STEP 1]: Web Matrix Scraper
-        let _ = TRAINER_LOGS.send("[STEP 1] Web Matrix Scraper deployed...".to_string());
+        let engine_arc = std::sync::Arc::new(crate::research::DeepResearchEngine::new(
+            Some(state.db.clone()), 
+            Some(state.adblock_engine.clone()), 
+            Some(vault_ptr.clone())
+        ));
+
+        let _ = TRAINER_LOGS.send("[STEP 1.0] Iniciando Arquitetura Agentic Loop (Tool Calling)...".to_string());
         
-        // --- PHASE 19 FIX: The LLM Query Condenser ---
-        // We must reduce the massive paragraph directive into a 5-word search matrix to bypass WAF 403 limits
-        let _ = TRAINER_LOGS.send("[STEP 1.1] Condensing Query via Local LLM...".to_string());
+        let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
+        use chrono::Datelike;
+        let current_year = chrono::Local::now().year();
+        let current_year_minus_5 = current_year - 5;
         
-        let sub_llm_prompt = format!("Extraia a intenção técnica principal deste texto em APENAS UMA STRING CURTA (máximo 6 palavras) altamente otimizada para motores de busca. Responda APENAS com a string, sem acentos, sem pontuações, sem aspas, tudo minúsculo, sem explicações. Você está programando o Google. Texto original: '{}'", prompt);
-        
-        let client = reqwest::Client::new();
-        let payload = serde_json::json!({
-            "model": "llama3.2:latest", // Fast resilient model for logic operations
-            "messages": [{"role": "user", "content": sub_llm_prompt}],
-            "stream": false,
-            "options": { "temperature": 0.1 }
-        });
-        
-        let mut optimized_query = prompt.clone(); // Fallback to raw if LLM panics
-        let olla_url = format!("http://127.0.0.1:11434/api/chat");
-        if let Ok(res) = client.post(&olla_url).json(&payload).send().await {
-            if let Ok(json) = res.json::<serde_json::Value>().await {
-                if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                    let cleaned = content.trim().replace("\"", "").replace("'", "");
-                    if !cleaned.is_empty() && cleaned.len() < 100 {
-                        optimized_query = cleaned;
-                        
-                        // Phase 26: Dynamic Intent Dorking
-                        let mut intent_dorks = String::new();
-                        let q_low = optimized_query.to_lowercase();
-                        
-                        if q_low.contains("codigo") || q_low.contains("programacao") || q_low.contains("python") || q_low.contains("rust") || q_low.contains("react") || q_low.contains("javascript") || q_low.contains("c++") {
-                            intent_dorks = " (site:docs.* OR site:*.io OR github.com)".to_string();
-                        } else if q_low.contains("economia") || q_low.contains("inflacao") || q_low.contains("petroleo") || q_low.contains("dolar") || q_low.contains("pib") || q_low.contains("taxa") || q_low.contains("selic") {
-                            intent_dorks = " (site:gov.br OR site:*.edu.br OR site:bcb.gov.br)".to_string();
-                        } else if q_low.contains("academico") || q_low.contains("artigo") || q_low.contains("tese") || q_low.contains("ciencia") {
-                            intent_dorks = " (site:*.edu OR site:*.edu.br OR site:scielo.br)".to_string();
+        let query_example = format!("Uma query cirúrgica enxuta (ex: 'brasil inflacao ipca historico {} a {}' ou 'preco petroleo brent {}').", current_year_minus_5, current_year, current_year);
+
+        let tools_schema = serde_json::json!([{
+            "type": "function",
+            "function": {
+                "name": "dispatch_sub_researcher",
+                "description": "Faz uma pesquisa profunda na web utilizando um agente especialista (Llama 3B). Use isso infinitas vezes para coletar as provas factuais que necessita ANTES de emitir seu relatório.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "search_query": {
+                            "type": "string",
+                            "description": query_example
                         }
-
-                        if !intent_dorks.is_empty() {
-                            tracing::info!("🎯 [WAG Dorking] Intent Detectada. Dorks Injetados: {}", intent_dorks);
-                            optimized_query.push_str(&intent_dorks);
-                        }
-
-                        tracing::info!("🧠 [WAG Sub-LLM] Texto reduzido para bypass de WAF HTTP: '{}'", optimized_query);
-                        let _ = TRAINER_LOGS.send(format!("[WAG] Matrix de Busca Otimizada: '{}'", optimized_query));
-                    }
+                    },
+                    "required": ["search_query"]
                 }
             }
-        }
+        }]);
+
+        let target_model_name = req.model.clone().unwrap_or_else(|| "llama3.2:latest".to_string());
+        let is_low_end = target_model_name.contains("3.2") || target_model_name.contains("qwen2.5:1.5b") || target_model_name.contains("3b");
         
-        // Spawn Real Search & Scrape
-        let engine = std::sync::Arc::new(crate::research::DeepResearchEngine::new(Some(state.db.clone()), Some(state.adblock_engine.clone()), Some(state.vault_path.clone())));
-        let engine_clone = engine.clone();
-        let prompt_clone = optimized_query; // Safely condensed string
-        
-        let scrape_future = async move {
-            let mut all_scraped_markdown = String::new();
-            if let Ok(links) = engine_clone.search_web(&prompt_clone).await {
-                let mut _scraped_count = 0;
-                for link in links {
-                    match engine_clone.scrape_url(&link).await {
-                        Ok(md) if md.len() > 100 => { // Ensure it actually fetched content
-                            _scraped_count += 1;
-                            let _ = TRAINER_LOGS.send(format!("[SCRAPED: 1]")); // Send delta of 1 for the UI counter
-                            all_scraped_markdown.push_str(&format!("## Source: {}\n{}\n\n", link, md.chars().take(4000).collect::<String>()));
-                        },
-                        _ => {}
-                    }
-                }
-                Ok(all_scraped_markdown)
-            } else {
-                Err("WAF blocked search".to_string())
-            }
+        let anchor_directive = format!("[DIRETRIZ MATEMÁTICA ABSOLUTA] O ano real atual é {}. Se for exigido 'N' anos atrás, obrigatoriamente calcule a data subtraindo 'N' de {}. É terminantemente PROIBIDO usar seu ano de treinamento base como âncora temporal.", current_year, current_year);
+
+        let synthesis_prompt = if is_low_end {
+            format!(
+                "Você é Sophy, a IA Especialista Sênior do Sovereign Pair.\n\
+                [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
+                {}\n\
+                [DIRETRIZES DE RIGOR FACTUAL IMPRESCINDÍVEIS E DE TIER-1]\n\
+                1. Você DEVE usar a ferramenta `dispatch_sub_researcher` para buscar DADOS REAIS da web.\n\
+                2. SEU ÚNICO DEVER é invocar a ferramenta e agregar fatos.\n\
+                3. NÃO ESCREVA RESPOSTAS LONGAS ou crie formatação Markdown final. Responda apenas com os Fatos Brutos listados de forma direta.",
+                anchor_directive
+            )
+        } else {
+            format!(
+                "Você é Sophy, a IA Especialista Sênior do Sovereign Pair (Operando no Loop ReAct).\n\
+                [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
+                {}\n\
+                [DIRETRIZES DE RIGOR FACTUAL IMPRESCINDÍVEIS E DE TIER-1 / TIER-2]\n\
+                1. Você DEVE usar a ferramenta `dispatch_sub_researcher` para buscar DADOS REAIS da web.\n\
+                2. Trate fontes Governamentais (Banco Central, IBGE, gov.br) como os Guardiões Absolutos de Séries Históricas e Números Brutos.\n\
+                3. Trate fontes Jornalísticas como Guardiãs do Contexto e da geopolítica do dia a dia.\n\
+                4. Protocolo Anti-Alucinação: Se um dado numérico do jornalismo conflitar com o do Governo, NÃO tente adivinhar. Calcule a divergência matematicamente, cite as DUAS fontes e declare o Governo como o validador da série histórica.\n\
+                5. Só escreva o Relatório Final em Markdown após ter coletado todas as evidências em mãos via Tool Call.",
+                anchor_directive
+            )
         };
 
-        // Bind Cancellation Token to the Real Network Future
-        let mut final_markdown = String::new();
-        tokio::select! {
-            res = scrape_future => {
-                if let Ok(md) = res {
-                    final_markdown = md;
-                }
-            },
-            _ = token.cancelled() => {
-                let _ = TRAINER_LOGS.send("⚠️ [DEEP_RESEARCH] ABORTED BY COMMANDER.".to_string());
-                return;
-            }
-        }
+        let mut messages = vec![
+            serde_json::json!({"role": "system", "content": synthesis_prompt}),
+            serde_json::json!({"role": "user", "content": prompt.clone()})
+        ];
 
-        // --- PHASE 30 & 28: Sovereign Map-Reduce (The RAG Trinity) ---
-        if final_markdown.len() > 2000 {
-            let _ = TRAINER_LOGS.send("[STEP 1.5] Map-Reduce: Decompondo a Diretiva em Micro-Missões...".to_string());
-            let embed_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(60)).build().unwrap_or_else(|_| reqwest::Client::new());
-            
-            let planner_prompt = format!(
-                "Decomponha a seguinte diretiva de pesquisa num array JSON estrito contendo entre 2 a 5 perguntas específicas.\n\
-                REGRAS:\n\
-                1. Retorne APENAS um array JSON válido de strings.\n\
-                2. Não inclua texto fora do array.\n\
-                3. Exemplo: [\"Qual o IPCA de 2021?\", \"Investigação do CADE\"]\n\n\
-                DIRETIVA:\n{}", prompt
-            );
-            
-            let planner_payload = serde_json::json!({
-                "model": "llama3.2:latest",
-                "messages": [{"role": "user", "content": planner_prompt}],
-                "stream": false,
-                "options": { "temperature": 0.1 }
-            });
-            
-            let mut sub_questions: Vec<String> = vec![prompt.clone()]; // Fallback
-            if let Ok(res) = embed_client.post("http://127.0.0.1:11434/api/chat").json(&planner_payload).send().await {
-                if let Ok(json) = res.json::<serde_json::Value>().await {
-                    if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                        let start = content.find('[');
-                        let end = content.rfind(']');
-                        if let (Some(s), Some(e)) = (start, end) {
-                            if s < e {
-                                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&content[s..=e]) {
-                                    if !parsed.is_empty() {
-                                        sub_questions = parsed;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            let _ = TRAINER_LOGS.send(format!("[Agente Planejador] Diretiva fracionada em {} missões. Lendo dossiê bruto...", sub_questions.len()));
-            
-            // Chunk the haystack
-            let mut all_chunks: Vec<String> = Vec::new();
-            let mut current_source = String::new();
-            for line in final_markdown.split("\n\n") {
-                let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed.len() < 40 { continue; }
-                if trimmed.starts_with("## Source:") {
-                    current_source = trimmed.to_string();
-                } else {
-                    all_chunks.push(format!("{}\n{}", current_source, trimmed));
-                }
-            }
-            
-            let mut progressive_dossier = String::new();
-            
-            // Loop through Agent 2: Extractor
-            for (idx, sq) in sub_questions.iter().enumerate() {
-                if wait_or_cancel(2, &token).await { return; }
-                let _ = TRAINER_LOGS.send(format!("[Vetorizador {}/{}] Minerando: '{}'", idx+1, sub_questions.len(), sq));
-                
-                if let Some(sq_embed) = get_embedding(&embed_client, sq, "llama3.2:latest").await {
-                    let mut scored_chunks: Vec<(f32, String)> = Vec::new();
-                    for chunk in &all_chunks {
-                        if wait_or_cancel(2, &token).await { return; }
-                        if let Some(chunk_embed) = get_embedding(&embed_client, chunk, "llama3.2:latest").await {
-                            let score = cosine_similarity(&sq_embed, &chunk_embed);
-                            scored_chunks.push((score, chunk.clone()));
-                        }
-                    }
-                    
-                    scored_chunks.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-                    let top_5: Vec<String> = scored_chunks.into_iter().take(5).map(|(_, text)| text).collect();
-                    let local_context = top_5.join("\n\n");
-                    
-                    let _ = TRAINER_LOGS.send(format!("[Extrator {}/{}] Analisando 5 fragmentos retidos...", idx+1, sub_questions.len()));
-                    let extractor_prompt = format!(
-                        "Responda à pergunta abaixo baseando-se APENAS no contexto histórico fornecido. \n\
-                        Se a resposta final não puder ser extraída do texto, responda estritamente: 'DADO NÃO ENCONTRADO no contexto raspado'.\n\
-                        IMPORTANTE: Indique sempre a [Fonte: URL] de onde tirou o dado. Mantenha a resposta curta, direta e factual.\n\n\
-                        PERGUNTA:\n{}\n\n\
-                        CONTEXTO:\n{}", sq, local_context
-                    );
-                    
-                    let ext_payload = serde_json::json!({
-                        "model": "llama3.2:latest",
-                        "messages": [{"role": "user", "content": extractor_prompt}],
-                        "stream": false,
-                        "options": { "temperature": 0.0 }
-                    });
-                    
-                    if let Ok(res) = embed_client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await {
-                        if let Ok(json) = res.json::<serde_json::Value>().await {
-                            if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                                if !content.contains("DADO NÃO ENCONTRADO") {
-                                    progressive_dossier.push_str(&format!("### Sobre: {}\n{}\n\n", sq, content));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            if !progressive_dossier.trim().is_empty() {
-                final_markdown = progressive_dossier; 
-                let _ = TRAINER_LOGS.send("[Map-Reduce Completo] Dossiê limpo gerado. Encaminhando para Síntese Final...".to_string());
-            } else {
-                let _ = TRAINER_LOGS.send("[Map-Reduce Vazio] Extração rigorosa falhou (dados indiretos). Aplicando fallback...".to_string());
-                // Fallback to top 15 of standard prompt
-                 if let Some(prompt_embed) = get_embedding(&embed_client, &prompt, "llama3.2:latest").await {
-                    let mut scored_chunks: Vec<(f32, String)> = Vec::new();
-                    for chunk in all_chunks {
-                        if wait_or_cancel(2, &token).await { return; }
-                        if let Some(chunk_embed) = get_embedding(&embed_client, &chunk, "llama3.2:latest").await {
-                            scored_chunks.push((cosine_similarity(&prompt_embed, &chunk_embed), chunk));
-                        }
-                    }
-                    scored_chunks.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-                    final_markdown = scored_chunks.into_iter().take(15).map(|(_, text)| text).collect::<Vec<String>>().join("\n\n");
-                 }
-            }
-        }
 
-        // [STEP 2]: Synthesis Engine
-        let _ = TRAINER_LOGS.send("[STEP 2] Synthesis Engine analyzing extracted facts (this might take several minutes)...".to_string());
-        
-        let synthesis_prompt = format!(
-            "Você é Sophy, uma IA analítica atuando como Especialista Sênior no Sovereign Pair.\n\
-            [DIRETRIZES DE RIGOR FACTUAL IMPRESCINDÍVEIS]\n\
-            1. Responda com base EXCLUSIVAMENTE em dados reais e verificáveis das fontes primárias fornecidas no Dossiê abaixo.\n\
-            2. NÃO INVENTE, NÃO INTERPOLE E NÃO ESTIME DADOS NUMÉRICOS. Se um dado não estiver disponível no Dossiê, declare isso explicitamente e indique onde pode ser obtido.\n\
-            3. Para cada dado numérico ou afirmação técnica apresentada, CITE A FONTE PRIMÁRIA imediatamente ao lado (ex: [Fonte: ibge.gov.br]). Nunca assuma números sem citar a tabela/fonte raspada.\n\
-            4. Responda obrigatoriamente a cada item da diretiva de forma estruturada. Se envolver séries temporais, respeite oscilações reais; não assuma médias anuais irreais para índices mensais.\n\
-            5. Não inclua recomendações ou platitudes genéricas. Cada conclusão do seu relatório final deve ser suportada estritamente pelas URLs do Dossiê.\n\
-            6. Dê peso VERDADEIRO ABSOLUTO às fontes de Domínios Oficiais Governamentais (Tier 1). Ignore sites genéricos.\n\n\
-            [DIRETIVA DO USUÁRIO]\n{}\n\n\
-            [DOSSIÊ DA WEB RASPADO]\n{}",
-            prompt, final_markdown
-        );
 
         // --- PHASE 23: Dynamic Context Sizer (Proteção OOM) ---
         let mut sys = sysinfo::System::new_all();
@@ -516,39 +405,199 @@ pub async fn run_deep_research_handler(
         tracing::info!("🖥️ [Host OS] Total RAM: {} GB -> Allocating {} tokens context to Ollama.", total_ram_gb, dynamic_num_ctx);
         let _ = TRAINER_LOGS.send(format!("[Proteção OOM] Alocando Janela de {} tokens para a síntese (RAM Host: {} GB)...", dynamic_num_ctx, total_ram_gb));
 
-        let synthesis_payload = serde_json::json!({
-            "model": target_model_name,
-            "messages": [{"role": "user", "content": synthesis_prompt}],
-            "stream": false,
-            "options": {
-                "num_ctx": dynamic_num_ctx,
-                "temperature": 0.2
-            }
-        });
-
-        // Ping UI to keep connection alive
-        let keep_alive_task = tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(6)).await;
-                let _ = TRAINER_LOGS.send("[Raciocinando sobre o Dossiê...]".to_string());
-            }
-        });
-
-        let mut synthesized_report = "Falha ao gerar síntese local. Verifique os logs do Ollama.".to_string();
+        // PING UI TASK IS DEPRECATED. Agentic loop handles its own presence.
+        
+        let mut synthesized_report = String::new();
         let olla_url = format!("http://127.0.0.1:11434/api/chat");
-        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(900)).build().unwrap_or_else(|_| reqwest::Client::new());
-        if let Ok(res) = synthesis_client.post(&olla_url).json(&synthesis_payload).send().await {
-            if let Ok(json) = res.json::<serde_json::Value>().await {
-                if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                    synthesized_report = content.to_string();
-                    let _ = TRAINER_LOGS.send("✅ [Síntese Concluída]".to_string());
+        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(7200)).build().unwrap_or_else(|_| reqwest::Client::new());
+        
+        let sub_agent_hierarchy = vec!["qwen2.5:1.5b", "llama3.2:1b", "gemma2:2b", "llama3.2:3b", "llama3.2"];
+        let sub_agent_model = crate::api::discover_best_model(sub_agent_hierarchy, "llama3.2:latest").await;
+        
+        let mut all_sources = Vec::new();
+        
+        // --- THE AGENTIC LOOP (MAX 5 ITERATIONS TO PREVENT INFINITE LOOPS) ---
+        for cycle in 1..=5 {
+            if wait_or_cancel(200, &token).await { return; }
+            
+            let _ = TRAINER_LOGS.send(format!("🚀 [Loop ReAct - Ciclo {}/5] Invocando Mente Mestra ({})...", cycle, target_model_name));
+
+            let synthesis_payload = serde_json::json!({
+                "model": target_model_name,
+                "messages": messages,
+                "tools": tools_schema,
+                "stream": false,
+                "options": {
+                    "num_ctx": dynamic_num_ctx,
+                    "temperature": 0.05
                 }
+            });
+
+            if let Ok(res) = synthesis_client.post(&olla_url).json(&synthesis_payload).send().await {
+                if let Ok(json) = res.json::<serde_json::Value>().await {
+                    if let Some(msg_obj) = json.get("message") {
+                        // 1. O Modelo usou uma Ferramenta (Tool Call)?
+                        if let Some(tool_calls) = msg_obj.get("tool_calls").and_then(|t| t.as_array()) {
+                            let _ = TRAINER_LOGS.send(format!("⚙️ O Mestre ativou Tool Calling! ({}) funções detectadas.", tool_calls.len()));
+                            
+                            messages.push(msg_obj.clone()); // Adiciona o request do assistant no histórico
+
+                            for tc in tool_calls {
+                                if let Some(func) = tc.get("function") {
+                                    if func.get("name").and_then(|n| n.as_str()) == Some("dispatch_sub_researcher") {
+                                        let mut sq = func.get("arguments")
+                                            .and_then(|args| args.get("search_query"))
+                                            .and_then(|sq| sq.as_str())
+                                            .unwrap_or("general query")
+                                            .to_string();
+
+                                        // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
+                                        if sq.starts_with('{') && sq.contains("\"description\"") {
+                                            if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(&sq) {
+                                                if let Some(desc) = pseudo_json.get("description").and_then(|d| d.as_str()) {
+                                                    let _ = TRAINER_LOGS.send("🤖 [Cognitive Nanny] Desarmando alucinação de JSON Schema do Llama 3B no Tool Call...".to_string());
+                                                    sq = desc.to_string();
+                                                }
+                                            }
+                                        }
+
+                                        let _ = TRAINER_LOGS.send(format!("🧠 [Thought] Mestre despacha Aluno para: '{}'", sq));
+                                        
+                                        // Roda a extração rigorosamente restrita do Sub-Agente
+                                        let result = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), sub_agent_model.clone()).await;
+                                        all_sources.push(result.clone());
+                                        
+                                        let scaped_count = result.lines().filter(|l| l.starts_with("## Source:")).count();
+                                        if scaped_count > 0 {
+                                            let _ = TRAINER_LOGS.send(format!("[SCRAPED: {}]", scaped_count));
+                                        }
+
+                                        let _ = TRAINER_LOGS.send(format!("✅ [Sub-Agente] Retornou dados processados para a query '{}'", sq));
+                                        
+                                        // Devolve a resposta do Tool para a memória do Mestre
+                                        messages.push(serde_json::json!({
+                                            "role": "tool",
+                                            "content": result
+                                        }));
+                                    }
+                                }
+                            }
+                            // O loop continuará para a próxima inferência (o Qwen lerá a tool response e decidirá)
+                            continue;
+                        } 
+                        // 2. O Modelo entregou a resposta final em plain text!
+                        else if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
+                            // Babá Cognitiva: Roteamento Híbrido por Regex/Parsing (Fallback para 3B Low-End)
+                            if content.contains("\"dispatch_sub_researcher\"") && content.contains("\"search_query\"") {
+                                let _ = TRAINER_LOGS.send("🩺 [Cognitive Nanny] Vazamento de JSON detectado no output de texto! Interceptando rotina Low-End...".to_string());
+                                
+                                if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}')) {
+                                    if start < end {
+                                        let json_str = &content[start..=end];
+                                        if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(json_str) {
+                                            if let Some(params) = pseudo_json.get("parameters") {
+                                                if let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
+                                                    let _ = TRAINER_LOGS.send(format!("🧠 [Thought Nanny] Mestre Low-End despacha Aluno para: '{}'", sq));
+                                                    
+                                                    let sq_string = sq.to_string();
+                                                    let result = execute_sub_analyst(sq_string, engine_arc.clone(), embed_client.clone(), sub_agent_model.clone()).await;
+                                                    all_sources.push(result.clone());
+
+                                                    let _ = TRAINER_LOGS.send(format!("✅ [Sub-Agente Nanny] Retornou dados processados para a query '{}'", sq));
+                                                    
+                                                    messages.push(serde_json::json!({
+                                                        "role": "user",
+                                                        "content": format!("[SISTEMA INTERNO]: O Tool Call vazado foi executado manualmente pela Babá Cognitiva. Aqui estão os resultados deste passo:\n\n{}", result)
+                                                    }));
+                                                    
+                                                    continue; // Volta ao Agentic Loop iterativo
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Caso passe pela Nanny ou não tenha JSON vazado, finaliza o Chain of Thought.
+                            synthesized_report = content.to_string();
+                            let _ = TRAINER_LOGS.send("✅ [Síntese Concluída] O Mestre finalizou o Raciocínio (Chain of Thought exit).".to_string());
+                            
+                            if let (Some(eval_count), Some(eval_duration)) = (
+                                json.get("eval_count").and_then(|v| v.as_u64()),
+                                json.get("eval_duration").and_then(|v| v.as_u64())
+                            ) {
+                                if let Ok(mut tel) = telemetry_ptr.write() {
+                                    let duration_ms = (eval_duration / 1_000_000) as u128;
+                                    tel.record_session(eval_count as usize, duration_ms, &target_model_name);
+                                }
+                            }
+                            break; // Sai do Agentic Loop!
+                        }
+                    } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                        tracing::error!("❌ [Ollama Synthesizer ERRO]: {}", err);
+                        synthesized_report = format!("Falha ao gerar síntese local. Erro da API Ollama: {}", err);
+                        break;
+                    }
+                }
+            } else {
+                let _ = TRAINER_LOGS.send("❌ Erro de conexão com o Ollama no Loop Agentico.".to_string());
+                break;
             }
         }
-        
-        keep_alive_task.abort();
 
         if wait_or_cancel(500, &token).await { return; }
+
+        // [STEP 2]: Hallucination Filter 
+        let _ = TRAINER_LOGS.send("[STEP 2] Acionando Anti-Hallucination Filter...".to_string());
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await; // Simulation of LLM Validator delay
+
+        // --- Scribe Agent (Formatação Isolada para Low-End) ---
+        let final_markdown_report = if is_low_end {
+            let _ = TRAINER_LOGS.send("✍️ [The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
+            let scribe_prompt = format!(
+                "Você é The Scribe, um formatador técnico de elite do Sovereign Pair.\n\
+                [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
+                Abaixo estão Fatos Brutos e o Prompt Original do Usuário. Seu ÚNICO objetivo é criar um relatório Markdown detalhado, hiper-estruturado e visualmente atraente respondendo ao Prompt original, APENAS usando os fatos listados. Se os fatos não tiverem a resposta, diga que não há dados.\n\
+                \n[PROMPT DO USUÁRIO]: {}\n\n[FATOS BRUTOS COLETADOS PELA IA PESQUISADORA]:\n{}",
+                prompt, synthesized_report
+            );
+            
+            let scribe_hierarchy = vec![
+                "qwen2.5:14b", "gemma2:9b", "gemma2",
+                "llama3.1:8b", "llama3.1",
+                "qwen2.5:7b", "qwen2.5", "mistral", "mixtral"
+            ];
+            
+            let scribe_model = crate::api::discover_best_model(scribe_hierarchy, &target_model_name).await;
+            if scribe_model != target_model_name {
+                let _ = TRAINER_LOGS.send(format!("🧠 [Scribe Orchestrator] Auto-elevação de Córtex: Escalonando para '{}' visando formatar a resposta.", scribe_model));
+            }
+
+            let scribe_payload = serde_json::json!({
+                "model": scribe_model,
+                "messages": [
+                    {"role": "user", "content": scribe_prompt}
+                ],
+                "stream": false,
+                "options": {
+                    "num_ctx": 4096,
+                    "temperature": 0.1
+                }
+            });
+            
+            let mut formatted = synthesized_report.clone();
+            if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await {
+                if let Ok(json) = res.json::<serde_json::Value>().await {
+                    if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                        formatted = content.to_string();
+                        let _ = TRAINER_LOGS.send("✍️ ✅ [The Scribe] Formatação Markdown concluída!".to_string());
+                    }
+                }
+            }
+            formatted
+        } else {
+            synthesized_report.clone()
+        };
 
         // [STEP 3]: Vault Context Injector
         let _ = TRAINER_LOGS.send("[STEP 3] Vault Context Injector persisting artifact...".to_string());
@@ -564,20 +613,23 @@ pub async fn run_deep_research_handler(
             
         let md_path = artifacts_dir.join(format!("{}_{}.md", safe_filename, uuid::Uuid::new_v4().to_string().chars().take(4).collect::<String>()));
         
-        let source_links: Vec<String> = final_markdown.lines()
+        let mut source_links: Vec<String> = all_sources.join("\n").lines()
             .filter(|l| l.starts_with("## Source: "))
             .map(|l| format!("- {}", l.replace("## Source: ", "").trim()))
             .collect();
             
+        source_links.sort();
+        source_links.dedup();
+            
         let sources_block = if source_links.is_empty() {
-            "- Nenhuma fonte externa foi rastreada.".to_string()
+            "- Nenhuma fonte externa foi rastreada pelo Loop React.".to_string()
         } else {
             source_links.join("\n")
         };
         
         let md_content = format!(
             "# Deep Research Report\n\n**Directive:** {}\n\n>[!INFO] This artifact was autonomously generated by the Sovereign Deep Research loop.\n\n## Abstract (LLM Synthesis)\n{}\n\n---\n## 📚 Fontes Pesquisadas\n{}\n", 
-            prompt, synthesized_report, sources_block
+            prompt, final_markdown_report, sources_block
         );
         
         if let Err(e) = tokio::fs::write(&md_path, md_content).await {
@@ -655,7 +707,7 @@ pub async fn unsloth_monitor_sse_handler() -> Sse<impl Stream<Item = Result<Even
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
 }
 
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::RwLock;
 
 lazy_static! {
@@ -813,7 +865,7 @@ pub struct TrainerControlReq {
 }
 
 pub async fn trainer_control_handler(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(req): Json<TrainerControlReq>,
 ) -> impl IntoResponse {
     tracing::info!("🎛️ [Sovereign Trainer] RPC Command Recieved: {}", req.action);

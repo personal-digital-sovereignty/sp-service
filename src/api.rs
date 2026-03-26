@@ -46,6 +46,30 @@ async fn scrape_engine(client: &reqwest::Client, name: &str, url: &str, jitter_b
     }
     String::new()
 }
+// -------------------------------------------------------------
+// Autonomous Fleet Orchestrator (Phase 39)
+// -------------------------------------------------------------
+pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String {
+    let client = reqwest::Client::new();
+    if let Ok(res) = client.get("http://127.0.0.1:11434/api/tags").send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+                let available_names: Vec<&str> = models.iter()
+                    .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
+                    .collect();
+                
+                for ideal in hierarchy {
+                    if let Some(found) = available_names.iter().find(|&&n| n.contains(ideal)) {
+                        tracing::info!("✨ [Fleet Orchestrator] Modelo Dinâmico Elevado: '{}' (Alvo Encontrado: '{}')", found, ideal);
+                        return found.to_string();
+                    }
+                }
+            }
+        }
+    }
+    tracing::warn!("⚠️ [Fleet Orchestrator] Nenhum modelo da hierarquia encontrado. Fallback de Sobrevivência: '{}'", fallback);
+    fallback.to_string()
+}
 
 /// O Primeiro Controlador Cíbrido: Recebendo os Pensamentos do VS Code.
 pub async fn chat_completions_handler(
@@ -138,8 +162,9 @@ let mut resolved_model = requested_model.clone();
 // If OpenCode (or the IDE) injects commercial models blindly, we forcefully hijack 
 // them down to the Sovereign Private Mesh locally, ensuring NO 404 Ollama Panics on Factory Installs.
 if requested_model.to_lowercase().contains("gpt") || requested_model.to_lowercase().contains("claude") {
-    resolved_model = "llama3.2:latest".to_string(); // Safest local Default (1B/3B)
-    tracing::info!("🔄 Proxy OpenCode/IDE enviou modelo comercial [{}]. Hijacking forçado para Endpoint Soberano: [{}]", requested_model, resolved_model);
+    let hierarchy = vec!["qwen2.5:14b", "gemma2:9b", "gemma2", "llama3.1:8b", "llama3.1", "qwen2.5:7b", "qwen2.5", "llama3.2"];
+    resolved_model = discover_best_model(hierarchy, "llama3.2:latest").await;
+    tracing::info!("🔄 Proxy OpenCode/IDE enviou modelo comercial [{}]. Hijacking dinâmico para Endpoint Soberano: [{}]", requested_model, resolved_model);
 }
 
 if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(&state.db).await {

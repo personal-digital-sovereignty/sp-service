@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use adblock::engine::Engine;
 use adblock::lists::{FilterSet, ParseOptions};

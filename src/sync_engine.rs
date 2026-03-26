@@ -219,10 +219,13 @@ impl SyncEngine {
         
         let mut final_summary = fallback_summary.clone();
         
+        let sync_hierarchy = vec!["gemma2:9b", "gemma2", "llama3.1:8b", "llama3.1", "qwen2.5:7b", "qwen2.5", "llama3.2"];
+        let sync_model = crate::api::discover_best_model(sync_hierarchy, "llama3.2:latest").await;
+
         // Chamada direta pro Ollama garantindo autonomia do Rust Core
         if let Ok(resp) = client.post("http://127.0.0.1:11434/api/generate")
             .json(&serde_json::json!({
-                "model": "llama3.2:latest", // Exemplo fixo por segurança
+                "model": sync_model,
                 "prompt": prompt,
                 "stream": false
             }))
