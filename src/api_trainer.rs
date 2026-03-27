@@ -674,8 +674,8 @@ pub async fn run_deep_research_handler(
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
         let final_markdown_report = if all_sources.is_empty() {
-            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE HARD-KILL] Zero dados reais extraídos. Abortando Scribe para impedir alucinação matemática pesada.".to_string());
-            "OPERAÇÃO ABORTADA PELA BABÁ COGNITIVA: DADOS NUMÉRICOS INACESSÍVEIS. A web retornou tabelas vazias ou bloqueadas por JavaScript. PROIBIDA A INVENÇÃO DE DADOS ESTATÍSTICOS.".to_string()
+            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE HARD-KILL] Zero dados extrativos validados pela Trindade. Acionando Babá Cognitiva mas preservando o raciocínio final do Mestre.".to_string());
+            format!(">[!WARNING] **OPERAÇÃO ABORTADA PELA BABÁ COGNITIVA:** Nenhuma fonte web passou no crivo da Inquisição Cíbrida (Vazio Epistêmico ou WAF Intransponível). Para satisfazer a política de Defesa 'Anti-Alucinação Numérica', a dedução pura da IA está isolada abaixo.\n\n### Último Raciocínio (Chain of Thought):\n> {}", synthesized_report)
         } else if is_low_end {
             let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
             let scribe_prompt = format!(
