@@ -146,6 +146,13 @@ pub async fn init_pool() -> SqlitePool {
             status TEXT DEFAULT 'Operational',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS model_hallucinations (
+            id TEXT PRIMARY KEY,
+            model_name TEXT NOT NULL,
+            lies_detected INTEGER DEFAULT 0,
+            queries_processed INTEGER DEFAULT 0,
+            last_lied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
                  "
     ).execute(&pool).await;
 

@@ -4,6 +4,11 @@ use std::time::Duration;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+lazy_static::lazy_static! {
+    // 🛡️ [CHROME OOM GUARD] Limita a 2 o número MÁXIMO de Chromium rodando simultaneamente em todos os Requests!
+    static ref CHROME_SEMAPHORE: tokio::sync::Semaphore = tokio::sync::Semaphore::new(2);
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TrustMatrix {
     pub tier1: Vec<String>,
@@ -41,7 +46,7 @@ struct ScoredUrl {
 /// Blindada via Rust para injetar contexto externo ao RAG Cíbrido.
 pub struct DeepResearchEngine {
     client: Client,
-    db_pool: Option<sqlx::SqlitePool>,
+    pub db_pool: Option<sqlx::SqlitePool>,
     adblock_engine: Option<crate::adblocker::AdblockHandle>,
     trust_matrix: TrustMatrix,
 }
@@ -83,7 +88,62 @@ impl DeepResearchEngine {
 
         let html_content = response.text().await.map_err(|e| format!("Failed to read HTML body: {}", e))?;
         
-        Ok(self.sanitize_to_markdown(&html_content))
+        let markdown = self.sanitize_to_markdown(&html_content);
+        
+        // --- EPISTEMIC FALLBACK (JS/SPA DEFEATER) ---
+        // Se a página retornou menos de 400 caracteres de "texto líquido" OU clamou por javascript
+        let is_suspect_spa = markdown.len() < 400 
+            || markdown.to_lowercase().contains("enable javascript") 
+            || markdown.to_lowercase().contains("javascript is required")
+            || markdown.to_lowercase().contains("please wait...");
+            
+        if is_suspect_spa {
+            tracing::warn!("⚠️ [The Nurse / Scraper] Vazio Epistêmico Detectado! SPA local suspeito ({} bytes extraídos). Invocando Chrome Headless para rendering...", markdown.len());
+            if let Ok(js_markdown) = self.scrape_with_headless_chrome(url).await
+                && js_markdown.len() > markdown.len() {
+                    tracing::info!("✅ [Sovereign Headless Engine] Sucesso: Payload orgânico escalou para {} bytes via V8 Engine.", js_markdown.len());
+                    return Ok(js_markdown);
+                }
+        }
+        
+        Ok(markdown)
+    }
+
+    /// Extrator Pesado via Chromium Headless (Puppeteer Rust-Native)
+    async fn scrape_with_headless_chrome(&self, url: &str) -> Result<String, String> {
+        let url_clone = url.to_string();
+        
+        // 🛡️ OOM Guard: Aguarda vaga no Semaphore para impedir RAM Thrashing
+        let _permit = CHROME_SEMAPHORE.acquire().await.map_err(|e| format!("Falha de Semaphore V8: {}", e))?;
+        
+        tokio::task::spawn_blocking(move || {
+            use headless_chrome::{Browser, LaunchOptions};
+            
+            let options = LaunchOptions::default_builder()
+                .headless(true)
+                .sandbox(false)
+                .idle_browser_timeout(std::time::Duration::from_secs(45))
+                .build()
+                .map_err(|e| e.to_string())?;
+
+            let browser = Browser::new(options).map_err(|e| e.to_string())?;
+            let tab = browser.new_tab().map_err(|e| e.to_string())?;
+            
+            tab.navigate_to(&url_clone).map_err(|e| e.to_string())?;
+            tab.wait_until_navigated().map_err(|e| e.to_string())?;
+            
+            // Fica dormindo 5.5 segundos para garantir que a Hidratação em React/Vue terminou no frontend alvo
+            std::thread::sleep(std::time::Duration::from_millis(5500)); 
+            
+            // Extraction via Native V8 JS Engine bypassing non-semantic DOM trees
+            let js_eval = tab.evaluate("document.body.innerText", false)
+                .map_err(|e| e.to_string())?;
+                
+            let text = js_eval.value.and_then(|v| v.as_str().map(|s| s.to_string())).unwrap_or_default();
+            Ok(text)
+        })
+        .await
+        .map_err(|e| format!("Thread Panic no Chrome: {}", e))?
     }
 
     /// Limpa o HTML ruidoso (scripts, estilos, anúncios) e extrai o texto principal em formato Semântico (Markdown-like).
@@ -438,5 +498,46 @@ mod tests {
         assert!(!markdown.contains("body { color: red; }"), "Scraper leaked raw CSS text!");
         assert!(!markdown.contains("Ignored Header Navigation"), "Scraper leaked <header> navigation!");
         assert!(!markdown.contains("Adverts here"), "Scraper leaked <aside> tags!");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_spa_javascript_escalation() {
+        println!("🚀 [SPA Stress Test] Inicializando o Motor Cíbrido...");
+        let engine = DeepResearchEngine::new(None, None, None);
+        
+        let urls = vec![
+            "https://www.b3.com.br/pt_br/market-data-e-indices/servicos-de-dados/market-data/cotacoes/cotacoes/",
+            "https://www.bcb.gov.br/",
+        ];
+        
+        let mut tasks = Vec::new();
+
+        for url in urls {
+            let target = url.to_string();
+            
+            let task = tokio::spawn(async move {
+                let engine_local = DeepResearchEngine::new(None, None, None);
+                println!("📡 [SPA Test] Disparando Requisição Assíncrona para: {}", target);
+                let result = engine_local.scrape_url(&target).await;
+                
+                assert!(result.is_ok(), "❌ Falha crítica ao extrair dados de: {}", target);
+                let content = result.unwrap();
+                
+                println!("✅ Extração Completa para {}! Tamanho da Payload Markdown: {} bytes", target, content.len());
+                
+                assert!(content.len() > 200, "⚠️ [SPA Test] O Retorno do Scraper foi microscópico. Renderização falha? Conteúdo: {:?}", content);
+                content
+            });
+            
+            tasks.push(task);
+        }
+        
+        let results = futures_util::future::join_all(tasks).await;
+        
+        for res in results {
+            assert!(res.is_ok(), "Tokio Thread Panic during test");
+        }
+        
+        println!("🏆 [SPA Stress Test] Concluído com Sucesso! Semaphore Headless_Chrome Operacional.");
     }
 }

@@ -141,6 +141,7 @@ async fn main() {
     let app = Router::new()
         // ------------------ LLMOps Telemetry & Logs ------------------
         .route("/v1/analytics/telemetry", axum::routing::get(api::telemetry_snapshot_handler))
+        .route("/v1/analytics/hallucinations", axum::routing::get(api_trainer::get_hallucinations_ledger_handler))
         .route("/v1/logs", axum::routing::get(api::realtime_logs_handler))
         // ------------------ RAG & SOVEREIGN DRIVES (Workspaces O.S) --------------------------
         .route("/v1/workspaces", axum::routing::get(api_vault::list_workspaces_handler)

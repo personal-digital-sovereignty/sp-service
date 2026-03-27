@@ -816,6 +816,7 @@ mod tests {
         let (log_sender, _) = tokio::sync::broadcast::channel(16);
         let (sync_sender, _) = tokio::sync::broadcast::channel(16);
         
+        let (adblock_tx, _) = tokio::sync::mpsc::channel(1);
         let state = Arc::new(crate::AppState { 
             db, 
             http_client: reqwest::Client::new(),
@@ -823,6 +824,7 @@ mod tests {
             telemetry: std::sync::Arc::new(std::sync::RwLock::new(crate::telemetry::TelemetryState::new())),
             log_sender,
             sync_sender,
+            adblock_engine: crate::adblocker::AdblockHandle { sender: adblock_tx },
         });
 
         // 1. Test POST /workspaces (Creation)
@@ -850,6 +852,7 @@ mod tests {
         let (log_sender, _) = tokio::sync::broadcast::channel(16);
         let (sync_sender, _) = tokio::sync::broadcast::channel(16);
 
+        let (adblock_tx, _) = tokio::sync::mpsc::channel(1);
         let state = Arc::new(crate::AppState {
             db,
             http_client: reqwest::Client::new(),
@@ -857,6 +860,7 @@ mod tests {
             telemetry: std::sync::Arc::new(std::sync::RwLock::new(crate::telemetry::TelemetryState::new())),
             log_sender,
             sync_sender,
+            adblock_engine: crate::adblocker::AdblockHandle { sender: adblock_tx },
         });
 
         let app = axum::Router::new()

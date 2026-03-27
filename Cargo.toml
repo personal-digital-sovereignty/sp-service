@@ -49,6 +49,7 @@ sysinfo = "0.38.4"
 async-stream = "0.3.6"
 tokio-util = "0.7.18"
 adblock = "0.12.1"
+headless_chrome = "1.0.21"
 
 [dev-dependencies]
 tempfile = "3.10.1"

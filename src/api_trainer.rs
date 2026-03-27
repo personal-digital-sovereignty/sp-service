@@ -80,9 +80,9 @@ pub async fn run_distillation_handler(
     
     // Dispara via Threadpool para não travar a call HTTP do Client
     tokio::spawn(async move {
-        let _ = TRAINER_LOGS.send(format!("🚀 Extraindo corpus de conhecimento local do Sensus Vault (Epochs: {}, Batch: {})...", req.epochs, req.batch_size));
+        let _ = TRAINER_LOGS.send(format!("Extraindo corpus de conhecimento local do Sensus Vault (Epochs: {}, Batch: {})...", req.epochs, req.batch_size));
         tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-        let _ = TRAINER_LOGS.send("✅ Sensus > JSONL Data Exportado (Target: /tmp/sovereign-pair/distill_vault.jsonl)".to_string());
+        let _ = TRAINER_LOGS.send("Sensus > JSONL Data Exportado (Target: /tmp/sovereign-pair/distill_vault.jsonl)".to_string());
         tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
 
         let client = reqwest::Client::new();
@@ -93,7 +93,7 @@ pub async fn run_distillation_handler(
             "stream": true
         });
 
-        let _ = TRAINER_LOGS.send(format!("🚀 Acionando Roteamento Distilado: {} >> {}", teacher, student));
+        let _ = TRAINER_LOGS.send(format!("Acionando Roteamento Distilado: {} >> {}", teacher, student));
 
         match client.post(&endpoint).json(&payload).send().await {
             Ok(res) if res.status().is_success() => {
@@ -106,26 +106,26 @@ pub async fn run_distillation_handler(
                                     if !line.trim().is_empty()
                                         && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
                                             && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
-                                                let _ = TRAINER_LOGS.send(format!("📦 [Layer Sync]: {}", status));
+                                                let _ = TRAINER_LOGS.send(format!("[Layer Sync]: {}", status));
                                             }
                                 }
                             }
                         },
                         Err(_) => {
-                            let _ = TRAINER_LOGS.send("⚠️ Erro de rede ao processar os tensores remotos.".to_string());
+                            let _ = TRAINER_LOGS.send("Erro de rede ao processar os tensores remotos.".to_string());
                             break;
                         }
                     }
                 }
-                let _ = TRAINER_LOGS.send(format!("✅ Pipeline de Distillation finalizada! Modelo '{}' Cíbrido agora está imortalizado localmente.", student));
+                let _ = TRAINER_LOGS.send(format!("Pipeline de Distillation finalizada! Modelo '{}' Cíbrido agora está imortalizado localmente.", student));
             },
             Ok(err_res) => {
                 let status = err_res.status();
                 let txt = err_res.text().await.unwrap_or_default();
-                let _ = TRAINER_LOGS.send(format!("❌ Falha do Ollama Engine: HTTP {} - {}", status, txt));
+                let _ = TRAINER_LOGS.send(format!("Falha do Ollama Engine: HTTP {} - {}", status, txt));
             },
             Err(e) => {
-                let _ = TRAINER_LOGS.send(format!("❌ Fatal: Falha de Conexão com Ollama: {}", e));
+                let _ = TRAINER_LOGS.send(format!("Fatal: Falha de Conexão com Ollama: {}", e));
             }
         }
     });
@@ -141,7 +141,7 @@ pub async fn run_finetuning_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<FineTuningReq>,
 ) -> impl IntoResponse {
-    tracing::info!("🔥 [Sovereign Trainer] Fine-Tuning requested on {} with {}", req.base_model, req.dataset_name);
+    tracing::info!("[Sovereign Trainer] Fine-Tuning requested on {} with {}", req.base_model, req.dataset_name);
     
     // Reaproveita a mesma lógica de criação (já que Ollama não possui um /api/train nativo yet)
     // Para provar conceito, passaremos pra ele fazer pull de um novo arquivo Misto:
@@ -152,11 +152,11 @@ pub async fn run_finetuning_handler(
     let name = format!("{}-tuned", req.base_model);
     
     tokio::spawn(async move {
-        let _ = TRAINER_LOGS.send(format!("🚀 Compilando Dataset Sensus Vault '{}' para JSONL...", req.dataset_name));
+        let _ = TRAINER_LOGS.send(format!("Compilando Dataset Sensus Vault '{}' para JSONL...", req.dataset_name));
         tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
-        let _ = TRAINER_LOGS.send(format!("✅ JSONL exportado para /tmp/sovereign-pair/{}.jsonl", req.dataset_name));
+        let _ = TRAINER_LOGS.send(format!("JSONL exportado para /tmp/sovereign-pair/{}.jsonl", req.dataset_name));
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        let _ = TRAINER_LOGS.send(format!("🚀 Iniciando subprocess Unsloth: LR={}, LoRA_Rank={}, BatchSize={}", req.learning_rate, req.lora_rank, req.batch_size));
+        let _ = TRAINER_LOGS.send(format!("Iniciando subprocess Unsloth: LR={}, LoRA_Rank={}, BatchSize={}", req.learning_rate, req.lora_rank, req.batch_size));
 
         let client = reqwest::Client::new();
         let payload = serde_json::json!({
@@ -166,7 +166,7 @@ pub async fn run_finetuning_handler(
             "stream": true
         });
 
-        let _ = TRAINER_LOGS.send(format!("🔥 Treinamento LoRA Acoplado Iniciando: {} -> {}", base, name));
+        let _ = TRAINER_LOGS.send(format!("Treinamento LoRA Acoplado Iniciando: {} -> {}", base, name));
 
         match client.post(&endpoint).json(&payload).send().await {
             Ok(res) if res.status().is_success() => {
@@ -179,7 +179,7 @@ pub async fn run_finetuning_handler(
                                     if !line.trim().is_empty()
                                         && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
                                             && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
-                                                let _ = TRAINER_LOGS.send(format!("⚙️ [Epoch Tensor Swap]: {}", status));
+                                                let _ = TRAINER_LOGS.send(format!("[Epoch Tensor Swap]: {}", status));
                                             }
                                 }
                             }
@@ -187,13 +187,13 @@ pub async fn run_finetuning_handler(
                         Err(_) => break,
                     }
                 }
-                let _ = TRAINER_LOGS.send(format!("✅ Treinamento LoRA Aplicado! Novo artefato GGUF ({}) escrito no OLLAMA_MODELS_PATH.", name));
+                let _ = TRAINER_LOGS.send(format!("Treinamento LoRA Aplicado! Novo artefato GGUF ({}) escrito no OLLAMA_MODELS_PATH.", name));
             },
             Err(e) => {
-                let _ = TRAINER_LOGS.send(format!("❌ Fatal: Fine-Tuning falhou ao inferir o Ollama: {}", e));
+                let _ = TRAINER_LOGS.send(format!("Fatal: Fine-Tuning falhou ao inferir o Ollama: {}", e));
             }
             _ => {
-                let _ = TRAINER_LOGS.send("❌ Resposta inesperada ao simular fine-tuning.".to_string());
+                let _ = TRAINER_LOGS.send("Resposta inesperada ao simular fine-tuning.".to_string());
             }
         }
     });
@@ -219,7 +219,7 @@ async fn wait_or_cancel(ms: u64, token: &CancellationToken) -> bool {
     tokio::select! {
         _ = tokio::time::sleep(tokio::time::Duration::from_millis(ms)) => false,
         _ = token.cancelled() => {
-            let _ = TRAINER_LOGS.send("⚠️ [DEEP_RESEARCH] ABORTED BY COMMANDER.".to_string());
+            let _ = TRAINER_LOGS.send("[DEEP_RESEARCH] ABORTED BY COMMANDER.".to_string());
             true
         }
     }
@@ -237,23 +237,20 @@ async fn execute_sub_analyst(
     // Condenser to help bypassing
     let cond_prompt = format!("Reduza a pergunta a seguir em uma string de busca enxuta (max 5 palavras). Responda apenas com a string pura. Pergunta: '{}'", query);
     let cond_payload = serde_json::json!({"model": sub_agent_model, "messages": [{"role": "user", "content": cond_prompt}], "stream": false, "options": {"temperature": 0.0}});
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&cond_payload).send().await {
-        if let Ok(json) = res.json::<serde_json::Value>().await {
-            if let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&cond_payload).send().await
+        && let Ok(json) = res.json::<serde_json::Value>().await
+            && let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                 let clean = c.replace("\"", "").replace("'", "").trim().to_string();
                 if clean.len() < 80 { search_query = clean; }
             }
-        }
-    }
 
     let mut raw_student_md = String::new();
     if let Ok(links) = engine_arc.search_web(&search_query).await {
         for link in links.into_iter().take(3) {
-            if let Ok(md) = engine_arc.scrape_url(&link).await {
-                if md.len() > 100 {
+            if let Ok(md) = engine_arc.scrape_url(&link).await
+                && md.len() > 100 {
                     raw_student_md.push_str(&format!("## Source: {}\n{}\n\n", link, md.chars().take(2500).collect::<String>()));
                 }
-            }
         }
     }
 
@@ -275,13 +272,11 @@ async fn execute_sub_analyst(
     });
 
     let mut distilled_text = "Falha do aluno ao purificar.".to_string();
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await {
-        if let Ok(json) = res.json::<serde_json::Value>().await {
-            if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await
+        && let Ok(json) = res.json::<serde_json::Value>().await
+            && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                 distilled_text = content.to_string();
             }
-        }
-    }
     
     let mut sources_used = String::new();
     for line in raw_student_md.lines().filter(|l| l.starts_with("## Source: ")) {
@@ -402,13 +397,13 @@ pub async fn run_deep_research_handler(
             65536
         };
 
-        tracing::info!("🖥️ [Host OS] Total RAM: {} GB -> Allocating {} tokens context to Ollama.", total_ram_gb, dynamic_num_ctx);
+        tracing::info!("[Host OS] Total RAM: {} GB -> Allocating {} tokens context to Ollama.", total_ram_gb, dynamic_num_ctx);
         let _ = TRAINER_LOGS.send(format!("[Proteção OOM] Alocando Janela de {} tokens para a síntese (RAM Host: {} GB)...", dynamic_num_ctx, total_ram_gb));
 
         // PING UI TASK IS DEPRECATED. Agentic loop handles its own presence.
         
         let mut synthesized_report = String::new();
-        let olla_url = format!("http://127.0.0.1:11434/api/chat");
+        let olla_url = "http://127.0.0.1:11434/api/chat".to_string();
         let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(7200)).build().unwrap_or_else(|_| reqwest::Client::new());
         
         // --- PHASE 41: TRINITY INQUISITION (QWEN, DEEPSEEK, PHI) ---
@@ -426,7 +421,7 @@ pub async fn run_deep_research_handler(
         for cycle in 1..=5 {
             if wait_or_cancel(200, &token).await { return; }
             
-            let _ = TRAINER_LOGS.send(format!("🚀 [Loop ReAct - Ciclo {}/5] Invocando Mente Mestra ({})...", cycle, target_model_name));
+            let _ = TRAINER_LOGS.send(format!("[Loop ReAct - Ciclo {}/5] Invocando Mente Mestra ({})...", cycle, target_model_name));
 
             let synthesis_payload = serde_json::json!({
                 "model": target_model_name,
@@ -444,13 +439,13 @@ pub async fn run_deep_research_handler(
                     if let Some(msg_obj) = json.get("message") {
                         // 1. O Modelo usou uma Ferramenta (Tool Call)?
                         if let Some(tool_calls) = msg_obj.get("tool_calls").and_then(|t| t.as_array()) {
-                            let _ = TRAINER_LOGS.send(format!("⚙️ O Mestre ativou Tool Calling! ({}) funções detectadas.", tool_calls.len()));
+                            let _ = TRAINER_LOGS.send(format!("O Mestre ativou Tool Calling! ({}) funções detectadas.", tool_calls.len()));
                             
                             messages.push(msg_obj.clone()); // Adiciona o request do assistant no histórico
 
                             for tc in tool_calls {
-                                if let Some(func) = tc.get("function") {
-                                    if func.get("name").and_then(|n| n.as_str()) == Some("dispatch_sub_researcher") {
+                                if let Some(func) = tc.get("function")
+                                    && func.get("name").and_then(|n| n.as_str()) == Some("dispatch_sub_researcher") {
                                         let mut sq = func.get("arguments")
                                             .and_then(|args| args.get("search_query"))
                                             .and_then(|sq| sq.as_str())
@@ -458,16 +453,14 @@ pub async fn run_deep_research_handler(
                                             .to_string();
 
                                         // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
-                                        if sq.starts_with('{') && sq.contains("\"description\"") {
-                                            if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(&sq) {
-                                                if let Some(desc) = pseudo_json.get("description").and_then(|d| d.as_str()) {
-                                                    let _ = TRAINER_LOGS.send("🤖 [Cognitive Nanny] Desarmando alucinação de JSON Schema do Llama 3B no Tool Call...".to_string());
+                                        if sq.starts_with('{') && sq.contains("\"description\"")
+                                            && let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(&sq)
+                                                && let Some(desc) = pseudo_json.get("description").and_then(|d| d.as_str()) {
+                                                    let _ = TRAINER_LOGS.send("[Cognitive Nanny] Desarmando alucinação de JSON Schema do Llama 3B no Tool Call...".to_string());
                                                     sq = desc.to_string();
                                                 }
-                                            }
-                                        }
 
-                                        let _ = TRAINER_LOGS.send(format!("⚖️ [Trinity Inquisition] Acareamento Paralelo (Quórum 2/3): Surgeon ({}), Reasoner ({}) e Auditor CoT ({}).", sub_model_surgeon, sub_model_reasoner, sub_model_cot));
+                                        let _ = TRAINER_LOGS.send(format!("[Trinity Inquisition] Acareamento Paralelo (Quórum 2/3): Surgeon ({}), Reasoner ({}) e Auditor CoT ({}).", sub_model_surgeon, sub_model_reasoner, sub_model_cot));
                                         
                                         // Roda a extração rigorosamente restrita da Trindade EM PARALELO
                                         let (res_surg, res_reas, res_cot) = tokio::join!(
@@ -492,7 +485,7 @@ pub async fn run_deep_research_handler(
                                             
                                             // Se houve 1 mentiroso... pune ele!
                                             if !liar.is_empty() {
-                                                let _ = TRAINER_LOGS.send(format!("🚨 [Hallucination Ledger] MENTIRA DETECTADA NA TRINDADE! O modelo '{}' alucinou predições numéricas enquanto os outros dois provaram que o HTML estava vazio.", liar));
+                                                let _ = TRAINER_LOGS.send(format!("[Hallucination Ledger] MENTIRA DETECTADA NA TRINDADE! O modelo '{}' alucinou predições numéricas enquanto os outros dois provaram que o HTML estava vazio.", liar));
                                                 if let Some(pool) = &engine_arc.db_pool {
                                                     let uuid_str = uuid::Uuid::new_v4().to_string();
                                                     let _ = sqlx::query("
@@ -520,13 +513,13 @@ pub async fn run_deep_research_handler(
                                             }
                                             
                                             if divergence {
-                                                let _ = TRAINER_LOGS.send("🚨 [Hallucination Ledger] DIVERGÊNCIA SEVERA NO QUÓRUM! Os modelos não concordaram no payload extraído.".to_string());
-                                                "🚨 DADOS INCONSISTENTES NA TRINDADE: O HTML parecia retornar dados, mas os Inquisidores divergiram pesadamente na leitura da tabela. Não confie nessa extração.".to_string()
+                                                let _ = TRAINER_LOGS.send("[Hallucination Ledger] DIVERGÊNCIA SEVERA NO QUÓRUM! Os modelos não concordaram no payload extraído.".to_string());
+                                                "DADOS INCONSISTENTES NA TRINDADE: O HTML parecia retornar dados, mas os Inquisidores divergiram pesadamente na leitura da tabela. Não confie nessa extração.".to_string()
                                             } else {
                                                 // Tudo Certo! A gente confia Primordialmente no Surgeon/Anchor para a formatação final.
                                                 let validated = if !surg_failed { res_surg.clone() } else { ok_results[0].clone() };
                                                 all_sources.push(validated.clone());
-                                                let _ = TRAINER_LOGS.send("✅ [Trinity Inquisition] Extração Validada por Quórum Majoritário!".to_string());
+                                                let _ = TRAINER_LOGS.send("[Trinity Inquisition] Extração Validada por Quórum Majoritário!".to_string());
                                                 validated
                                             }
                                         };
@@ -536,7 +529,7 @@ pub async fn run_deep_research_handler(
                                             let _ = TRAINER_LOGS.send(format!("[SCRAPED: {}]", scaped_count));
                                         }
 
-                                        let _ = TRAINER_LOGS.send(format!("✅ [Cognitive Nanny] Acareamento resolvido para a query '{}'", sq));
+                                        let _ = TRAINER_LOGS.send(format!("[Cognitive Nanny] Acareamento resolvido para a query '{}'", sq));
                                         
                                         // Devolve a resposta do Tool para a memória do Mestre
                                         messages.push(serde_json::json!({
@@ -544,27 +537,26 @@ pub async fn run_deep_research_handler(
                                             "content": final_result
                                         }));
                                     }
-                                }
                             }
                             // O loop continuará para a próxima inferência (o Qwen lerá a tool response e decidirá)
                             continue;
                         } 
                         // 2. O Modelo entregou a resposta final em plain text!
                         else if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
-                            // Babá Cognitiva: Roteamento Híbrido por Regex/Parsing (Fallback para 3B Low-End)
+                            // Firewall Cognitivo: Roteamento Híbrido por Regex/Parsing (Fallback para 3B Low-End)
                             if content.contains("\"dispatch_sub_researcher\"") && content.contains("\"search_query\"") {
-                                let _ = TRAINER_LOGS.send("🩺 [Cognitive Nanny] Vazamento de JSON detectado no output de texto! Interceptando rotina Low-End...".to_string());
+                                let _ = TRAINER_LOGS.send("[Cognitive Nanny] Vazamento de JSON detectado no output de texto! Interceptando rotina Low-End...".to_string());
                                 
-                                if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}')) {
-                                    if start < end {
+                                if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}'))
+                                    && start < end {
                                         let json_str = &content[start..=end];
-                                        if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                            if let Some(params) = pseudo_json.get("parameters") {
-                                                if let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
-                                                    let _ = TRAINER_LOGS.send(format!("🧠 [Thought Nanny] Mestre Low-End despacha Aluno para: '{}'", sq));
+                                        if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(json_str)
+                                            && let Some(params) = pseudo_json.get("parameters")
+                                                && let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
+                                                    let _ = TRAINER_LOGS.send(format!("[Thought Nanny] Mestre Low-End despacha Aluno para: '{}'", sq));
                                                     
                                                     let sq_string = sq.to_string();
-                                                    let _ = TRAINER_LOGS.send(format!("⚖️ [Trinity Inquisition] Acareamento Paralelo (Quórum 2/3) FALLBACK: Surgeon ({}), Reasoner ({}) e Auditor CoT ({}).", sub_model_surgeon, sub_model_reasoner, sub_model_cot));
+                                                    let _ = TRAINER_LOGS.send(format!("[Trinity Inquisition] Acareamento Paralelo (Quórum 2/3) FALLBACK: Surgeon ({}), Reasoner ({}) e Auditor CoT ({}).", sub_model_surgeon, sub_model_reasoner, sub_model_cot));
                                                     
                                                     let (res_surg, res_reas, res_cot) = tokio::join!(
                                                         execute_sub_analyst(sq_string.clone(), engine_arc.clone(), embed_client.clone(), sub_model_surgeon.clone()),
@@ -585,7 +577,7 @@ pub async fn run_deep_research_handler(
                                                         if !cot_failed { liar = sub_model_cot.clone(); }
                                                         
                                                         if !liar.is_empty() {
-                                                            let _ = TRAINER_LOGS.send(format!("🚨 [Hallucination Ledger] MENTIRA DETECTADA (Gatilho Low-End)! O modelo '{}' alucinou predições numéricas.", liar));
+                                                            let _ = TRAINER_LOGS.send(format!("[Hallucination Ledger] MENTIRA DETECTADA (Gatilho Low-End)! O modelo '{}' alucinou predições numéricas.", liar));
                                                             if let Some(pool) = &engine_arc.db_pool {
                                                                 let uuid_str = uuid::Uuid::new_v4().to_string();
                                                                 let _ = sqlx::query("
@@ -607,8 +599,8 @@ pub async fn run_deep_research_handler(
                                                         } else { false };
                                                         
                                                         if divergence {
-                                                            let _ = TRAINER_LOGS.send("🚨 [Hallucination Ledger] DIVERGÊNCIA SEVERA LOW-END NO QUÓRUM!".to_string());
-                                                            "🚨 DADOS INCONSISTENTES NO ACAREAMENTO: O HTML parecia retornar dados, mas os Inquisidores divergiram pesadamente. Não confie nessa extração.".to_string()
+                                                            let _ = TRAINER_LOGS.send("[Hallucination Ledger] DIVERGÊNCIA SEVERA LOW-END NO QUÓRUM!".to_string());
+                                                            "DADOS INCONSISTENTES NO ACAREAMENTO: O HTML parecia retornar dados, mas os Inquisidores divergiram pesadamente. Não confie nessa extração.".to_string()
                                                         } else {
                                                             let validated = if !surg_failed { res_surg.clone() } else { ok_results[0].clone() };
                                                             all_sources.push(validated.clone());
@@ -616,44 +608,40 @@ pub async fn run_deep_research_handler(
                                                         }
                                                     };
 
-                                                    let _ = TRAINER_LOGS.send(format!("✅ [Cognitive Nanny] Acareamento Low-End da Trindade processado."));
+                                                    let _ = TRAINER_LOGS.send("[Cognitive Nanny] Acareamento Low-End da Trindade processado.".to_string());
                                                     
                                                     messages.push(serde_json::json!({
                                                         "role": "user",
-                                                        "content": format!("[SISTEMA INTERNO]: O Tool Call vazado foi executado manualmente pela Babá Cognitiva. Aqui estão os resultados deste passo:\n\n{}", final_result)
+                                                        "content": format!("[SISTEMA INTERNO]: O Tool Call vazado foi executado manualmente pela Firewall Cognitivo. Aqui estão os resultados deste passo:\n\n{}", final_result)
                                                     }));
                                                     
                                                     continue; // Volta ao Agentic Loop iterativo
                                                 }
-                                            }
-                                        }
                                     }
-                                }
                             }
                             
                             // Caso passe pela Nanny ou não tenha JSON vazado, finaliza o Chain of Thought.
                             synthesized_report = content.to_string();
-                            let _ = TRAINER_LOGS.send("✅ [Síntese Concluída] O Mestre finalizou o Raciocínio (Chain of Thought exit).".to_string());
+                            let _ = TRAINER_LOGS.send("[Síntese Concluída] O Mestre finalizou o Raciocínio (Chain of Thought exit).".to_string());
                             
                             if let (Some(eval_count), Some(eval_duration)) = (
                                 json.get("eval_count").and_then(|v| v.as_u64()),
                                 json.get("eval_duration").and_then(|v| v.as_u64())
-                            ) {
-                                if let Ok(mut tel) = telemetry_ptr.write() {
+                            )
+                                && let Ok(mut tel) = telemetry_ptr.write() {
                                     let duration_ms = (eval_duration / 1_000_000) as u128;
                                     tel.record_session(eval_count as usize, duration_ms, &target_model_name);
                                 }
-                            }
                             break; // Sai do Agentic Loop!
                         }
                     } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
-                        tracing::error!("❌ [Ollama Synthesizer ERRO]: {}", err);
+                        tracing::error!("[Ollama Synthesizer ERRO]: {}", err);
                         synthesized_report = format!("Falha ao gerar síntese local. Erro da API Ollama: {}", err);
                         break;
                     }
                 }
             } else {
-                let _ = TRAINER_LOGS.send("❌ Erro de conexão com o Ollama no Loop Agentico.".to_string());
+                let _ = TRAINER_LOGS.send("Erro de conexão com o Ollama no Loop Agentico.".to_string());
                 break;
             }
         }
@@ -665,10 +653,10 @@ pub async fn run_deep_research_handler(
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
         let final_markdown_report = if all_sources.is_empty() {
-            let _ = TRAINER_LOGS.send("🚨 [EPISTEMIC VACCINE HARD-KILL] Zero dados reais extraídos. Abortando Scribe para impedir alucinação matemática pesada.".to_string());
+            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE HARD-KILL] Zero dados reais extraídos. Abortando Scribe para impedir alucinação matemática pesada.".to_string());
             "OPERAÇÃO ABORTADA PELA BABÁ COGNITIVA: DADOS NUMÉRICOS INACESSÍVEIS. A web retornou tabelas vazias ou bloqueadas por JavaScript. PROIBIDA A INVENÇÃO DE DADOS ESTATÍSTICOS.".to_string()
         } else if is_low_end {
-            let _ = TRAINER_LOGS.send("✍️ [The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
+            let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
             let scribe_prompt = format!(
                 "Você é The Scribe, um formatador técnico de elite do Sovereign Pair.\n\
                 [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
@@ -685,7 +673,7 @@ pub async fn run_deep_research_handler(
             
             let scribe_model = crate::api::discover_best_model(scribe_hierarchy, &target_model_name).await;
             if scribe_model != target_model_name {
-                let _ = TRAINER_LOGS.send(format!("🧠 [Scribe Orchestrator] Auto-elevação de Córtex: Escalonando para '{}' visando formatar a resposta.", scribe_model));
+                let _ = TRAINER_LOGS.send(format!("[Scribe Orchestrator] Auto-elevação de Córtex: Escalonando para '{}' visando formatar a resposta.", scribe_model));
             }
 
             let scribe_payload = serde_json::json!({
@@ -701,14 +689,12 @@ pub async fn run_deep_research_handler(
             });
             
             let mut formatted = synthesized_report.clone();
-            if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await {
-                if let Ok(json) = res.json::<serde_json::Value>().await {
-                    if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+            if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await
+                && let Ok(json) = res.json::<serde_json::Value>().await
+                    && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                         formatted = content.to_string();
-                        let _ = TRAINER_LOGS.send("✍️ ✅ [The Scribe] Formatação Markdown concluída!".to_string());
+                        let _ = TRAINER_LOGS.send("[The Scribe] Formatação Markdown concluída!".to_string());
                     }
-                }
-            }
             formatted
         } else {
             synthesized_report.clone()
@@ -748,9 +734,9 @@ pub async fn run_deep_research_handler(
         );
         
         if let Err(e) = tokio::fs::write(&md_path, md_content).await {
-            tracing::error!("❌ [Vault Router] Failed to persist Deep Research artifact to {:?}: {}", md_path, e);
+            tracing::error!("[Vault Router] Failed to persist Deep Research artifact to {:?}: {}", md_path, e);
         } else {
-            tracing::info!("✅ [Vault Router] Deep Research Artifact Synthesized: {:?}", md_path);
+            tracing::info!("[Vault Router] Deep Research Artifact Synthesized: {:?}", md_path);
         }
 
         let _ = TRAINER_LOGS.send("[STEP 4] Deep Research Protocol Complete.".to_string());
@@ -802,10 +788,10 @@ pub async fn unsloth_monitor_sse_handler() -> Sse<impl Stream<Item = Result<Even
                             yield Ok(Event::default().data(msg));
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            yield Ok(Event::default().data("⚠️ [Sovereign Watchdog] Buffer sobrecarregado. Alguns logs foram perdidos na renderização."));
+                            yield Ok(Event::default().data("[Sovereign Watchdog] Buffer sobrecarregado. Alguns logs foram perdidos na renderização."));
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            yield Ok(Event::default().data("❌ [Sovereign Watchdog] Canal Subjacente Destruído."));
+                            yield Ok(Event::default().data("[Sovereign Watchdog] Canal Subjacente Destruído."));
                             break;
                         }
                     }
@@ -852,17 +838,15 @@ fn get_system_vram_gb() -> (f64, f64) {
                 let path = entry.path();
                 let dev_path = path.join("device");
                 if dev_path.join("mem_info_vram_total").exists() {
-                    if let Ok(total_str) = std::fs::read_to_string(dev_path.join("mem_info_vram_total")) {
-                        if let Ok(total_bytes) = total_str.trim().parse::<u64>() {
+                    if let Ok(total_str) = std::fs::read_to_string(dev_path.join("mem_info_vram_total"))
+                        && let Ok(total_bytes) = total_str.trim().parse::<u64>() {
                             total_gb = total_bytes as f64 / 1_073_741_824.0;
                             local_found = true;
                         }
-                    }
-                    if let Ok(used_str) = std::fs::read_to_string(dev_path.join("mem_info_vram_used")) {
-                        if let Ok(used_bytes) = used_str.trim().parse::<u64>() {
+                    if let Ok(used_str) = std::fs::read_to_string(dev_path.join("mem_info_vram_used"))
+                        && let Ok(used_bytes) = used_str.trim().parse::<u64>() {
                             used_gb = used_bytes as f64 / 1_073_741_824.0;
                         }
-                    }
                     if local_found { break; }
                 }
             }
@@ -1025,4 +1009,41 @@ pub async fn trainer_control_handler(
         "status": "success",
         "action_taken": req.action
     }))
+}
+
+#[derive(serde::Serialize)]
+pub struct HallucinationLedgerEntry {
+    pub id: String,
+    pub model_name: String,
+    pub lies_detected: i64,
+    pub queries_processed: i64,
+    pub last_lied_at: String,
+}
+
+pub async fn get_hallucinations_ledger_handler(
+    axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::AppState>>,
+) -> axum::response::Response {
+    let mut records = Vec::new();
+    if let Ok(rows) = sqlx::query("SELECT id, model_name, lies_detected, queries_processed, last_lied_at FROM model_hallucinations ORDER BY lies_detected DESC")
+        .fetch_all(&state.db)
+        .await
+    {
+        for row in rows {
+            let id: String = sqlx::Row::get(&row, "id");
+            let model_name: String = sqlx::Row::get(&row, "model_name");
+            let lies_detected: i64 = sqlx::Row::try_get(&row, "lies_detected").unwrap_or(0);
+            let queries_processed: i64 = sqlx::Row::try_get(&row, "queries_processed").unwrap_or(0);
+            let last_lied_at: Option<String> = sqlx::Row::try_get(&row, "last_lied_at").unwrap_or(None);
+            
+            records.push(HallucinationLedgerEntry {
+                id,
+                model_name,
+                lies_detected,
+                queries_processed,
+                last_lied_at: last_lied_at.unwrap_or_default(),
+            });
+        }
+    }
+        
+    axum::Json(records).into_response()
 }

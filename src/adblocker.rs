@@ -73,15 +73,12 @@ pub fn start_adblock_daemon(
 
         loop {
             let mut needs_update = true;
-            if let Ok(metadata) = tokio::fs::metadata(&list_cache_path).await {
-                if let Ok(modified) = metadata.modified() {
-                    if let Ok(age) = std::time::SystemTime::now().duration_since(modified) {
-                        if age.as_secs() < 86400 { // 24h
+            if let Ok(metadata) = tokio::fs::metadata(&list_cache_path).await
+                && let Ok(modified) = metadata.modified()
+                    && let Ok(age) = std::time::SystemTime::now().duration_since(modified)
+                        && age.as_secs() < 86400 { // 24h
                             needs_update = false;
                         }
-                    }
-                }
-            }
 
             if needs_update {
                 tracing::info!("📡 [Pi-Hole Updater] Cache obsoleto. Fazendo Download Assíncrono das matrizes Tracker...");
@@ -90,16 +87,13 @@ pub fn start_adblock_daemon(
                 
                 for encoded_url in BLOCKLIST_SOURCES_B64 {
                     // WAF Evasion: Decode on the fly so DPI doesn't block the static binary
-                    if let Ok(decoded_bytes) = BASE64_STANDARD.decode(encoded_url) {
-                        if let Ok(url) = String::from_utf8(decoded_bytes) {
-                            if let Ok(resp) = client.get(&url).send().await {
-                                if let Ok(text) = resp.text().await {
+                    if let Ok(decoded_bytes) = BASE64_STANDARD.decode(encoded_url)
+                        && let Ok(url) = String::from_utf8(decoded_bytes)
+                            && let Ok(resp) = client.get(&url).send().await
+                                && let Ok(text) = resp.text().await {
                                     combined_rules.push_str(&text);
-                                    combined_rules.push_str("\n");
+                                    combined_rules.push('\n');
                                 }
-                            }
-                        }
-                    }
                 }
 
                 if !combined_rules.is_empty() {
@@ -124,7 +118,7 @@ fn build_engine_from_disk(path: &std::path::Path) -> Engine {
         for line in content.lines() {
             let chunk = line.trim();
             if !chunk.is_empty() && !chunk.starts_with('!') {
-                let _ = filter_set.add_filter(&chunk, ParseOptions::default());
+                let _ = filter_set.add_filter(chunk, ParseOptions::default());
             }
         }
     } else {

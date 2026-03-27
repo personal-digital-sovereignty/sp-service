@@ -51,9 +51,9 @@ async fn scrape_engine(client: &reqwest::Client, name: &str, url: &str, jitter_b
 // -------------------------------------------------------------
 pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String {
     let client = reqwest::Client::new();
-    if let Ok(res) = client.get("http://127.0.0.1:11434/api/tags").send().await {
-        if let Ok(json) = res.json::<serde_json::Value>().await {
-            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+    if let Ok(res) = client.get("http://127.0.0.1:11434/api/tags").send().await
+        && let Ok(json) = res.json::<serde_json::Value>().await
+            && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
                 let available_names: Vec<&str> = models.iter()
                     .filter_map(|m| m.get("name").and_then(|n| n.as_str()))
                     .collect();
@@ -65,8 +65,6 @@ pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String
                     }
                 }
             }
-        }
-    }
     tracing::warn!("⚠️ [Fleet Orchestrator] Nenhum modelo da hierarquia encontrado. Fallback de Sobrevivência: '{}'", fallback);
     fallback.to_string()
 }
@@ -198,17 +196,15 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         if let Some(k) = parsed.get("top_k").and_then(|v| v.as_i64()) { sys_top_k = Some(k); }
         
         let mut base_prompt = String::new();
-        if let Some(name) = parsed.get("ai_name").and_then(|v| v.as_str()) {
-            if !name.is_empty() {
+        if let Some(name) = parsed.get("ai_name").and_then(|v| v.as_str())
+            && !name.is_empty() {
                 base_prompt = format!("Identidade Sistêmica: Assuma a persona local soberana definida pelo usuário. Seu nome é {}. Aja de forma coerente e amigável sem ser repetitivo.\n\n", name);
             }
-        }
         
-        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str()) {
-            if !p.is_empty() { 
+        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str())
+            && !p.is_empty() { 
                 base_prompt.push_str(p); 
             }
-        }
         
         if !base_prompt.is_empty() {
             global_system_prompt = Some(base_prompt);
@@ -798,8 +794,8 @@ let tracking_model = ollama_model.clone();
 
 let tracking_human_query = human_prompt.clone();
 let mut tracking_rag_context = project_context.clone();
-if !web_context.is_empty() { tracking_rag_context.push_str("\n"); tracking_rag_context.push_str(&web_context); }
-if !sys_context.is_empty() { tracking_rag_context.push_str("\n"); tracking_rag_context.push_str(&sys_context); }
+if !web_context.is_empty() { tracking_rag_context.push('\n'); tracking_rag_context.push_str(&web_context); }
+if !sys_context.is_empty() { tracking_rag_context.push('\n'); tracking_rag_context.push_str(&sys_context); }
 if tracking_rag_context.trim().is_empty() { tracking_rag_context = "Interação Direta (Zero-Shot / Sem Contexto RAG)".to_string(); }
 
 let start_time = std::time::Instant::now();
