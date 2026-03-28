@@ -176,6 +176,7 @@ if let Err(security_alert) = crate::guardrails::evaluate_prompt(&human_prompt, &
 let mut sys_temperature: Option<f64> = None;
 let mut sys_top_k: Option<i64> = None;
 let mut global_system_prompt: Option<String> = None;
+let mut system_ai_name = "The Nurse".to_string();
 let mut resolved_model = requested_model.clone();
 
 // 🛑 THE SOVEREIGN FIREWALL (Zero-Day Model Fallback) 🛑
@@ -218,8 +219,11 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         if let Some(k) = parsed.get("top_k").and_then(|v| v.as_i64()) { sys_top_k = Some(k); }
         
         let mut base_prompt = String::new();
-        if let Some(name) = parsed.get("ai_name").and_then(|v| v.as_str())
+        // Support both ai_name and aiName json structures
+        let name_val = parsed.get("ai_name").or_else(|| parsed.get("aiName")).and_then(|v| v.as_str());
+        if let Some(name) = name_val
             && !name.is_empty() {
+                system_ai_name = name.to_string();
                 base_prompt = format!("Identidade Sistêmica: Assuma a persona local soberana definida pelo usuário. Seu nome é {}. Aja de forma coerente e amigável sem ser repetitivo.\n\n", name);
             }
         
@@ -518,7 +522,7 @@ if payload.deep_research.unwrap_or(false) {
 } else if is_sys {
     let query = human_prompt[4..].trim();
     info!("⚙️ [The Nurse] Agentic Task detectada: /sys -> Analisando '{}'", query);
-    sys_context = format!("INSTRUÇÃO SISTÊMICA (THE NURSE): O usuário solicitou análise profunda sobre a arquitetura 'Sovereign Pair'. Somos um sistema Cíbrido puramente em Rust (The Nurse/Axum) e Svelte 5 + Tailwind na UI. Usamos LLMs Locais (Ollama) mapeados via SQL. Foque em responder a seguinte dúvida de Engenharia: '{}'", query);
+    sys_context = format!("INSTRUÇÃO SISTÊMICA ({}): O usuário solicitou análise profunda sobre a arquitetura 'Sovereign Pair'. Somos um sistema Cíbrido puramente em Rust ({}/Axum) e Svelte 5 + Tailwind na UI. Usamos LLMs Locais (Ollama) mapeados via SQL. Foque em responder a seguinte dúvida de Engenharia: '{}'", system_ai_name.to_uppercase(), system_ai_name, query);
 }
 // =========================================================
 
@@ -607,7 +611,9 @@ if !sys_context.is_empty() {
         "role": "system",
         "content": sys_context
     }));
-} else if let Some(global_prompt) = global_system_prompt {
+}
+
+if let Some(global_prompt) = global_system_prompt {
     // Injeta a Persona Customizada definida na UI com Alta Prioridade Cognitiva (Enforcement Tático)
     purified_messages.push(json!({
         "role": "system",
