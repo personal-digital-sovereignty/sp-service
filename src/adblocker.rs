@@ -45,7 +45,8 @@ pub fn start_adblock_daemon(
         while let Some(msg) = rx.blocking_recv() {
             match msg {
                 AdblockMessage::Check { url, reply } => {
-                    let check_req = adblock::request::Request::new(&url, "", "").unwrap_or_else(|_| adblock::request::Request::new("http://fallback", "", "").unwrap());
+                    // Passa 'document' para que filtros third-party (Analytics) não bloqueiem domínios raiz inteiros (Ex: cnn.com)
+                    let check_req = adblock::request::Request::new(&url, &url, "document").unwrap_or_else(|_| adblock::request::Request::new("http://fallback", "http://fallback", "document").unwrap());
                     let result = engine.check_network_request(&check_req);
                     let _ = reply.send(result.matched);
                 },

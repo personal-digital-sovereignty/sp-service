@@ -12,10 +12,15 @@ use std::convert::Infallible;
 use lazy_static::lazy_static;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
+use fastembed::{TextRerank, RerankInitOptions, RerankerModel};
+use unicode_segmentation::UnicodeSegmentation;
 
 lazy_static! {
     pub static ref TRAINER_LOGS: broadcast::Sender<String> = broadcast::channel(100).0;
     pub static ref DEEP_RESEARCH_CANCEL_TOKEN: std::sync::RwLock<Option<CancellationToken>> = std::sync::RwLock::new(None);
+    pub static ref RERANKER: std::sync::Mutex<TextRerank> = {
+        std::sync::Mutex::new(TextRerank::try_new(RerankInitOptions::new(RerankerModel::BGERerankerBase)).expect("Failed to initialize BGE Reranker Model"))
+    };
 }
 
 #[derive(Deserialize)]
@@ -213,6 +218,7 @@ pub struct DeepResearchReq {
     pub grounding_focus: bool,
     pub query_expansion: bool,
     pub model: Option<String>,
+    pub firewall_enabled: Option<bool>,
 }
 
 async fn wait_or_cancel(ms: u64, token: &CancellationToken) -> bool {
@@ -230,19 +236,11 @@ async fn execute_sub_analyst(
     query: String,
     engine_arc: Arc<crate::research::DeepResearchEngine>,
     client: reqwest::Client,
-    sub_agent_model: String
+    sub_agent_model: String,
+    firewall_enabled: bool
 ) -> String {
-    let mut search_query = query.clone();
-    
-    // Condenser to help bypassing
-    let cond_prompt = format!("Reduza a pergunta a seguir em uma string de busca enxuta (max 5 palavras). Responda apenas com a string pura. Pergunta: '{}'", query);
-    let cond_payload = serde_json::json!({"model": sub_agent_model, "messages": [{"role": "user", "content": cond_prompt}], "stream": false, "options": {"temperature": 0.0}});
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&cond_payload).send().await
-        && let Ok(json) = res.json::<serde_json::Value>().await
-            && let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                let clean = c.replace("\"", "").replace("'", "").trim().to_string();
-                if clean.len() < 80 { search_query = clean; }
-            }
+    // Removed LLM Condenser to vastly accelerate initial response times.
+    let search_query = query.clone();
 
     let mut raw_student_md = String::new();
     if let Ok(res) = engine_arc.search_web(&search_query).await {
@@ -250,23 +248,87 @@ async fn execute_sub_analyst(
             raw_student_md.push_str(&format!("## ZERO-CLICK SEARCH SNIPPETS (DuckDuckGo Lite)\n{}\n\n", res.snippets));
         }
 
-        for link in res.links.into_iter().take(3) {
-            if let Ok(md) = engine_arc.scrape_url(&link).await
-                && md.len() > 100 {
-                    raw_student_md.push_str(&format!("## Source: {}\n{}\n\n", link, md.chars().take(2500).collect::<String>()));
+        let mut scrape_handles = Vec::new();
+        for link in res.links.clone().into_iter().take(20) {
+            let engine_clone = engine_arc.clone();
+            scrape_handles.push(tokio::spawn(async move {
+                if let Ok(md) = engine_clone.scrape_url(&link).await {
+                    if md.len() > 100 {
+                        return Some(format!("## Source: {}\n{}\n\n", link, md.chars().take(2500).collect::<String>()));
+                    }
                 }
+                None
+            }));
+        }
+
+        let results = futures_util::future::join_all(scrape_handles).await;
+        for res_task in results {
+            if let Ok(Some(md_content)) = res_task {
+                raw_student_md.push_str(&md_content);
+            }
+        }
+
+        if !firewall_enabled {
+            if let Some(pool) = &engine_arc.db_pool {
+                for link in &res.links {
+                    if let Ok(u) = reqwest::Url::parse(link) {
+                        if let Some(domain) = u.host_str() {
+                            let _ = sqlx::query("UPDATE domain_extraction_ledger SET status = 'quarantined', quarantine_until = datetime('now', '+60 days') WHERE domain = ?")
+                                .bind(domain.to_string())
+                                .execute(pool)
+                                .await;
+                        }
+                    }
+                }
+            }
         }
     }
 
     if raw_student_md.trim().is_empty() { return "Nenhum dado retornado da web para esta query.".to_string(); }
 
+    let _ = TRAINER_LOGS.send(format!("Chunking & Semantic Reranking: Processando {} bytes de puro HTML Extrativo...", raw_student_md.len()));
+    
+    // Chunking Context: Split by unicode sentences and group by 3 to form dense semantic blocks
+    let sentence_chunks: Vec<String> = raw_student_md
+        .unicode_sentences()
+        .collect::<Vec<_>>()
+        .chunks(4)
+        .map(|chunk| chunk.join(" "))
+        .filter(|c| c.len() > 30) // Drop useless micro chunks
+        .collect();
+
+    let mut reranked_md = String::new();
+    if !sentence_chunks.is_empty() {
+        let chunk_refs: Vec<&str> = sentence_chunks.iter().map(|c| c.as_str()).collect();
+        if let Ok(mut rlock) = RERANKER.lock() {
+            if let Ok(results) = rlock.rerank(query.as_str(), chunk_refs, true, None) {
+                let mut top_results = results;
+                top_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+                
+                // Keep the top 35 semantic chunks to build the perfect context (approx 3k-5k tokens)
+                let top_k = top_results.into_iter().take(35);
+                for (i, res) in top_k.enumerate() {
+                    if let Some(text) = res.document {
+                        reranked_md.push_str(&format!("[- Chunk {} (Score: {:.2})]: {}\n\n", i, res.score, text));
+                    }
+                }
+            } else {
+                reranked_md = raw_student_md.clone(); // Fallback if reranker fails
+            }
+        } else {
+            reranked_md = raw_student_md.clone(); // Fallback if Mutex lock fails
+        }
+    } else {
+        reranked_md = raw_student_md.clone();
+    }
+
     let system_prompt = "Você é um Inquisidor Soberano implacável. Seu idioma oficial obrigatório é o PORTUGUÊS (PT-BR). REGRA DE OURO: Se a resposta não estiver LITERALMENTE descrita no texto do contexto, ou se o contexto for vazio, responda ESTRITAMENTE e UNICAMENTE com as palavras em CAIXA ALTA: 'DADO NÃO ENCONTRADO'. NÃO INVENTE DADOS. JAMAIS responda em inglês.";
 
     let extractor_prompt = format!(
-        "Responda à pergunta abaixo baseando-se APENAS e RESTRITAMENTE no contexto histórico fornecido raspado da web. \n\
-        CITE A FONTE URL DE ONDE TIROU CADA NÚMERO DIRETAMENTE DO TEXTO. Se faltar dados, use a Regra de Ouro. Mantenha resposta curta, direta, jornalística.\n\n\
+        "Responda à pergunta abaixo baseando-se APENAS e RESTRITAMENTE no contexto histórico fornecido raspado da web (Reranked Top-K Segments). \n\
+        CITE A FONTE URL DE ONDE TIROU CADA INFORMAÇÃO DIRETAMENTE DO TEXTO. Se faltar dados, use a Regra de Ouro. Mantenha resposta curta, direta, jornalística.\n\n\
         PERGUNTA A SER RESOLVIDA:\n{}\n\n\
-        CONTEXTO RASPADO PELO SEU CRAWLER (FONTES ABAIXO):\n{}", query, raw_student_md
+        CONTEXTO SEMÂNTICO RERANKED PELO SEU CRAWLER (FONTES ABAIXO):\n{}", query, reranked_md
     );
 
     let ext_payload = serde_json::json!({
@@ -328,6 +390,8 @@ pub async fn run_deep_research_handler(
     let vault_ptr = state.vault_path.clone();
     let telemetry_ptr = state.telemetry.clone();
     let prompt = req.directive.clone();
+    let is_firewall_enabled = req.firewall_enabled.unwrap_or(true);
+
     tokio::spawn(async move {
         // --- PHASE 33: Agentic Loop (ReAct / Tool Calling) ---
         let embed_client = reqwest::Client::builder()
@@ -341,7 +405,7 @@ pub async fn run_deep_research_handler(
             Some(vault_ptr.clone())
         ));
 
-        let _ = TRAINER_LOGS.send("[STEP 1.0] Iniciando Arquitetura Agentic Loop (Tool Calling)...".to_string());
+        let _ = TRAINER_LOGS.send(format!("[STEP 1.0] Iniciando Arquitetura Agentic Loop (Tool Calling)... Firewall Cognitivo Ativo: {}", is_firewall_enabled));
         
         let current_date = chrono::Local::now().format("%Y-%m-%d").to_string();
         use chrono::Datelike;
@@ -487,13 +551,13 @@ pub async fn run_deep_research_handler(
                                         let _ = TRAINER_LOGS.send(format!("[The Honest Inquisitor] Acionando Inquisidor Único de Confiança: {}", auth_inquisitor));
                                         
                                         // Roda a extração rigorosamente restrita do Modelo Solitário Eleito
-                                        let res_inquisitor = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone()).await;
+                                        let res_inquisitor = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), is_firewall_enabled).await;
                                         
                                         // A LÓGICA DE ACAREAMENTO (SINGLE-AGENT TRUSTED)
-                                        let inquisitor_failed = res_inquisitor.contains("DADO NÃO ENCONTRADO") || res_inquisitor.contains("Falha do aluno");
+                                        let inquisitor_failed = if is_firewall_enabled { res_inquisitor.contains("DADO NÃO ENCONTRADO") || res_inquisitor.contains("Falha do aluno") } else { false };
                                         
                                         let final_result = if inquisitor_failed {
-                                            "NÃO EXISTEM DADOS MATEMÁTICOS PARA ESTA QUERY NO HTML RASPADO (POSSÍVEL BLOQUEIO DE JAVASCRIPT OU SINGLE PAGE APPLICATION). RECOMENDE AO COMANDANTE USAR API EXTERNA.".to_string()
+                                            "NÃO EXISTEM DADOS CONFIÁVEIS PARA ESTA QUERY NO HTML RASPADO (POSSÍVEL BLOQUEIO DE JAVASCRIPT OU DADOS AUSENTES). RECOMENDE AO COMANDANTE USAR API EXTERNA.".to_string()
                                         } else {
                                             // Passou! Assumimos como verdade absoluta devido ao Tracker Histórico.
                                             let _ = TRAINER_LOGS.send("[The Honest Inquisitor] Extração Validada por Grau de Veracidade!".to_string());
@@ -549,9 +613,9 @@ pub async fn run_deep_research_handler(
                                                     let sq_string = sq.to_string();
                                                     let _ = TRAINER_LOGS.send(format!("[The Honest Inquisitor] Sub-Agente Low-End Eleito Para Fallback: {}", auth_inquisitor));
                                                     
-                                                    let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone()).await;
+                                                    let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), is_firewall_enabled).await;
                                                     
-                                                    let inquisitor_failed_fb = res_inquisitor_fb.contains("DADO NÃO ENCONTRADO") || res_inquisitor_fb.contains("Falha do aluno");
+                                                    let inquisitor_failed_fb = if is_firewall_enabled { res_inquisitor_fb.contains("DADO NÃO ENCONTRADO") || res_inquisitor_fb.contains("Falha do aluno") } else { false };
                                                     
                                                     let final_result = if inquisitor_failed_fb {
                                                         "NÃO EXISTEM DADOS MATEMÁTICOS PARA ESTA QUERY NO HTML RASPADO (POSSÍVEL BLOQUEIO DE JAVASCRIPT OU SINGLE PAGE APPLICATION). RECOMENDE AO COMANDANTE USAR API EXTERNA.".to_string()
@@ -628,7 +692,7 @@ pub async fn run_deep_research_handler(
         let _ = TRAINER_LOGS.send("[STEP 2] Acionando Epistemic Hard-Kill Vaccine & Scribe...".to_string());
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
-        let final_markdown_report = if all_sources.is_empty() {
+        let final_markdown_report = if all_sources.is_empty() && is_firewall_enabled {
             let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE HARD-KILL] Zero dados extrativos validados pela Trindade. Acionando Firewall Cognitivo mas preservando o raciocínio final do Mestre.".to_string());
             format!(">[!WARNING] **OPERAÇÃO ABORTADA PELO FIREWALL COGNITIVO:** Nenhuma fonte web passou no crivo da Inquisição Cíbrida (Vazio Epistêmico ou WAF Intransponível). Para satisfazer a política de Defesa 'Anti-Alucinação Numérica', a dedução pura da IA está isolada abaixo.\n\n### Último Raciocínio (Chain of Thought):\n> {}", synthesized_report)
         } else if is_low_end {

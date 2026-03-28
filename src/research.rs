@@ -1,5 +1,4 @@
-use rquest::Client;
-use rquest_util::Emulation;
+use reqwest::Client;
 use scraper::{Html, Selector};
 use std::time::Duration;
 use regex::Regex;
@@ -57,7 +56,6 @@ impl DeepResearchEngine {
     pub fn new(db_pool: Option<sqlx::SqlitePool>, adblock_engine: Option<crate::adblocker::AdblockHandle>, vault_path: Option<std::path::PathBuf>) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(15))
-            .emulation(Emulation::Chrome131) // 🛡️ Sovereign Stealth: TLS JA3/JA4 Spoofing
             .build()
             .unwrap_or_else(|_| Client::new());
 
@@ -210,14 +208,24 @@ impl DeepResearchEngine {
         None
     }
 
-    /// O Master Router do Ghost Protocol: Tenta extração simultânea de Caches Globais
+    /// O Master Router do Ghost Protocol: Tenta extração simultânea de Caches Globais Institucionais (CDX) e Comerciais
     async fn scrape_ghost_fallbacks(&self, url: &str) -> Result<String, String> {
-        let (wayback, gcache, archive_ph) = tokio::join!(
+        let (wayback, arquivo_pt, ukwa, vefsafn, gcache, archive_ph) = tokio::join!(
             self.scrape_via_wayback_machine(url),
+            self.scrape_via_arquivo_pt(url),
+            self.scrape_via_ukwa(url),
+            self.scrape_via_vefsafn(url),
             self.scrape_via_google_cache(url),
             self.scrape_via_archive_today(url)
         );
 
+        // Retorna o primeiro que tiver conteúdo útil (corrida de latência paralela!)
+        if let Ok(md) = arquivo_pt
+            && md.len() > 200 { return Ok(md); }
+        if let Ok(md) = ukwa
+            && md.len() > 200 { return Ok(md); }
+        if let Ok(md) = vefsafn
+            && md.len() > 200 { return Ok(md); }
         if let Ok(md) = wayback
             && md.len() > 200 { return Ok(md); }
         if let Ok(md) = gcache
@@ -225,12 +233,12 @@ impl DeepResearchEngine {
         if let Ok(md) = archive_ph
             && md.len() > 200 { return Ok(md); }
 
-        Err("Todas as 3 malhas de The Ghost Fallback Protocol falharam ou retornaram o vácuo.".to_string())
+        Err("Todas as 6 matrizes do The Ghost Fallback Protocol (Institucionais e Caches) falharam ou retornaram o vácuo.".to_string())
     }
 
     async fn scrape_via_google_cache(&self, url: &str) -> Result<String, String> {
         let cache_url = format!("https://webcache.googleusercontent.com/search?q=cache:{}", urlencoding::encode(url));
-        if let Ok(resp) = self.client.get(&cache_url).header(rquest::header::USER_AGENT, Self::get_random_user_agent()).send().await
+        if let Ok(resp) = self.client.get(&cache_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await
             && resp.status().is_success()
                 && let Ok(html) = resp.text().await {
                     let markdown = self.sanitize_to_markdown(&html);
@@ -242,7 +250,7 @@ impl DeepResearchEngine {
 
     async fn scrape_via_archive_today(&self, url: &str) -> Result<String, String> {
         let archive_url = format!("https://archive.ph/latest/{}", url);
-        if let Ok(resp) = self.client.get(&archive_url).header(rquest::header::USER_AGENT, Self::get_random_user_agent()).send().await
+        if let Ok(resp) = self.client.get(&archive_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await
             && resp.status().is_success()
                 && let Ok(html) = resp.text().await {
                     let markdown = self.sanitize_to_markdown(&html);
@@ -250,6 +258,78 @@ impl DeepResearchEngine {
                     return Ok(markdown);
                 }
         Err("Archive.today Fallback Failed".to_string())
+    }
+
+    /// Ghost Fallback (Lusófono/Europeu): Arquivo.pt (Solr/PyWB)
+    async fn scrape_via_arquivo_pt(&self, url: &str) -> Result<String, String> {
+        tracing::info!("👻 [Ghost Protocol] Invocando Arquivo.pt (Europa/GDPR): arquivo.pt/wayback/cdx");
+        let cdx_url = format!("https://arquivo.pt/wayback/cdx?url={}&output=json&limit=1&filter=statuscode:200", urlencoding::encode(url));
+        if let Ok(cdx_req) = self.client.get(&cdx_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await {
+            if let Ok(cdx_json) = cdx_req.json::<Vec<Vec<String>>>().await {
+                if cdx_json.len() >= 2 {
+                    let timestamp = &cdx_json[1][1];
+                    let original_url = &cdx_json[1][2]; 
+                    let ghost_url = format!("https://arquivo.pt/wayback/{}id_/{}", timestamp, original_url);
+                    if let Ok(ghost_req) = self.client.get(&ghost_url).send().await {
+                        if ghost_req.status().is_success() {
+                            let ghost_html = ghost_req.text().await.unwrap_or_default();
+                            tracing::info!("🔗 [Ghost Protocol][Arquivo.pt] Download passivo efetuado (Timestamp: {})", timestamp);
+                            if let Some(json_payload) = self.extract_hydration_json(&ghost_html) { return Ok(json_payload); }
+                            return Ok(self.sanitize_to_markdown(&ghost_html));
+                        }
+                    }
+                }
+            }
+        }
+        Err("Arquivo.pt Fallback Failed".into())
+    }
+
+    /// Ghost Fallback (Inglês Global): UK Web Archive (UKWA)
+    async fn scrape_via_ukwa(&self, url: &str) -> Result<String, String> {
+        tracing::info!("👻 [Ghost Protocol] Invocando UKWA (Global English/UK): webarchive.org.uk");
+        let cdx_url = format!("https://www.webarchive.org.uk/wayback/archive/cdx?url={}&output=json&limit=1&filter=statuscode:200", urlencoding::encode(url));
+        if let Ok(cdx_req) = self.client.get(&cdx_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await {
+            if let Ok(cdx_json) = cdx_req.json::<Vec<Vec<String>>>().await {
+                if cdx_json.len() >= 2 {
+                    let timestamp = &cdx_json[1][1];
+                    let original_url = &cdx_json[1][2]; 
+                    let ghost_url = format!("https://www.webarchive.org.uk/wayback/archive/{}id_/{}", timestamp, original_url);
+                    if let Ok(ghost_req) = self.client.get(&ghost_url).send().await {
+                        if ghost_req.status().is_success() {
+                            let ghost_html = ghost_req.text().await.unwrap_or_default();
+                            tracing::info!("🔗 [Ghost Protocol][UKWA] Download passivo efetuado (Timestamp: {})", timestamp);
+                            if let Some(json_payload) = self.extract_hydration_json(&ghost_html) { return Ok(json_payload); }
+                            return Ok(self.sanitize_to_markdown(&ghost_html));
+                        }
+                    }
+                }
+            }
+        }
+        Err("UKWA Fallback Failed".into())
+    }
+
+    /// Ghost Fallback (RocksDB High-Speed Europe): Vefsafn.is (Islândia)
+    async fn scrape_via_vefsafn(&self, url: &str) -> Result<String, String> {
+        tracing::info!("👻 [Ghost Protocol] Invocando Vefsafn.is (OutbackCDX/RocksDB): wayback.vefsafn.is");
+        let cdx_url = format!("https://wayback.vefsafn.is/wayback/cdx?url={}&output=json&limit=1&filter=statuscode:200", urlencoding::encode(url));
+        if let Ok(cdx_req) = self.client.get(&cdx_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await {
+            if let Ok(cdx_json) = cdx_req.json::<Vec<Vec<String>>>().await {
+                if cdx_json.len() >= 2 {
+                    let timestamp = &cdx_json[1][1];
+                    let original_url = &cdx_json[1][2]; 
+                    let ghost_url = format!("https://wayback.vefsafn.is/wayback/{}id_/{}", timestamp, original_url);
+                    if let Ok(ghost_req) = self.client.get(&ghost_url).send().await {
+                        if ghost_req.status().is_success() {
+                            let ghost_html = ghost_req.text().await.unwrap_or_default();
+                            tracing::info!("🔗 [Ghost Protocol][Vefsafn.is] Download passivo efetuado (Timestamp: {})", timestamp);
+                            if let Some(json_payload) = self.extract_hydration_json(&ghost_html) { return Ok(json_payload); }
+                            return Ok(self.sanitize_to_markdown(&ghost_html));
+                        }
+                    }
+                }
+            }
+        }
+        Err("Vefsafn.is Fallback Failed".into())
     }
 
     /// Ghost Fallback: Consome o cache passivo do Wayback Machine via CDX API para aniquilar WAFs
@@ -260,7 +340,7 @@ impl DeepResearchEngine {
         let cdx_url = format!("https://web.archive.org/cdx/search/cdx?url={}&output=json&limit=1&filter=statuscode:200", urlencoding::encode(url));
         
         let cdx_req = self.client.get(&cdx_url)
-            .header(rquest::header::USER_AGENT, Self::get_random_user_agent())
+            .header(reqwest::header::USER_AGENT, Self::get_random_user_agent())
             .send().await.map_err(|e| format!("Wayback CDX API falhou: {}", e))?;
             
         if !cdx_req.status().is_success() {
@@ -388,9 +468,9 @@ impl DeepResearchEngine {
         let params = [("q", query), ("kl", "br-pt")];
         
         let req = self.client.post(url)
-            .header(rquest::header::USER_AGENT, Self::get_random_user_agent())
-            .header(rquest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .header(rquest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml")
+            .header(reqwest::header::USER_AGENT, Self::get_random_user_agent())
+            .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml")
             .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"131\", \"Not:A-Brand\";v=\"8\"")
             .header("Sec-Ch-Ua-Mobile", "?0")
             .header("Sec-Ch-Ua-Platform", "\"Windows\"")
@@ -580,10 +660,10 @@ impl DeepResearchEngine {
         let url = format!("https://search.yahoo.com/search?p={}", urlencoding::encode(query));
         
         let req = self.client.get(&url)
-            .header(rquest::header::USER_AGENT, Self::get_random_user_agent())
-            .header(rquest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7")
-            .header(rquest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
-            .header(rquest::header::DNT, "1")
+            .header(reqwest::header::USER_AGENT, Self::get_random_user_agent())
+            .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9,pt-BR;q=0.8,pt;q=0.7")
+            .header(reqwest::header::ACCEPT, "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+            .header(reqwest::header::DNT, "1")
             .header("Sec-Ch-Ua", "\"Google Chrome\";v=\"123\", \"Not:A-Brand\";v=\"8\", \"Chromium\";v=\"123\"")
             .header("Sec-Ch-Ua-Mobile", "?0")
             .header("Sec-Ch-Ua-Platform", "\"Windows\"")

@@ -182,10 +182,15 @@ pub async fn init_pool() -> SqlitePool {
             technique_ghost_success BOOLEAN DEFAULT 0,
             last_search_prompt TEXT,
             quarantine_until DATETIME,
-            last_attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            last_attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'verified'
         );
                  "
     ).execute(&pool).await;
+
+    // Graceful migration for existing DB instances
+    let _ = sqlx::query("ALTER TABLE domain_extraction_ledger ADD COLUMN status TEXT DEFAULT 'verified';")
+        .execute(&pool).await;
 
     // Garante Tabelas de Kanban (Projects e Tasks)
     let _ = sqlx::query("

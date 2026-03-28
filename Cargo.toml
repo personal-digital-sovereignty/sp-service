@@ -49,8 +49,9 @@ sysinfo = "0.38.4"
 async-stream = "0.3.6"
 tokio-util = "0.7.18"
 adblock = "0.12.1"
-rquest = { version = "5.1.0", features = ["json"] }
-rquest-util = "2.2.1"
+fastembed = "5.13.0"
+readability = "0.3.0"
+unicode-segmentation = "1.13.2"
 
 [dev-dependencies]
 tempfile = "3.10.1"

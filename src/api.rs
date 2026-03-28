@@ -74,8 +74,9 @@ use sqlx::Row;
 pub async fn query_most_honest_model(db_pool: Option<&sqlx::SqlitePool>, fallback: &str) -> String {
     if let Some(pool) = db_pool {
         // Ignoramos Deepseek ativamente baseado no feedback do comandante de que ele não serve como inquisitor factual
+        // Restringindo também modelos MENORES QUE 3B de atuarem como Honest Inquisitors (1b, 1.5b, 1.7b, 2b)
         let row = sqlx::query(
-            "SELECT model_name FROM model_hallucinations WHERE model_name NOT LIKE '%deepseek%' ORDER BY lies_detected ASC, queries_processed DESC LIMIT 1"
+            "SELECT model_name FROM model_hallucinations WHERE model_name NOT LIKE '%deepseek%' AND model_name NOT LIKE '%1b%' AND model_name NOT LIKE '%1.5b%' AND model_name NOT LIKE '%1.7b%' AND model_name NOT LIKE '%2b%' ORDER BY lies_detected ASC, queries_processed DESC LIMIT 1"
         )
         .fetch_optional(pool)
         .await;
