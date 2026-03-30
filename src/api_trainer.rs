@@ -238,6 +238,7 @@ async fn execute_sub_analyst(
     engine_arc: Arc<crate::research::DeepResearchEngine>,
     client: reqwest::Client,
     sub_agent_model: String,
+    master_model: String,
     firewall_enabled: bool
 ) -> String {
     // Removed LLM Condenser to vastly accelerate initial response times.
@@ -266,21 +267,6 @@ async fn execute_sub_analyst(
         for res_task in results {
             if let Ok(Some(md_content)) = res_task {
                 raw_student_md.push_str(&md_content);
-            }
-        }
-
-        if !firewall_enabled {
-            if let Some(pool) = &engine_arc.db_pool {
-                for link in &res.links {
-                    if let Ok(u) = reqwest::Url::parse(link) {
-                        if let Some(domain) = u.host_str() {
-                            let _ = sqlx::query("UPDATE domain_extraction_ledger SET status = 'quarantined', quarantine_until = datetime('now', '+60 days') WHERE domain = ?")
-                                .bind(domain.to_string())
-                                .execute(pool)
-                                .await;
-                        }
-                    }
-                }
             }
         }
     }
@@ -334,23 +320,52 @@ async fn execute_sub_analyst(
         reranked_md = raw_student_md.clone();
     }
 
-    let is_micro_llama = sub_agent_model.to_lowercase().contains("1b") || sub_agent_model.to_lowercase().contains("1.5b");
+    // --- PHASE 1.1: SUFFICIENCY GATE (1B/3B) ---
+    let gate_hierarchy = vec!["qwen2.5:1.5b", "llama3.2:1b", "gemma2:2b", "qwen2.5:3b", "llama3.2"];
+    let gate_model = crate::api::discover_best_model(gate_hierarchy, "qwen2.5:3b").await;
+    
+    let gate_system = "You are a data sufficiency checker. Your only job is to answer: 'Does the retrieved context contain enough specific numerical data and facts to answer the query?' Output ONLY valid JSON: {\"sufficient\": true, \"fields_found\": [\"<field1>\"]} or {\"sufficient\": false, \"missing\": [\"<field1>\"], \"reason\": \"<specific gap>\"}. Do NOT attempt to answer the original query. Do NOT generate any analysis.";
+    
+    let gate_prompt = format!("<context>\n{}\n</context>\n\n<query>{}</query>\n\nJSON OUTPUT:", reranked_md, query);
 
-    let system_prompt = if is_micro_llama {
-        "Extract exact answer from <context>. If missing, return exactly {\"status\":\"null\"}. Numbers verbatim. Output ONLY Valid JSON e.g. {\"status\":\"extracted\", \"data\":\"answer\"}."
-    } else {
-        "Você é um Analista Rigoroso. Extraia fatos exatos. REGRA 0: Se faltar texto, DEVOLVA {\"status\":\"null\"}. REGRA 1: Use <scratchpad> ANTES do JSON copiando verbatim a frase que provê a resposta, iniciando com [SRC:chunk_X]. A saída final DEVE obrigatoriamente terminar com o JSON."
-    };
+    let gate_payload = serde_json::json!({
+        "model": gate_model,
+        "messages": [
+            {"role": "system", "content": gate_system},
+            {"role": "user", "content": gate_prompt}
+        ],
+        "format": "json",
+        "stream": false,
+        "options": { "temperature": 0.0, "num_ctx": 4096 }
+    });
 
-    let extractor_prompt = if is_micro_llama {
-        format!("QUESTION: {}\n<context>\n{}\n</context>\nJSON OUTPUT:", query, reranked_md)
-    } else {
-        format!(
-            "Extraia a resposta baseando-se RESTRITAMENTE nos Chunks. CITE O [- Chunk X] NO <scratchpad>. Dê a saída final em JSON (status e data).\n\n\
-            PERGUNTA:\n{}\n\n\
-            CONTEXTO:\n{}", query, reranked_md
-        )
-    };
+    let mut is_sufficient = false;
+    let mut missing_reason = String::new();
+
+    let _ = TRAINER_LOGS.send(format!("[Sufficiency Gate] Verificando preenchimento factual com '{}'...", gate_model));
+
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&gate_payload).send().await
+        && let Ok(json) = res.json::<serde_json::Value>().await
+            && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+                    if let Some(suff) = parsed.get("sufficient").and_then(|s| s.as_bool()) {
+                        is_sufficient = suff;
+                    }
+                    if let Some(reason) = parsed.get("reason").and_then(|r| r.as_str()) {
+                        missing_reason = reason.to_string();
+                    }
+                }
+    }
+
+    if !is_sufficient && firewall_enabled {
+        let _ = TRAINER_LOGS.send(format!("[Sufficiency Gate] Bloqueio de Alucinação Ativado: {}", missing_reason));
+        return "DADO NÃO ENCONTRADO".to_string();
+    }
+
+    // --- PHASE 1.2: LITERAL EXTRACTOR (3B) ---
+    let system_prompt = "Você é um Extrator Literal Estrito.\nFORBIDDEN outputs:\n- Any sentence without an attached [- Chunk X] citation\n- Rounded numbers (flag as suspicious)\n- Phrases: 'aproximadamente', 'em torno de', 'cerca de', 'significativamente' -> these are fabrication markers = HALT\n- Any claim about absence of evidence.\n\nSeu ÚNICO TRABALHO é copiar os valores textuais ou numéricos VERBATIM do [CONTEXTO], apensando na frente a citação exata de onde tirou (ex: 'Segundo os dados do [- Chunk 2]...'). NÃO GERE PROSA, não analise, não conclua. Apenas liste os fatos crus.";
+    
+    let extractor_prompt = format!("PERGUNTA:\n{}\n\n[CONTEXTO]:\n{}", query, reranked_md);
 
     let ext_payload = serde_json::json!({
         "model": sub_agent_model,
@@ -367,48 +382,31 @@ async fn execute_sub_analyst(
         && let Ok(json) = res.json::<serde_json::Value>().await
             && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                 
-                let content_str = content.to_string();
+                let content_str = content.trim().to_string();
                 
-                let json_start = content_str.find('{');
-                let json_end = content_str.rfind('}');
+                // Trimming reasoning tags that small models might regurgitate
+                let mut clean = content_str.clone();
+                if let Some(start) = clean.find("<think>") {
+                    if let Some(end) = clean.find("</think>") {
+                        let shift = if clean[end..].starts_with("</think>\n") { 9 } else { 8 };
+                        clean.replace_range(start..end + shift, "");
+                    }
+                }
                 
-                if let (Some(s), Some(e)) = (json_start, json_end) {
-                    if s < e {
-                        let json_slice = &content_str[s..=e];
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(json_slice) {
-                            if let Some(status) = v.get("status").and_then(|st| st.as_str()) {
-                                if status == "null" || status == "INSUFFICIENT_DATA" {
-                                    distilled_text = "DADO NÃO ENCONTRADO".to_string();
-                                } else if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
-                                    distilled_text = data.to_string();
-                                }
-                            } else if let Some(data) = v.get("data").and_then(|d| d.as_str()) {
-                                distilled_text = data.to_string();
-                            }
-                        }
-                    }
-                } else if !is_micro_llama {
-                    let upper = content_str.to_uppercase();
-                    if !upper.contains("DADO NÃO ENCONTRADO") && !upper.contains("\"NULL\"") {
-                        // Limpeza do DeepSeek (Cai aqui se o modelo não fez o JSON mas trouxe a resposta com think)
-                        let mut clean = content_str.clone();
-                        if let Some(start) = clean.find("<think>") {
-                            if let Some(end) = clean.find("</think>") {
-                                let shift = if clean[end..].starts_with("</think>\n\n") { 10 } else { 8 };
-                                clean.replace_range(start..end + shift, "");
-                            }
-                        }
-                        if let Some(scratch_end) = clean.find("</scratchpad>") {
-                           clean = clean[scratch_end + 13..].to_string(); 
-                        }
-                        distilled_text = clean.trim().to_string();
-                    }
+                let clean_upper = clean.to_uppercase();
+                if clean_upper.contains("DADO NÃO ENCONTRADO") {
+                    distilled_text = "DADO NÃO ENCONTRADO".to_string();
+                } else if clean.len() > 10 {
+                    distilled_text = clean.trim().to_string();
                 }
             }
     
-    // --- PHASE 2: ADVERSARIAL VERIFIER (PHI-3.5 CoVe) ---
-    if firewall_enabled && distilled_text != "DADO NÃO ENCONTRADO" && !is_micro_llama {
-        let _ = TRAINER_LOGS.send("[Adversarial Verifier] Submetendo extração ao Phi-3.5 para validação rigorosa (Zero-Trust)...".to_string());
+    // --- PHASE 2: ADVERSARIAL VERIFIER (MASTER MODEL CO-PILOT) ---
+    if firewall_enabled && distilled_text != "DADO NÃO ENCONTRADO" {
+        // Following User Feedback: Evaluator must be Neural Equivalent or Larger (The Master Model)
+        let verifier_model = master_model.clone();
+        
+        let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] Acionando a Mente Mestra ('{}') para auditar o Analista Menor...", verifier_model));
         
         let verifier_prompt = format!(
             "Você é o Advogado do Diabo (Auditor de Alucinações). Sua ÚNICA função é verificar se a EXTRAÇÃO fornecida é 100% verdadeira e provém LITERALMENTE do CONTEXTO.\n\
@@ -419,7 +417,7 @@ async fn execute_sub_analyst(
         );
 
         let verifier_payload = serde_json::json!({
-            "model": "phi3.5",
+            "model": verifier_model,
             "messages": [
                 {"role": "system", "content": "Você é um auditor rigoroso de dados do Estado. Responda apenas APPROVED ou REJECTED. Nada mais."},
                 {"role": "user", "content": verifier_prompt}
@@ -433,14 +431,14 @@ async fn execute_sub_analyst(
                 && let Some(v_content) = v_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     let v_upper = v_content.to_uppercase();
                     if v_upper.contains("REJECTED") {
-                        let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] Phi-3.5 DESTRUIU a extração por alucinação epistêmica: {}", distilled_text));
-                        distilled_text = "DADO NÃO ENCONTRADO".to_string(); // Veto absoluto
+                        let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] O modelo '{}' marcou a extração como alucinada (Soft-Fail).", verifier_model));
+                        distilled_text = format!("> [!WARNING]\n> **[ALERTA FIREWALL COGNITIVO]:** O auditor secundário ({}) encontrou possíveis divergências ou extrapolações sobre o texto original raso. O dado foi mantido em regime *Soft-Fail* para sua análise final.\n\n{}", verifier_model, distilled_text);
                     } else {
-                        let _ = TRAINER_LOGS.send("[Adversarial Verifier] Phi-3.5 VALIDOU a extração com sucesso e coerência!".to_string());
+                        let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] O modelo '{}' VALIDOU a extração com sucesso e coerência!", verifier_model));
                     }
                 } else {
-                    let _ = TRAINER_LOGS.send("[Adversarial Verifier] Falha ao contatar Phi-3.5, assumindo extração como REJECTED por precaução.".to_string());
-                    distilled_text = "DADO NÃO ENCONTRADO".to_string(); // Veto por falta de comunicação (Null-Safe)
+                    let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] Falha de comunicação com '{}'. Assumindo Soft-Fail.", verifier_model));
+                    distilled_text = format!("> [!WARNING]\n> **[ALERTA FIREWALL COGNITIVO]:** O auditor ({}) falhou ao responder. O dado primário foi mantido sem dupla checagem.\n\n{}", verifier_model, distilled_text);
                 }
     }
 
@@ -498,13 +496,13 @@ pub async fn run_deep_research_handler(
             "type": "function",
             "function": {
                 "name": "dispatch_sub_researcher",
-                "description": format!("Ferramenta de Extração Web Profunda. [FILTRO TEMPORAL ABSOLUTO]: O ano atual é {}. Sempre que a pergunta exigir notícias recentes, fatos do dia ou referir-se ao 'último' ou 'mais recente' evento, você DEVE INCLUIR explicitamente o ano {} na sua query de busca para focar os resultados e anular fontes antigas de anos passados! [REGRA ANTI-SEO]: Você DEVE escapar de lixos de SEO ('Top 10 Guias') construindo Dorks Operacionais. Para contextos institucionais/economia, force a busca via Dork (ex: `site:gov.br` ou `site:istoedinheiro.com.br`). Mas este porto seguro abrange APENAS 30% da sua jornada! Para código, debates técnicos ou visões humanas cruas (os outros 70%), fuja de domínios corporativos usando Dorks Booleanos como `(site:reddit.com | site:github.com | site:ycombinator.com)`.", current_year, current_year),
+                "description": format!("Ferramenta de Extração Web Profunda. [FILTRO TEMPORAL]: O ano atual é {}. Sempre que a pergunta exigir notícias recentes ou fatos do dia, você DEVE INCLUIR explicitamente o ano {} na sua query. Forneça keywords de busca, como faria no Google Clássico.", current_year, current_year),
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "search_query": {
                             "type": "string",
-                            "description": format!("{} REGRA CRÍTICA DE TEMPO: Se o usuário pedir o 'último' ou 'a mais nova', ENXERTE A FORÇA o ano `{}` literalmente na string de pesquisa para atuar como Filtro Temporal cronológico. Use Dorks avançados anti-seo. JAMAS use a sigla API.", query_example, current_year)
+                            "description": format!("{} EXTREMAMENTE CRÍTICO: Não inclua restrições pesadas como 'site:gov.br' usando hardcodes! Deixe o motor buscar o dado puro globalmente. Formule queries concisas (5 palavras).", query_example)
                         }
                     },
                     "required": ["search_query"]
@@ -512,7 +510,7 @@ pub async fn run_deep_research_handler(
             }
         }]);
 
-        let target_model_name = req.model.clone().unwrap_or_else(|| "llama3.2:latest".to_string());
+        let target_model_name = req.model.clone().unwrap_or_else(|| "qwen2.5:7b".to_string());
         let is_low_end = target_model_name.contains("3.2") || target_model_name.contains("qwen2.5:1.5b") || target_model_name.contains("3b");
         
         let anchor_directive = format!("[DIRETRIZ MATEMÁTICA ABSOLUTA] O ano real atual é {}. Se for exigido 'N' anos atrás, obrigatoriamente calcule a data subtraindo 'N' de {}. É terminantemente PROIBIDO usar seu ano de treinamento base como âncora temporal.", current_year, current_year);
@@ -522,10 +520,11 @@ pub async fn run_deep_research_handler(
                 "Você é Sophy, a IA Especialista Sênior do Sovereign Pair.\n\
                 [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
                 {}\n\
-                [DIRETRIZES DE RIGOR FACTUAL IMPRESCINDÍVEIS E DE TIER-1]\n\
+                [DIRETRIZES DE RIGOR FACTUAL IMPRESCINDÍVEIS E OMNI-SEARCH]\n\
                 1. Você DEVE usar a ferramenta `dispatch_sub_researcher` para buscar DADOS REAIS da web.\n\
-                2. SEU ÚNICO DEVER é invocar a ferramenta e agregar fatos.\n\
-                3. NÃO ESCREVA RESPOSTAS LONGAS ou crie formatação Markdown final. Responda apenas com os Fatos Brutos listados de forma direta.",
+                2. NUNCA restrinja a busca a domínios usando 'site:' (ex: site:gov.br). Use queries Puras e Abertas na Ferramenta. O Motor Ghost Tratará das Extrações.\n\
+                3. SEU ÚNICO DEVER é invocar a ferramenta e agregar fatos.\n\
+                4. NÃO ESCREVA RESPOSTAS LONGAS ou crie formatação Markdown final. Responda apenas com os Fatos Brutos listados de forma direta.",
                 anchor_directive
             )
         } else {
@@ -533,12 +532,11 @@ pub async fn run_deep_research_handler(
                 "Você é Sophy, a IA Especialista Sênior do Sovereign Pair (Operando no Loop ReAct).\n\
                 [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
                 {}\n\
-                [DIRETRIZES DE DEEP RESEARCH & ANTI-SEO]\n\
+                [DIRETRIZES TÁTICAS OMNI-SEARCH (THE GHOST FALLBACK)]\n\
                 1. Você DEVE usar a ferramenta `dispatch_sub_researcher` para buscar DADOS REAIS.\n\
-                2. [A REGRA DOS 30%]: Trate fontes Institucionais/Tier-1 como valiosas para FATOS CRUS, porém DEPENDA delas no máximo 30% das vezes.\n\
-                3. [FUGA DE SEO]: Nos outros 70%, assuma que o Google está envenenado por guias caça-clique de SEO. Se a pergunta buscar uma \"solução real humana\", crie queries usando operadores site: específicos (Fóruns Orgânicos, Github, Reddit) para evitar de cair em Content Farms idênticos.\n\
-                4. Protocolo Anti-Alucinação: Se um dado divergir entre jornais e o Governo, cite as DUAS fontes mantendo o Governo como baliza primária.\n\
-                5. Só escreva o Relatório Final após ter coletado as evidências purificadas via Tool Call.",
+                2. NUNCA restrinja a busca de forma restritiva ou hardcoded (Ex: NUNCA USE 'site:gov.br'). Submeta os termos limpos. O Motor Interno cuidará do Crawler Global (Cíbrido).\n\
+                3. Recomenda-se realizar uma busca pontual, no máximo duas, consolidando os resultados. Não emule um ciclo infinito de pesquisas tentando buscar a perfeição absolutas em migalhas.\n\
+                4. Caso encontre informações parciais após a busca, não recuse. Formule o relatório em cima do que foi minerado da Common Crawl Web, mantendo as citações e a veracidade.",
                 anchor_directive
             )
         };
@@ -631,7 +629,7 @@ pub async fn run_deep_research_handler(
                                         let _ = TRAINER_LOGS.send(format!("[The Honest Inquisitor] Acionando Inquisidor Único de Confiança: {}", auth_inquisitor));
                                         
                                         // Roda a extração rigorosamente restrita do Modelo Solitário Eleito
-                                        let res_inquisitor = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), is_firewall_enabled).await;
+                                        let res_inquisitor = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), target_model_name.clone(), is_firewall_enabled).await;
                                         
                                         // A LÓGICA DE ACAREAMENTO (SINGLE-AGENT TRUSTED)
                                         let inquisitor_failed = if is_firewall_enabled { res_inquisitor.contains("DADO NÃO ENCONTRADO") || res_inquisitor.contains("Falha do aluno") } else { false };
@@ -693,7 +691,7 @@ pub async fn run_deep_research_handler(
                                                     let sq_string = sq.to_string();
                                                     let _ = TRAINER_LOGS.send(format!("[The Honest Inquisitor] Sub-Agente Low-End Eleito Para Fallback: {}", auth_inquisitor));
                                                     
-                                                    let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), is_firewall_enabled).await;
+                                                    let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), target_model_name.clone(), is_firewall_enabled).await;
                                                     
                                                     let inquisitor_failed_fb = if is_firewall_enabled { res_inquisitor_fb.contains("DADO NÃO ENCONTRADO") || res_inquisitor_fb.contains("Falha do aluno") } else { false };
                                                     
@@ -767,14 +765,22 @@ pub async fn run_deep_research_handler(
         }
 
         if wait_or_cancel(500, &token).await { return; }
+        
+        // BUGFIX DO AGENTIC LOOP INFINITO: 
+        // Se o Mestre consumiu todos os 5 ciclos batendo ferramentas e NÃO gerou texto final, 
+        // `synthesized_report` fica vazio, apagando todos os fatos brutos para o Scribe.
+        if synthesized_report.trim().is_empty() && !all_sources.is_empty() {
+            let _ = TRAINER_LOGS.send("[Agentic Loop] O Mestre finalizou o limite de chamadas (5 Turns) sem sintetizar a resposta. Forçando dump dos fatos extraídos para o Scribe.".to_string());
+            synthesized_report = all_sources.join("\n\n=== FACTUAL BORDER ===\n\n");
+        }
 
         // [STEP 2]: Epistemic Hard-Kill Vaccine & Scribe Formatting
         let _ = TRAINER_LOGS.send("[STEP 2] Acionando Epistemic Hard-Kill Vaccine & Scribe...".to_string());
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
-        let final_markdown_report = if all_sources.is_empty() && is_firewall_enabled {
-            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE HARD-KILL] Zero dados extrativos validados pela Trindade. Acionando Firewall Cognitivo mas preservando o raciocínio final do Mestre.".to_string());
-            format!(">[!WARNING] **OPERAÇÃO ABORTADA PELO FIREWALL COGNITIVO:** Nenhuma fonte web passou no crivo da Inquisição Cíbrida (Vazio Epistêmico ou WAF Intransponível). Para satisfazer a política de Defesa 'Anti-Alucinação Numérica', a dedução pura da IA está isolada abaixo.\n\n### Último Raciocínio (Chain of Thought):\n> {}", synthesized_report)
+        let final_markdown_report = if all_sources.is_empty() {
+            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE SOFT-FAIL] Zero dados extrativos validados. Reportando tentativa falha.".to_string());
+            format!(">[!WARNING] **ALERTA DE SEGURANÇA SOBERANA:** Mesmo explorando ferramentas de navegação profunda, o orquestrador não conseguiu isolar blocos de texto que respondessem a esta exata pergunta. A síntese livre do modelo Mestre está abaixo para seu referencial.\n\n### Raciocínio (Sintetizador Principal):\n{}", synthesized_report)
         } else if is_low_end {
             let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
             let scribe_prompt = format!(

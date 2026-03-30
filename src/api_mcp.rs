@@ -37,7 +37,9 @@ pub struct JsonRpcRequest {
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<Value>,
 }
 
@@ -91,11 +93,14 @@ pub async fn mcp_message_handler(
 
     if let Some(sender) = tx {
         // Processa o Método RPC
+        let is_notification = payload.id.is_none();
         let response_payload = handle_rpc_method(&state, payload).await;
         
-        // Dispara de volta pela SSE (Event: message)
-        if let Ok(json_str) = serde_json::to_string(&response_payload) {
-            let _ = sender.send(json_str);
+        // Dispara de volta pela SSE (Event: message) - Apenas se não for Notificação
+        if !is_notification {
+            if let Ok(json_str) = serde_json::to_string(&response_payload) {
+                let _ = sender.send(json_str);
+            }
         }
         
         (axum::http::StatusCode::ACCEPTED, "Accepted").into_response()
@@ -155,8 +160,8 @@ async fn handle_rpc_method(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRp
     }
 
     // Execução Dinâmica de Ferramentas
-    if req.method == "tools/call"
-        && let Some(params) = req.params {
+    if req.method == "tools/call" {
+        if let Some(params) = req.params {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
             
@@ -174,6 +179,7 @@ async fn handle_rpc_method(state: &Arc<AppState>, req: JsonRpcRequest) -> JsonRp
                 error: None,
             };
         }
+    }
 
     // Ping e Respostas não suportadas
     if req.method == "ping" {

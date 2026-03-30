@@ -577,69 +577,10 @@ impl DeepResearchEngine {
     }
 
     /// Executa o algoritmo de Vetting Institucional.
-    /// Avalia cada link orgânico extraído e joga fontes Tier-1 e Tier-2 para o Topo do Index.
-    /// Puxa os domínios PRIMEIRO do Banco de Dados Dinâmico `trusted_sources`.
+    /// (DESATIVADO): O usuário determinou a abolição das amarras de Tiers.
     async fn assign_sovereign_trust_score(&self, links: Vec<String>) -> Vec<String> {
-        let mut tier_1_domains = self.trust_matrix.tier1.clone();
-        let mut tier_2_domains = self.trust_matrix.tier2.clone();
-        
-        // Fetch do SQLite (Source DB Primária)
-        if let Some(pool) = &self.db_pool
-            && let Ok(records) = sqlx::query(
-                "SELECT domain, tier FROM trusted_sources WHERE is_active = 1"
-            ).fetch_all(pool).await {
-                let mut db_t1 = Vec::new();
-                let mut db_t2 = Vec::new();
-                for r in records {
-                    use sqlx::Row;
-                    let domain: String = r.try_get("domain").unwrap_or_default();
-                    let tier: i32 = r.try_get("tier").unwrap_or(2);
-                    if tier == 1 { db_t1.push(domain); }
-                    else if tier == 2 { db_t2.push(domain); }
-                }
-                tier_1_domains.extend(db_t1);
-                tier_2_domains.extend(db_t2);
-            }
-
-        let mut scored_links: Vec<ScoredUrl> = links.into_iter().map(|url| {
-            let mut score = 0;
-            let url_lower = url.to_lowercase();
-            
-            // Phase 7: The 30% Trust Rule (Limiting absolute bias)
-            if tier_1_domains.iter().any(|d| url_lower.contains(d)) {
-                score += 50; // Tier 1: Guardian of Raw Numbers
-            } else if tier_2_domains.iter().any(|d| url_lower.contains(d)) {
-                score += 40; // Tier 2: Guardian of the Narrative
-            } else if self.trust_matrix.encyclopedia.iter().any(|d| url_lower.contains(d)) {
-                score += 20; // Wikipedia
-            } else if url_lower.contains(".org") || url_lower.contains(".io") {
-                score += 5;
-            }
-
-            // Phase 7: Raio Secante Anti-SEO (O Assassinato de Páginas Afiliadas)
-            let seo_toxic_slugs = [
-                "top-10", "top-5", "melhores-", "best-", "-review", "guideline", "tutorial", 
-                "guias-", "comprar", "oferta", "promo", "vs-", "-opiniao", "coupon", "discount",
-                "produto/", "shop/", "affiliate"
-            ];
-            
-            if seo_toxic_slugs.iter().any(|spam| url_lower.contains(spam)) {
-                score -= 500;
-            }
-
-            // Penalize aggregators & Content Farms where genuine authors don't rank organically
-            if url_lower.contains("pinterest.") || url_lower.contains("quora.") || url_lower.contains("yahoo.answers") {
-                score -= 500;
-            }
-
-            ScoredUrl { url, score }
-        }).collect();
-
-        // Sort descending
-        scored_links.sort_by(|a, b| b.score.cmp(&a.score));
-        
-        // Strip out the metadata struct and return the raw string vectors
-        scored_links.into_iter().map(|s| s.url).collect()
+        // Retorna a lista orgânica de pesquisa intocada sem pontuar `.gov.br` ou aplicar penalidades.
+        links
     }
 
     /// Rotacionador de Identidade (Sovereign Cloak)
