@@ -69,6 +69,75 @@ pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String
     fallback.to_string()
 }
 
+pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
+    let client = reqwest::Client::new();
+    
+    if let Ok(res) = client.get("http://127.0.0.1:11434/api/tags").send().await
+        && let Ok(json) = res.json::<serde_json::Value>().await
+        && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+            
+            let mut all_models = Vec::new();
+            for m in models {
+                if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                    let n_lower = name.to_lowercase();
+                    if n_lower.contains("embed") || n_lower.contains("bge-") || n_lower.contains("nomic") {
+                        continue; // Proteção contra injetar embeddings como agentes
+                    }
+                    if let Some(size_str) = m.get("details").and_then(|d| d.get("parameter_size")).and_then(|s| s.as_str()) {
+                        let s_upper = size_str.to_uppercase();
+                        let num_val: f32 = if s_upper.ends_with('B') {
+                            s_upper.trim_end_matches('B').parse().unwrap_or(0.0)
+                        } else if s_upper.ends_with('M') {
+                            s_upper.trim_end_matches('M').parse::<f32>().unwrap_or(0.0) / 1000.0
+                        } else {
+                            0.0
+                        };
+                        
+                        if num_val > 0.0 && num_val < 300.0 { // Foco SLM / LLM
+                            all_models.push((name.to_string(), num_val));
+                        }
+                    }
+                }
+            }
+            
+            if all_models.is_empty() { return "llama3.2:latest".to_string(); }
+
+            // Mathematical Sizing Tiers
+            let (min_b, max_b) = match tier {
+                "intern" => (0.0, 2.9),
+                "junior" => (3.0, 4.0),
+                "senior" => (4.1, 9.5),
+                "specialist" => (9.6, 999.0),
+                _ => (3.0, 999.0)
+            };
+
+            // 1. Filter Strict Candidates within the Squad Tier
+            let mut strict_matches: Vec<_> = all_models.iter().filter(|(_, s)| *s >= min_b && *s <= max_b).collect();
+            if !strict_matches.is_empty() {
+                // Ascend to the largest and most capable LLM boundary inside this exact tier
+                strict_matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                let elected = strict_matches[0].0.clone();
+                tracing::info!("✨ [Dynamic Squad Scanner] Engatilhando Patente [{}] -> Encontrou mente local matemática: '{}'", tier, elected);
+                return elected;
+            }
+
+            // 2. Cascade Fallback (Nearest Median Distance)
+            // Se o usuário não tiver um "Sênior", a matemática escala verticalmente/horizontalmente pro vizinho mais próximo sem 404s.
+            let target_median = (min_b + max_b.min(30.0)) / 2.0;
+            all_models.sort_by(|a, b| {
+                let diff_a = (a.1 - target_median).abs();
+                let diff_b = (b.1 - target_median).abs();
+                diff_a.partial_cmp(&diff_b).unwrap_or(std::cmp::Ordering::Equal)
+            });
+            
+            let fallback_elected = all_models[0].0.clone();
+            tracing::warn!("⚠️ [Dynamic Squad Scanner] Fresta Cognitiva! Nenhum SLM estrito para a Patente [{}]. Substituição Euclidiana mais próxima: '{}'", tier, fallback_elected);
+            return fallback_elected;
+        }
+        
+    "llama3.2:latest".to_string()
+}
+
 use sqlx::Row;
 
 pub async fn query_most_honest_model(db_pool: Option<&sqlx::SqlitePool>, fallback: &str) -> String {

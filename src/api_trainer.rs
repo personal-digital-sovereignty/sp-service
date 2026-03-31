@@ -350,25 +350,25 @@ async fn execute_sub_analyst(
     let payload_size = reranked_md.len();
     
     let routed_sub_agent = if payload_size < 15_000 { // Estagiário
-        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Estagiário (1B-2B)", payload_size));
-        crate::api::discover_best_model(vec!["gemma2:2b", "qwen2.5:1.5b", "llama3.2:1b"], &sub_agent_model).await
+        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Estagiário Dinâmico", payload_size));
+        crate::api::discover_cognitive_model_by_tier("intern").await
     } else if payload_size < 50_000 { // Júnior/Pleno
-        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Analista Júnior (3B)", payload_size));
-        crate::api::discover_best_model(vec!["qwen2.5:3b", "llama3.2", "phi4-mini"], "qwen2.5:3b").await
+        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Analista Júnior Dinâmico", payload_size));
+        crate::api::discover_cognitive_model_by_tier("junior").await
     } else if payload_size < 120_000 { // Sênior
-        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Desenvolvedor Sênior (7B-9B)", payload_size));
-        crate::api::discover_best_model(vec!["llama3.1:8b", "qwen2.5:7b", "gemma2:9b"], "llama3.1:8b").await
+        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Desenvolvedor Sênior Dinâmico", payload_size));
+        crate::api::discover_cognitive_model_by_tier("senior").await
     } else { // Especialista
-        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes (MASSIVO!): Escalonando Especialista (14B+)", payload_size));
-        crate::api::discover_best_model(vec!["qwen2.5:14b", "phi4:14b", "llama3.1:8b", "qwen2.5:7b"], "llama3.1:8b").await
+        let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes (MASSIVO!): Escalonando Especialista Dinâmico", payload_size));
+        crate::api::discover_cognitive_model_by_tier("specialist").await
     };
 
     // A Sufficiency Gate JAMAIS pode ser um Estagiário, pois julgar suficiência factual exige raciocínio dedutivo mínimo (3B min).
     // Se a carga for massiva (>50k), o gate também sobe para Sênior.
     let gate_model = if payload_size < 50_000 {
-        crate::api::discover_best_model(vec!["qwen2.5:3b", "llama3.2", "phi4-mini"], "qwen2.5:3b").await
+        crate::api::discover_cognitive_model_by_tier("junior").await
     } else {
-        crate::api::discover_best_model(vec!["llama3.1:8b", "qwen2.5:7b", "gemma2:9b"], "llama3.1:8b").await
+        crate::api::discover_cognitive_model_by_tier("senior").await
     };
     
     let gate_system = "You are a data sufficiency checker. Your only job is to answer: 'Does the retrieved context contain enough specific numerical data and facts to answer the query?' Output ONLY valid JSON: {\"sufficient\": true, \"fields_found\": [\"<field1>\"]} or {\"sufficient\": false, \"missing\": [\"<field1>\"], \"reason\": \"<specific gap>\"}. Do NOT attempt to answer the original query. Do NOT generate any analysis.";
@@ -627,8 +627,7 @@ pub async fn run_deep_research_handler(
         // --- PHASE 41: THE HONEST INQUISITOR (SINGLE AGENT) ---
         // Eliminação da Trindade (Quórum) por sobrecarga de processamento. 
         // A extração agora elege apenas UM sub-agente, classificado pelo banco SQLite como o que menos alucinou no passado.
-        let sub_hierarchy_trusted = vec!["qwen2.5:3b", "gemma2:2b", "phi4-mini", "llama3.2"];
-        let fallback_inquisitor = crate::api::discover_best_model(sub_hierarchy_trusted, "qwen2.5:3b").await;
+        let fallback_inquisitor = crate::api::discover_cognitive_model_by_tier("junior").await;
         
         // Elege o modelo empiricamente mais honesto (Ignora deepseek pois o prompt zero-shot quebra o json)
         let auth_inquisitor = crate::api::query_most_honest_model(engine_arc.db_pool.as_ref(), &fallback_inquisitor).await;
@@ -884,13 +883,9 @@ pub async fn run_deep_research_handler(
                 prompt, synthesized_report
             );
             
-            let scribe_hierarchy = vec![
-                "qwen2.5:14b", "gemma2:9b", "gemma2",
-                "llama3.1:8b", "llama3.1",
-                "qwen2.5:7b", "qwen2.5", "mistral", "mixtral"
-            ];
-            
-            let scribe_model = crate::api::discover_best_model(scribe_hierarchy, &target_model_name).await;
+            // A Scribe Phase EXIGE formatadores experientes porque o SLM local era muito fraco.
+            // Escalonando verticalmente para matemática pura sem hardcode.
+            let scribe_model = crate::api::discover_cognitive_model_by_tier("senior").await;
             if scribe_model != target_model_name {
                 let _ = TRAINER_LOGS.send(format!("[Scribe Orchestrator] Auto-elevação de Córtex: Escalonando para '{}' visando formatar a resposta.", scribe_model));
             }
