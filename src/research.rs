@@ -700,12 +700,14 @@ impl DeepResearchEngine {
         }
 
         tracing::info!("🦁 [Brave Search] Invocando API nativa de privacidade para contornar WAF.");
-        let url = format!("https://api.search.brave.com/res/v1/web/search?q={}&count=15", urlencoding::encode(query));
+        // Assegurando que a API externa filtre nativamente conteúdos em língua portuguesa (pt-BR)
+        let url = format!("https://api.search.brave.com/res/v1/web/search?q={}&count=15&search_lang=pt&country=br", urlencoding::encode(query));
         
         let req = self.client.get(&url)
             .header("Accept", "application/json")
             .header("Accept-Encoding", "gzip")
             .header("X-Subscription-Token", api_key)
+            .header("Accept-Language", "pt-BR,pt;q=0.9,en-US;q=0.8")
             .send()
             .await;
 
@@ -757,7 +759,7 @@ impl DeepResearchEngine {
 
         for base_url in instances {
             tracing::info!("🔄 [SearxNG Agent] Simulando tráfego na instância P2P: {}", base_url);
-            let url = format!("{}/search?q={}&format=json", base_url, urlencoding::encode(query));
+            let url = format!("{}/search?q={}&format=json&language=pt-BR", base_url, urlencoding::encode(query));
             
             let req = self.client.get(&url).send().await;
             

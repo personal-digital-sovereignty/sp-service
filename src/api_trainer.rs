@@ -808,7 +808,20 @@ pub async fn run_deep_research_handler(
                         }
                     } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
                         tracing::error!("[Ollama Synthesizer ERRO]: {}", err);
-                        synthesized_report = format!("Falha ao gerar síntese local. Erro da API Ollama: {}", err);
+                        
+                        let pt_br_error = if err.contains("does not support tools") {
+                            "O modelo neural selecionado não possui suporte nativo à arquitetura Agentic Loop (Uso Autorizado de Ferramentas). Por favor, eleja um modelo compatível como Mestre Orquestrador (ex: Qwen 2.5, Llama 3.1+ ou Mistral).".to_string()
+                        } else if err.contains("not found") {
+                            "O modelo não foi localizado no seu registro local do Ollama.".to_string()
+                        } else if err.to_lowercase().contains("connection refused") {
+                            "Conexão com o nó do Ollama foi recusada.".to_string()
+                        } else if err.to_lowercase().contains("timeout") {
+                            "O modelo extrapolou o tempo limite de inferência (Timeout/OOM).".to_string()
+                        } else {
+                            format!("Intervenção necessária. Código bruto da API estrangeira: {}", err)
+                        };
+
+                        synthesized_report = format!("**Falha Estrutural ao gerar síntese local.**\n> {}", pt_br_error);
                         break;
                     }
                 }
