@@ -732,18 +732,37 @@ pub async fn run_deep_research_handler(
                                 if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}'))
                                     && start < end {
                                         let json_str = &content[start..=end];
-                                        // Extração agressiva da string mais longa do json caso não obedeça o Schema original ("search_query")
+                                        // Extração agressiva da string mais longa do json ignorando se o payload é um Object ou Array!
                                         let mut sq_extracted = "".to_string();
+                                        
+                                        // 1. Tenta varrer parametricamente caso seja válido (Array ou Object)
                                         if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                            if let Some(params) = pseudo_json.get("parameters") {
-                                                if let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
-                                                    sq_extracted = sq.to_string();
-                                                } else { 
-                                                    // Fallback heurístico lendo outras strings alucinadas no JSON paramétrico ("object", "site", etc)
-                                                    for (k, v) in params.as_object().unwrap_or(&serde_json::Map::new()) {
+                                            // Se for um Array vazado (ex: Mistral / Qwen 14B)
+                                            let iter_objs = if let Some(arr) = pseudo_json.as_array() {
+                                                arr.clone()
+                                            } else { vec![pseudo_json.clone()] };
+                                            
+                                            for obj in iter_objs {
+                                                // Se tiver estrutura aninhada (function.parameters)
+                                                if let Some(func_obj) = obj.get("function") {
+                                                    if let Some(params) = func_obj.get("parameters") {
+                                                        if let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
+                                                            sq_extracted = sq.to_string(); break;
+                                                        }
+                                                    }
+                                                }
+                                                // Se for estrutura plana
+                                                if let Some(params) = obj.get("parameters") {
+                                                    if let Some(sq) = params.get("search_query").and_then(|q| q.as_str()) {
+                                                        sq_extracted = sq.to_string(); break;
+                                                    }
+                                                }
+                                                // Fallback lendo qualquer chave grande não-URL
+                                                if let Some(obj_map) = obj.as_object() {
+                                                    for (_, v) in obj_map {
                                                         if let Some(v_str) = v.as_str() {
                                                             if !v_str.starts_with("http") && v_str.len() > sq_extracted.len() {
-                                                                sq_extracted = v_str.to_string(); 
+                                                                sq_extracted = v_str.to_string();
                                                             }
                                                         }
                                                     }
@@ -751,13 +770,13 @@ pub async fn run_deep_research_handler(
                                             }
                                         }
 
-                                        // Extrema Urgência: Se a string falhou ou tentou cuspir somente URLs puras, desmembre a URL:
+                                        // Extrema Urgência: Se o Parser do Rust falhou violentamente, quebre tudo via sub-strings (Regex-free)
                                         if sq_extracted.is_empty() {
-                                            if let Some(url_match) = content.find("search_query=") {
-                                                let sub_url = &content[url_match + 13..];
-                                                if let Some(amp_idx) = sub_url.find('&').or(sub_url.find('"')).or(sub_url.find('\'')) {
-                                                    let encoded = &sub_url[..amp_idx];
-                                                    sq_extracted = encoded.replace('+', " ").to_string();
+                                            if let Some(idx) = content.find("\"search_query\"") {
+                                                let sub = &content[idx..];
+                                                let tokens: Vec<&str> = sub.split('"').collect();
+                                                if tokens.len() >= 4 { // ["search_query", ": ", "A B C", ...]
+                                                    sq_extracted = tokens[3].to_string();
                                                 }
                                             }
                                         }
@@ -870,8 +889,30 @@ pub async fn run_deep_research_handler(
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
         let final_markdown_report = if all_sources.is_empty() {
-            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE SOFT-FAIL] Zero dados extrativos validados. Reportando tentativa falha.".to_string());
-            format!(">[!WARNING] **ALERTA DE SEGURANÇA SOBERANA:** Mesmo explorando ferramentas de navegação profunda, o orquestrador não conseguiu isolar blocos de texto que respondessem a esta exata pergunta. A síntese livre do modelo Mestre está abaixo para seu referencial.\n\n### Raciocínio (Sintetizador Principal):\n{}", synthesized_report)
+            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE SOFT-FAIL] Zero dados extrativos validados. Injetando Query Zero-Shot ao Mestre para sanear a resposta visual...".to_string());
+            
+            let fallback_payload = serde_json::json!({
+                "model": target_model_name,
+                "messages": [
+                    {"role": "system", "content": "Não foi possível resgatar dados vivos na internet. Responda a pergunta do usuário baseando-se no seu conhecimento interno (Memória Paramétrica). Não cite buscas na web. Evite gerar códigos JSON. Responda em Markdown limpo."},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": false,
+                "options": { "num_ctx": 4096 }
+            });
+            let mut fallback_text = String::new();
+            if let Ok(res) = synthesis_client.post(&olla_url).json(&fallback_payload).send().await {
+                if let Ok(json) = res.json::<serde_json::Value>().await {
+                    if let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                        fallback_text = c.to_string();
+                    }
+                }
+            }
+            if fallback_text.is_empty() {
+                fallback_text = synthesized_report; // Rastro final em caso de apagão total
+            }
+
+            format!(">[!WARNING] **ALERTA DE SEGURANÇA SOBERANA:** Mesmo explorando ferramentas de navegação profunda, o orquestrador não conseguiu isolar blocos de texto que respondessem a esta exata pergunta. A síntese livre do modelo Mestre está abaixo para seu referencial.\n\n### Raciocínio (Sintetizador Principal):\n{}", fallback_text)
         } else if is_low_end {
             let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
             let scribe_prompt = format!(
