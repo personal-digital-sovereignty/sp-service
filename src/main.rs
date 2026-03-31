@@ -184,6 +184,8 @@ async fn main() {
             .post(api_settings::set_ollama_clusters_handler))
         .route("/v1/settings/searxng", axum::routing::get(api_settings::get_searxng_nodes_handler)
             .post(api_settings::set_searxng_nodes_handler))
+        .route("/v1/settings/cold_storage", axum::routing::get(api_settings::get_cold_storage_handler)
+            .post(api_settings::set_cold_storage_handler))
         .route("/v1/system/export_config", axum::routing::get(api_settings::export_config_handler))
         .route("/v1/system/import_config", axum::routing::post(api_settings::import_config_handler))
         .route("/v1/system/available_models", axum::routing::get(api_settings::get_available_models_handler))

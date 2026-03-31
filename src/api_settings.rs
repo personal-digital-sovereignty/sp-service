@@ -337,3 +337,44 @@ pub async fn get_user_guide_handler() -> impl IntoResponse {
         ).into_response()
     }
 }
+
+/// Rota GET /v1/settings/cold_storage
+pub async fn get_cold_storage_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let result = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'cold_storage'")
+        .fetch_optional(&state.db)
+        .await;
+
+    match result {
+        Ok(Some(row)) => {
+            let val: String = row.get("value_json");
+            let parsed: Value = serde_json::from_str(&val).unwrap_or(serde_json::json!({
+                "corporaVaultPath": "/Vault/Offline_Corpus",
+                "offlineCorpora": []
+            }));
+            Json(parsed).into_response()
+        },
+        _ => Json(serde_json::json!({
+                "corporaVaultPath": "/Vault/Offline_Corpus",
+                "offlineCorpora": []
+            })).into_response()
+    }
+}
+
+/// Rota POST /v1/settings/cold_storage
+pub async fn set_cold_storage_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<Value>,
+) -> impl IntoResponse {
+    let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
+    
+    let res = sqlx::query("INSERT INTO global_settings (id, value_json) VALUES ('cold_storage', ?) ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json")
+        .bind(json_str)
+        .execute(&state.db)
+        .await;
+
+    if res.is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database Error").into_response();
+    }
+
+    Json(serde_json::json!({"status": "ok"})).into_response()
+}
