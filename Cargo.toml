@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 # Web Framework & Async Runtime (O novo FastAPI / Uvicorn)
-axum = "0.7.5"
+axum = { version = "0.7.5", features = ["multipart"] }
 tokio = { version = "1.37.0", features = ["full"] }
 tower-http = { version = "0.6.1", features = ["cors"] }
 
