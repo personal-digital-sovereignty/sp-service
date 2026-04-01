@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use axum::{
     extract::{Query, State},
     response::{IntoResponse, sse::{Event, Sse}},
