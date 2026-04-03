@@ -276,7 +276,6 @@ fn find_chartable_subgrid(matrix: &[Vec<String>]) -> Option<SubGrid> {
                     }
                     
                     // Trace height
-                    let mut valid_height = true;
                     while max_r < matrix.len() {
                         let mut row_ok = true;
                         // Check if the whole width is numeric
