@@ -237,22 +237,98 @@ fn extract_text_from_xml(xml: &str, target_tag: &[u8]) -> Result<String, String>
     Ok(txt.trim().to_string())
 }
 
-fn is_matrix_chart_capable(matrix: &[Vec<String>]) -> bool {
-    if matrix.len() < 2 || matrix[0].len() < 2 { return false; }
-    // Check if the top row contains strings (series names)
-    // and if all subsequent rows have a string label on index 0, and parseable numbers on 1..
-    for i in 1..matrix.len() {
-        for j in 1..matrix[i].len() {
-            let cell = matrix[i][j].trim();
-            if cell.is_empty() { continue; } // ignore empty
-            if cell.parse::<f64>().is_err() {
-                return false; // Found a non-number in the data grid
+#[derive(Debug)]
+struct SubGrid {
+    row_start: usize,
+    row_end: usize,
+    col_start: usize,
+    col_end: usize,
+}
+
+fn find_chartable_subgrid(matrix: &[Vec<String>]) -> Option<SubGrid> {
+    if matrix.is_empty() { return None; }
+    
+    // Scan for the first row that looks like numbers preceded by a label
+    let mut best_grid: Option<SubGrid> = None;
+    let mut best_size = 0;
+
+    for i in 0..matrix.len() {
+        if matrix[i].is_empty() { continue; }
+        for j in 0..matrix[i].len() {
+            // Is this cell a number? Wait, we want to find the top-left of the numeric block.
+            // A numeric block typically has its first number at (start_row + 1, start_col + 1).
+            // Meaning (start_row, start_col+1..) are series labels, and (start_row+1.., start_col) are category labels.
+            
+            // Let's assume (i, j) is the anchor: the top-left EMPTY or String cell before the headers.
+            // So numeric data starts at (i+1, j+1).
+            let data_r = i + 1;
+            let data_c = j + 1;
+            
+            if data_r < matrix.len() && data_c < matrix[data_r].len() {
+                if matrix[data_r][data_c].trim().parse::<f64>().is_ok() {
+                    // Looks like numeric data! Let's trace how far it goes.
+                    let mut max_r = data_r;
+                    let mut max_c = data_c;
+                    
+                    // Trace width
+                    while max_c < matrix[data_r].len() && matrix[data_r][max_c].trim().parse::<f64>().is_ok() {
+                        max_c += 1;
+                    }
+                    
+                    // Trace height
+                    let mut valid_height = true;
+                    while max_r < matrix.len() {
+                        let mut row_ok = true;
+                        // Check if the whole width is numeric
+                        for c in data_c..max_c {
+                            if c >= matrix[max_r].len() || matrix[max_r][c].trim().parse::<f64>().is_err() {
+                                row_ok = false;
+                                break;
+                            }
+                        }
+                        if !row_ok { break; }
+                        max_r += 1;
+                    }
+                    
+                    let rows = max_r - data_r;
+                    let cols = max_c - data_c;
+                    
+                    if rows >= 1 && cols >= 1 {
+                        let size = rows * cols;
+                        if size > best_size {
+                            best_size = size;
+                            best_grid = Some(SubGrid {
+                                row_start: i,
+                                row_end: max_r - 1,
+                                col_start: j,
+                                col_end: max_c - 1,
+                            });
+                        }
+                    }
+                }
             }
         }
     }
-    // Limit to reasonable chart sizes
-    if matrix.len() > 30 || matrix[0].len() > 15 { return false; }
-    true
+    
+    if best_size >= 2 { best_grid } else { None }
+}
+
+fn extract_subgrid_matrix(matrix: &[Vec<String>], grid: &SubGrid) -> Vec<Vec<String>> {
+    let mut sub = Vec::new();
+    for r in grid.row_start..=grid.row_end {
+        if r < matrix.len() {
+            let mut sub_row = Vec::new();
+            for c in grid.col_start..=grid.col_end {
+                if c < matrix[r].len() {
+                    sub_row.push(matrix[r][c].clone());
+                } else {
+                    sub_row.push(String::new());
+                }
+            }
+            sub.push(sub_row);
+        }
+    }
+    sub
 }
 
 fn generate_svg_bar_chart(matrix: &[Vec<String>], title: &str) -> String {
@@ -367,22 +443,61 @@ fn parse_spreadsheet(path: &str) -> Result<String, String> {
                 matrix.push(text_row);
             }
 
-            if is_matrix_chart_capable(&matrix) {
-                let svg = generate_svg_bar_chart(&matrix, &sheet);
+            if let Some(subgrid) = find_chartable_subgrid(&matrix) {
+                let chart_matrix = extract_subgrid_matrix(&matrix, &subgrid);
+                let mut title = sheet.clone();
+                
+                // Attempt to find a title from rows above the chart
+                for r in (0..subgrid.row_start).rev() {
+                    let mut found = false;
+                    for c in 0..matrix[r].len() {
+                        let cell = matrix[r][c].trim();
+                        if !cell.is_empty() {
+                            title = cell.to_string();
+                            found = true;
+                            break;
+                        }
+                    }
+                    if found { break; }
+                }
+
+                let svg = generate_svg_bar_chart(&chart_matrix, &title);
                 let b64 = STANDARD.encode(svg.as_bytes());
                 result_md.push_str(&format!("![Chart]({b64})\n\n", b64 = format!("data:image/svg+xml;base64,{}", b64)));
             }
 
             if !matrix.is_empty() {
-                let headers = &matrix[0];
-                let header_row = headers.iter().map(|c| c.replace('|', "\\|")).collect::<Vec<String>>().join(" | ");
-                result_md.push_str(&format!("| {} |\n", header_row));
-                let sep_row = headers.iter().map(|_| "---".to_string()).collect::<Vec<String>>().join(" | ");
-                result_md.push_str(&format!("| {} |\n", sep_row));
+                // Determine bounding box for meaningful data to print as a table
+                let mut first_row = 0;
+                while first_row < matrix.len() && matrix[first_row].iter().all(|c| c.trim().is_empty()) {
+                    first_row += 1;
+                }
+                
+                if first_row < matrix.len() {
+                    let mut first_col = 0;
+                    for c in 0..matrix[first_row].len() {
+                        let mut empty_col = true;
+                        for r in first_row..matrix.len() {
+                            if c < matrix[r].len() && !matrix[r][c].trim().is_empty() {
+                                empty_col = false;
+                                break;
+                            }
+                        }
+                        if empty_col { first_col += 1; } else { break; }
+                    }
+                    
+                    let headers = &matrix[first_row];
+                    let header_row = headers.iter().skip(first_col).map(|c| c.replace('|', "\\|")).collect::<Vec<String>>().join(" | ");
+                    result_md.push_str(&format!("| {} |\n", header_row));
+                    let sep_row = headers.iter().skip(first_col).map(|_| "---".to_string()).collect::<Vec<String>>().join(" | ");
+                    result_md.push_str(&format!("| {} |\n", sep_row));
 
-                for r in matrix.iter().skip(1) {
-                    let md_row = r.iter().map(|c| c.replace('|', "\\|")).collect::<Vec<String>>().join(" | ");
-                    result_md.push_str(&format!("| {} |\n", md_row));
+                    for r in matrix.iter().skip(first_row + 1) {
+                        // skip entirely empty rows
+                        if r.iter().all(|c| c.trim().is_empty()) { continue; }
+                        let md_row = r.iter().skip(first_col).map(|c| c.replace('|', "\\|")).collect::<Vec<String>>().join(" | ");
+                        result_md.push_str(&format!("| {} |\n", md_row));
+                    }
                 }
             }
             result_md.push_str("\n");
