@@ -136,7 +136,9 @@ impl SyncEngine {
 
             // Loop assíncrono recebendo eventos
             while let Some(event) = watcher_rx.recv().await {
-                if let notify::event::EventKind::Create(_) | notify::event::EventKind::Modify(notify::event::ModifyKind::Data(_)) = event.kind {
+                if matches!(event.kind, notify::event::EventKind::Create(_) 
+                    | notify::event::EventKind::Modify(notify::event::ModifyKind::Data(_)) 
+                    | notify::event::EventKind::Modify(notify::event::ModifyKind::Name(_))) {
                     for path in event.paths {
                         if path.is_file() {
                             let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
@@ -189,19 +191,21 @@ impl SyncEngine {
                             });
                         }
                     }
-                } else if let notify::event::EventKind::Remove(_) = event.kind {
+                } else if matches!(event.kind, notify::event::EventKind::Remove(_) | notify::event::EventKind::Modify(notify::event::ModifyKind::Name(_))) {
                     for path in event.paths {
                         let path_str = path.to_string_lossy().to_string();
                         
-                        // Garante que só tente purgar se existir no banco (evita spam de pastas excluídas)
-                        let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sensus_documents WHERE file_path = ?)")
-                            .bind(&path_str)
-                            .fetch_one(&db).await.unwrap_or(false);
-                            
-                        if exists {
-                            info!("🗑️ [Sensus GC] Evento de Remoção Físico Detectado. Erradicando Artefato Cíbrido: {}", path_str);
-                            let _ = sqlx::query("DELETE FROM sovereign_chunks WHERE file_path = ?").bind(&path_str).execute(&db).await;
-                            let _ = sqlx::query("DELETE FROM sensus_documents WHERE file_path = ?").bind(&path_str).execute(&db).await;
+                        // Se o caminho físico já não existir mais, é porque ele foi deletado ou movido (renomeado saindo do path antigo)
+                        if !std::path::Path::new(&path_str).exists() {
+                            let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sensus_documents WHERE file_path = ?)")
+                                .bind(&path_str)
+                                .fetch_one(&db).await.unwrap_or(false);
+                                
+                            if exists {
+                                info!("🗑️ [Sensus GC] Evento de Remoção Físico Detectado. Erradicando Artefato Cíbrido: {}", path_str);
+                                let _ = sqlx::query("DELETE FROM sovereign_chunks WHERE file_path = ?").bind(&path_str).execute(&db).await;
+                                let _ = sqlx::query("DELETE FROM sensus_documents WHERE file_path = ?").bind(&path_str).execute(&db).await;
+                            }
                         }
                     }
                 }
