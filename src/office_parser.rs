@@ -462,7 +462,7 @@ fn parse_spreadsheet(path: &str) -> Result<String, String> {
 
                 let svg = generate_svg_bar_chart(&chart_matrix, &title);
                 let b64 = STANDARD.encode(svg.as_bytes());
-                result_md.push_str(&format!("<img src=\"data:image/svg+xml;base64,{}\" alt=\"Native Chart\" style=\"max-width: 100%; border-radius: 8px; margin: 16px 0; border: 1px solid #1e293b;\" />\n\n", b64));
+                result_md.push_str(&format!(":::CHART_BASE64:{}:::\n\n", b64));
             }
 
             if !matrix.is_empty() {
