@@ -356,9 +356,12 @@ fn generate_svg_bar_chart(matrix: &[Vec<String>], title: &str) -> String {
     let chart_w = width - pad_left - pad_right;
     let chart_h = height - pad_top - pad_bottom;
     
-    let mut svg = String::new();
-    svg.push_str(&format!(r##"<svg width="{}" height="{}" xmlns="http://www.w3.org/2000/svg" style="background:#0f172a; font-family:sans-serif; border-radius: 8px;">"##, width, height));
-    
+    let mut svg = format!(
+        r##"<?xml version="1.0" encoding="utf-8"?>
+<svg width="{}" height="{}" xmlns="http://www.w3.org/2000/svg" style="background:#0f172a; font-family:sans-serif; border-radius: 8px;">"##,
+        chart_w + pad_left + pad_right,
+        chart_h + pad_top + pad_bottom
+    );
     svg.push_str(r##"<rect width="100%" height="100%" fill="#0f172a" rx="8" />"##);
     svg.push_str(&format!(r##"<text x="{}" y="35" fill="#f8fafc" font-size="20" font-weight="bold" text-anchor="middle">{}</text>"##, pad_left + chart_w/2, title));
     
@@ -417,7 +420,6 @@ fn escape_xml(s: &str) -> String {
 
 fn parse_spreadsheet(path: &str) -> Result<String, String> {
     use calamine::{open_workbook_auto, Reader, Data};
-    use base64::{Engine as _, engine::general_purpose::STANDARD};
 
     let mut workbook = open_workbook_auto(path).map_err(|e| format!("Failed to open workbook: {}", e))?;
     let mut result_md = String::new();
@@ -442,10 +444,7 @@ fn parse_spreadsheet(path: &str) -> Result<String, String> {
                 matrix.push(text_row);
             }
 
-            if let Some(subgrid) = find_chartable_subgrid(&matrix) {
-                let chart_matrix = extract_subgrid_matrix(&matrix, &subgrid);
-
-
+            if let Some(_subgrid) = find_chartable_subgrid(&matrix) {
                 // Use standard TipTap Image Markdown Syntax pointing to the live local Sovereign Vault API!
                 let url = format!("http://localhost:38001/v1/vault/office_chart?path={}&sheet={}", urlencoding::encode(path), urlencoding::encode(&sheet));
                 result_md.push_str(&format!("![Native Chart]({})\n\n", url));
