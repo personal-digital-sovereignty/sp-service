@@ -222,7 +222,7 @@ if let Err(security_alert) = crate::guardrails::evaluate_prompt(&human_prompt, &
     let chunk = crate::models::OpenAIChatChunkResponse {
         id: format!("chatcmpl-sec-{}", uuid::Uuid::new_v4()),
         object: "chat.completion.chunk".to_string(),
-        created: chrono::Utc::now().timestamp(),
+        created: chrono::Local::now().timestamp(),
         model: requested_model.clone(),
         choices: vec![crate::models::OpenAIChatChunkChoice {
             index: 0,
@@ -326,7 +326,7 @@ if human_prompt.to_lowercase().starts_with("/plan") {
     let chunk = crate::models::OpenAIChatChunkResponse {
         id: format!("chatcmpl-plan-{}", uuid::Uuid::new_v4()),
         object: "chat.completion.chunk".to_string(),
-        created: chrono::Utc::now().timestamp(),
+        created: chrono::Local::now().timestamp(),
         model: requested_model.clone(),
         choices: vec![crate::models::OpenAIChatChunkChoice {
             index: 0,
@@ -367,7 +367,7 @@ tokio::spawn(async move {
         let chunk = crate::models::OpenAIChatChunkResponse {
             id: format!("chatcmpl-thought-{}", uuid::Uuid::new_v4()),
             object: "chat.completion.chunk".to_string(),
-            created: chrono::Utc::now().timestamp(),
+            created: chrono::Local::now().timestamp(),
             model: requested_model.clone(),
             choices: vec![crate::models::OpenAIChatChunkChoice {
                 index: 0,
@@ -410,7 +410,7 @@ if payload.deep_research.unwrap_or(false) {
         send_thought("<thought>Iniciando Sovereign Search Engine (WAG)...</thought>\n<thought>Acionando Sub-LLM O Doutrinador...</thought>\n");
         // 1. Notifica o Frontend que o Loop Começou
         let _ = state.log_sender.send(crate::models::LogEntry {
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: chrono::Local::now().to_rfc3339(),
             level: "agent".to_string(),
             message: "🧠 [Deep Research] Acionando O Doutrinador (Sub-LLM) para quebrar sua pergunta em Múltiplas Queries Analíticas...".to_string(),
         });
@@ -479,7 +479,7 @@ if payload.deep_research.unwrap_or(false) {
         }
 
         let _ = state.log_sender.send(crate::models::LogEntry {
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: chrono::Local::now().to_rfc3339(),
             level: "agent".to_string(),
             message: format!("📡 [Deep Research] 3 Queries Forjadas: {:?}. Lançando {} Spiders Concurrentes à Malha SearxNG...", extracted_queries, extracted_queries.len()),
         });
@@ -515,7 +515,7 @@ if payload.deep_research.unwrap_or(false) {
         all_links.truncate(6); // Poda agressiva p/ não atolar a KV Cache GPU!
 
         let _ = state.log_sender.send(crate::models::LogEntry {
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: chrono::Local::now().to_rfc3339(),
             level: "agent".to_string(),
             message: format!("🕸️ [Deep Research] Capturado top {} Master-URLs. Lendo simultaneamente de {} IPs Cíbridos...", all_links.len(), all_links.len()),
         });
@@ -544,7 +544,7 @@ if payload.deep_research.unwrap_or(false) {
         }
 
         let _ = state.log_sender.send(crate::models::LogEntry {
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: chrono::Local::now().to_rfc3339(),
             level: "agent".to_string(),
             message: "✅ [Deep Research] Dossiê Multi-Site Concluído Massivamente! Despejando Relatório Estratégico no Córtex Principal.".to_string(),
         });
@@ -868,7 +868,7 @@ let res = match state
         let err_chunk = crate::models::OpenAIChatChunkResponse {
             id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
             object: "chat.completion.chunk".to_string(),
-            created: chrono::Utc::now().timestamp(),
+            created: chrono::Local::now().timestamp(),
             model: ollama_model.clone(),
             choices: vec![crate::models::OpenAIChatChunkChoice {
                 index: 0,
@@ -905,7 +905,7 @@ let res = match state
                     let err_chunk = crate::models::OpenAIChatChunkResponse {
                         id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
                         object: "chat.completion.chunk".to_string(),
-                        created: chrono::Utc::now().timestamp(),
+                        created: chrono::Local::now().timestamp(),
                         model: ollama_model.clone(),
                         choices: vec![crate::models::OpenAIChatChunkChoice {
                             index: 0,
@@ -935,7 +935,7 @@ let res = match state
             let err_chunk = crate::models::OpenAIChatChunkResponse {
                 id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
                 object: "chat.completion.chunk".to_string(),
-                created: chrono::Utc::now().timestamp(),
+                created: chrono::Local::now().timestamp(),
                 model: ollama_model.clone(),
                 choices: vec![crate::models::OpenAIChatChunkChoice {
                     index: 0,
@@ -1097,7 +1097,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                 
                                 let tps = if duration > 0 { (total_real_tokens as f64 / (duration as f64 / 1000.0)).round() } else { 0.0 };
                                 let _ = tracking_log_sender.send(crate::models::LogEntry {
-                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    timestamp: chrono::Local::now().to_rfc3339(),
                                     level: "system".to_string(),
                                     message: format!("⚡ Geração de Conhecimento: {} tokens a {} T/s [{}]", total_real_tokens, tps, tracking_model),
                                 });

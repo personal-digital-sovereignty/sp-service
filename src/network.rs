@@ -33,7 +33,7 @@ pub fn init_network_identity() -> NetworkIdentity {
     
     let claims = Claims {
         sub: "sovereign_pairing".to_owned(),
-        exp: (chrono::Utc::now() + chrono::Duration::try_days(30).unwrap()).timestamp() as usize,
+        exp: (chrono::Local::now() + chrono::Duration::try_days(30).unwrap()).timestamp() as usize,
     };
     
     let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).unwrap();

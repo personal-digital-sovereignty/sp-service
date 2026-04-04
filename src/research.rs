@@ -93,8 +93,17 @@ impl DeepResearchEngine {
             let domain = Self::extract_domain(url);
             let uuid_str = uuid::Uuid::new_v4().to_string();
             
+            let is_critical = domain.ends_with(".gov.br") || domain.contains("bcb.gov.br") || domain.contains("ibge.gov.br") || domain.contains("anp.gov.br") || domain.contains("fgv.br");
+            let is_commercial = domain.contains("tradingeconomics.com") || domain.contains("infomoney.com.br") || domain.contains("valor.globo");
+            
             let quarantine = if !html_success && !ghost_success {
-                "datetime('now', '+2 hours')"
+                if is_critical {
+                    "datetime('now', '+5 minutes')"
+                } else if is_commercial {
+                    "datetime('now', '+2 hours')"
+                } else {
+                    "datetime('now', '+3 days')"
+                }
             } else {
                 "NULL"
             };
@@ -122,13 +131,34 @@ impl DeepResearchEngine {
     }
 
     /// Realiza a varredura e o scrape profundo da URL alvo.
-    pub async fn scrape_url(&self, url: &str) -> Result<String, String> {
+    pub async fn scrape_url(&self, original_url: &str) -> Result<String, String> {
+        let mut url = original_url.to_string();
+
         // --- QUARANTINE FIREWALL ---
         if let Some(pool) = &self.db_pool {
-            let domain = Self::extract_domain(url);
+            let domain = Self::extract_domain(&url);
             if let Ok(Some(date)) = sqlx::query_scalar::<_, String>("SELECT quarantine_until FROM domain_extraction_ledger WHERE domain = ? AND quarantine_until > CURRENT_TIMESTAMP").bind(&domain).fetch_optional(pool).await {
-                tracing::warn!("⛔ [Sovereign Firewall] Domínio '{}' está restrito na Quarentena de WAF até {}. Economizando ciclos de CPU e ignorando URL.", domain, date);
-                return Err(format!("Domain '{}' is currently Quarantined due to WAF Blocks.", domain));
+                
+                // Cadeia de Fallback Estruturada
+                if domain.contains("ibge") && !url.contains("sidra") {
+                    tracing::warn!("⛔ [Sovereign Firewall] IBGE restrito até {}. Fallback P2P: portal SIDRA.", date);
+                    url = "https://sidra.ibge.gov.br/tabela/1737".to_string();
+                } else if domain.contains("bcb.gov.br") && !url.contains("dadosabertos") {
+                    tracing::warn!("⛔ [Sovereign Firewall] BCB restrito até {}. Fallback P2P: Dados Abertos.", date);
+                    url = "https://dadosabertos.bcb.gov.br/dataset/4449".to_string();
+                } else if domain.contains("tradingeconomics.com") {
+                    tracing::warn!("⛔ [Sovereign Firewall] TradingEconomics restrito até {}. Fallback alternativo: Dados de Mercado.", date);
+                    url = "https://www.dadosdemercado.com.br/indices/ipca".to_string();
+                } else {
+                    tracing::warn!("⛔ [Sovereign Firewall] Domínio '{}' está restrito na Quarentena de WAF até {}. Economizando ciclos de CPU e ignorando URL.", domain, date);
+                    return Err(format!("Domain '{}' is currently Quarantined due to WAF Blocks.", domain));
+                }
+
+                // Re-validate the fallback URL
+                let new_domain = Self::extract_domain(&url);
+                if let Ok(Some(new_date)) = sqlx::query_scalar::<_, String>("SELECT quarantine_until FROM domain_extraction_ledger WHERE domain = ? AND quarantine_until > CURRENT_TIMESTAMP").bind(&new_domain).fetch_optional(pool).await {
+                    return Err(format!("Fallback Domain '{}' is also Quarantined until {}.", new_domain, new_date));
+                }
             }
         }
 
@@ -138,8 +168,8 @@ impl DeepResearchEngine {
             format!("https://r.jina.ai/{}", url),
             format!("https://md.dita.to/{}", url),
             format!("https://txtify.it/{}", url), // Fallback 1: Txtify Reader
-            format!("https://urltomarkdown.com/api?url={}", urlencoding::encode(url)), // Fallback 2: General URL to MD
-            format!("https://api.firecrawl.dev/v0/scrape?url={}", urlencoding::encode(url)), // Fallback 3: Firecrawl Public Tier
+            format!("https://urltomarkdown.com/api?url={}", urlencoding::encode(&url)), // Fallback 2: General URL to MD
+            format!("https://api.firecrawl.dev/v0/scrape?url={}", urlencoding::encode(&url)), // Fallback 3: Firecrawl Public Tier
         ];
 
         for reader_url in cloud_readers {
@@ -164,7 +194,7 @@ impl DeepResearchEngine {
 
                         if markdown.len() > 200 && !markdown.to_lowercase().contains("enable javascript") && !markdown.contains("Access Denied") && !markdown.contains("Just a moment...") {
                             tracing::info!("☁️ [Cloud Reader Offload] Markdown resgatado com sucesso via {} ({} bytes). CPU protegida!", reader_url.split('/').nth(2).unwrap_or("Proxy"), markdown.len());
-                            self.update_domain_ledger(url, true, false).await;
+                            self.update_domain_ledger(&url, true, false).await;
                             return Ok(markdown);
                         }
                     }
@@ -174,18 +204,18 @@ impl DeepResearchEngine {
         
         tracing::warn!("⚠️ [Cloud Offload Falhou] Retornando ao Scraper Nativo em Tela Cheia (Heavy CPU) para: {}", url);
 
-        let response = self.client.get(url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await.map_err(|e| format!("HTTP Request failed: {}", e))?;
+        let response = self.client.get(&url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await.map_err(|e| format!("HTTP Request failed: {}", e))?;
         
         if !response.status().is_success() {
             // WAF Ghost Fallback! Se tomar block da nuvem, não desiste: bate no arquivo morto multi-plataforma.
             if response.status() == 403 || response.status() == 401 || response.status() == 429 || response.status() == 406 || response.status() == 503 {
                 tracing::warn!("🛡️ [WAF Blocked] Defesa Interceptada (HTTP {}). Acionando The Ghost Fallback Protocol...", response.status());
-                if let Ok(ghost_data) = self.scrape_ghost_fallbacks(url).await {
-                    self.update_domain_ledger(url, false, true).await;
+                if let Ok(ghost_data) = self.scrape_ghost_fallbacks(&url).await {
+                    self.update_domain_ledger(&url, false, true).await;
                     return Ok(ghost_data);
                 }
             }
-            self.update_domain_ledger(url, false, false).await;
+            self.update_domain_ledger(&url, false, false).await;
             return Err(format!("Server returned HTTP {}", response.status()));
         }
 
@@ -196,7 +226,7 @@ impl DeepResearchEngine {
         // de DOM (que estaria vazio) e saca diretamente do cofre JSON original!
         if let Some(json_payload) = self.extract_hydration_json(&html_content) {
             tracing::info!("🎯 [Ghost Scraper] Payload SSR Interceptado! Ignorando DOM Tree parser e entregando Ouro Puro.");
-            self.update_domain_ledger(url, true, false).await;
+            self.update_domain_ledger(&url, true, false).await;
             return Ok(json_payload);
         }
 
@@ -210,15 +240,15 @@ impl DeepResearchEngine {
             
         if is_suspect_spa {
             tracing::warn!("⚠️ [The Nurse / Scraper] Vazio Epistêmico Detectado! SPA interceptado ({} bytes extraídos). Acionando The Ghost Fallback Protocol...", markdown.len());
-            if let Ok(ghost_markdown) = self.scrape_ghost_fallbacks(url).await
+            if let Ok(ghost_markdown) = self.scrape_ghost_fallbacks(&url).await
                 && ghost_markdown.len() > markdown.len() {
                     tracing::info!("✅ [Ghost Protocol] Sucesso! Payload histórico resgatado do Vácuo Multi-Plataforma.");
-                    self.update_domain_ledger(url, false, true).await;
+                    self.update_domain_ledger(&url, false, true).await;
                     return Ok(ghost_markdown);
                 }
-            self.update_domain_ledger(url, false, false).await;
+            self.update_domain_ledger(&url, false, false).await;
         } else {
-            self.update_domain_ledger(url, true, false).await;
+            self.update_domain_ledger(&url, true, false).await;
         }
         
         Ok(markdown)

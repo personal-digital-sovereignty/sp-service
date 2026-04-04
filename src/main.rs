@@ -38,6 +38,14 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        write!(w, "{} ", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%z"))
+    }
+}
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]
@@ -69,6 +77,36 @@ async fn spa_static_handler(uri: Uri) -> impl IntoResponse {
     }
 }
 
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Sovereign falhou ao monitorar Ctrl+C");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("Sovereign falhou ao conectar listener SIGTERM")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+
+    tracing::warn!("🛑 SOVEREIGN SHUTDOWN ACTIVATE: Parada forçada via POSIX. Desocupando todas as portas e limpando memória RAM!");
+    
+    // Extirpa o processo na raiz. Garante que as dezenas de `tokio::spawn` em Background 
+    // (SyncEngine, Daemons) morram instantaneamente e a Porta seja liberada para o Kernel O.S.
+    std::process::exit(0);
+}
+
 // Estado Global (Músculo Cíbrido) compartilhado entre Threads
 pub struct AppState {
     pub http_client: Client,
@@ -88,7 +126,7 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "sovereign_core=info,axum=info".into()),
         )
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_timer(LocalTimer))
         .init();
 
     tracing::info!("🦀 Sovereign Core (Rust) Initializing...");
@@ -155,6 +193,7 @@ async fn main() {
         .route("/v1/vault/document/*id", axum::routing::get(api_vault::vault_document_read)
             .put(api_vault::vault_document_write))
         .route("/v1/vault/media", axum::routing::get(api_vault::vault_media_handler))
+        .route("/v1/vault/office_chart", axum::routing::get(api_vault::vault_office_chart_handler))
         .route("/v1/vault/fs/create", axum::routing::post(api_vault::vault_fs_create_handler))
         .route("/v1/vault/fs/rename", axum::routing::put(api_vault::vault_fs_rename_handler))
         .route("/v1/vault/fs/move", axum::routing::put(api_vault::vault_fs_move_handler))
@@ -298,5 +337,8 @@ async fn main() {
     network::start_mdns_beacon(&identity.alias, final_port);
     
     // Inicia o Servidor Nativo (Conector tipado pra permitir extração de IP pela LAN Guard)
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }

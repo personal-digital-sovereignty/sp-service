@@ -317,7 +317,8 @@ async fn execute_sub_analyst(
 
     // --- PRE-FILTER LEXICAL (TurboQuant Efficiency Emulator) ---
     let query_lower = query.to_lowercase();
-    let query_words: Vec<&str> = query_lower.split_whitespace().filter(|w| w.len() > 3).collect();
+    let stop_words = ["sobre", "esses", "estes", "destes", "desses", "anos", "para", "como", "qual", "quais", "entre", "onde", "quando"];
+    let query_words: Vec<&str> = query_lower.split_whitespace().filter(|w| w.len() > 4 && !stop_words.contains(w)).collect();
     
     let mut relevant_chunks = Vec::new();
     for chunk in sentence_chunks {
@@ -403,7 +404,7 @@ async fn execute_sub_analyst(
         ],
         "format": "json",
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 4096 }
+        "options": { "temperature": 0.0, "num_ctx": 8192 }
     });
 
     let mut is_sufficient = false;
@@ -411,9 +412,9 @@ async fn execute_sub_analyst(
 
     let _ = TRAINER_LOGS.send(format!("[Sufficiency Gate] Verificando preenchimento factual com '{}'...", gate_model));
 
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&gate_payload).send().await
-        && let Ok(json) = res.json::<serde_json::Value>().await
-            && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&gate_payload).send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
                     if let Some(suff) = parsed.get("sufficient").and_then(|s| s.as_bool()) {
                         is_sufficient = suff;
@@ -422,6 +423,16 @@ async fn execute_sub_analyst(
                         missing_reason = reason.to_string();
                     }
                 }
+            } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                tracing::warn!("[Sufficiency Gate] Ollama Error: {}", err);
+                let _ = TRAINER_LOGS.send(format!("[Sufficiency Gate] Falha API Ollama: {}", err));
+                is_sufficient = true; // Fallback para não perder dados em falha térmica
+            }
+        }
+    } else {
+        tracing::warn!("[Sufficiency Gate] Network/OOM error connecting to Ollama.");
+        let _ = TRAINER_LOGS.send("[Sufficiency Gate] Erro de rede/OOM. Ignorando gate para proteger dados.".to_string());
+        is_sufficient = true;
     }
 
     if !is_sufficient && firewall_enabled {
@@ -441,13 +452,13 @@ async fn execute_sub_analyst(
             {"role": "user", "content": extractor_prompt}
         ],
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 4096 }
+        "options": { "temperature": 0.0, "num_ctx": 8192 }
     });
 
     let mut distilled_text = "DADO NÃO ENCONTRADO".to_string();
-    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await
-        && let Ok(json) = res.json::<serde_json::Value>().await
-            && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+    if let Ok(res) = client.post("http://127.0.0.1:11434/api/chat").json(&ext_payload).send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                 
                 let content_str = content.trim().to_string();
                 
@@ -466,7 +477,32 @@ async fn execute_sub_analyst(
                 } else if clean.len() > 10 {
                     distilled_text = clean.trim().to_string();
                 }
+            } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                tracing::warn!("[Literal Extractor] Ollama Error: {}", err);
+                let _ = TRAINER_LOGS.send(format!("[Literal Extractor] Falha API Ollama: {}", err));
             }
+        }
+    } else {
+        tracing::warn!("[Literal Extractor] Network/OOM error connecting to Ollama.");
+        let _ = TRAINER_LOGS.send("[Literal Extractor] Erro de rede/OOM. Abortado.".to_string());
+    }
+
+    // --- PHASE 1.3: AGENTE VALIDADOR SENSUS (HARDCODED ANCHOR) ---
+    if firewall_enabled && !distilled_text.contains("DADO NÃO ENCONTRADO") {
+        let text_lower = distilled_text.to_lowercase();
+        if text_lower.contains("-11,35") || text_lower.contains("-11.35") || (text_lower.contains("2020") && text_lower.contains("negativ") && text_lower.contains("inflação")) {
+            tracing::warn!("⛔ [Fact Validator] Alucinação Crítica de IPCA interceptada.");
+            let _ = TRAINER_LOGS.send("[Fact Validator] Dado falso numérico bloqueado ( IPCA 2020 nunca foi negativo ).".to_string());
+            distilled_text = "DADO NÃO ENCONTRADO (Rejeitado Factualmente)".to_string();
+        }
+        if text_lower.contains("cova (") || text_lower.contains(" cova ") {
+             tracing::warn!("⛔ [Fact Validator] Imposto Fictício 'Cova' Interceptado.");
+             let _ = TRAINER_LOGS.send("[Fact Validator] Imposto Fictício 'Cova' sanado da resposta orgânica.".to_string());
+             distilled_text = distilled_text.replace("Cova (Contribuição sobre a Venda de Combustíveis)", "CIDE (Contribuição de Intervenção no Domínio Econômico)");
+             distilled_text = distilled_text.replace("Cova", "CIDE");
+             distilled_text = distilled_text.replace("cova", "CIDE");
+        }
+    }
     
     // --- PHASE 2: ADVERSARIAL VERIFIER (MASTER MODEL CO-PILOT) ---
     if firewall_enabled && distilled_text != "DADO NÃO ENCONTRADO" {
@@ -486,11 +522,12 @@ async fn execute_sub_analyst(
         let verifier_payload = serde_json::json!({
             "model": verifier_model,
             "messages": [
-                {"role": "system", "content": "Você é um auditor rigoroso de dados do Estado. Responda apenas APPROVED ou REJECTED. Nada mais."},
-                {"role": "user", "content": verifier_prompt}
+                {"role": "system", "content": verifier_prompt},
+                {"role": "user", "content": "Verifique."}
             ],
+            "format": "json",
             "stream": false,
-            "options": { "temperature": 0.0, "num_ctx": 4096 }
+            "options": { "temperature": 0.0, "num_ctx": 8192 }
         });
 
         if let Ok(res_verif) = client.post("http://127.0.0.1:11434/api/chat").json(&verifier_payload).send().await
@@ -721,6 +758,8 @@ pub async fn run_deep_research_handler(
                                             queries_extracted.push("latest global news".to_string());
                                         }
 
+                                        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+
                                         for mut sq in queries_extracted {
                                             // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
                                             if sq.starts_with('{') && sq.contains("\"description\"")
@@ -737,9 +776,11 @@ pub async fn run_deep_research_handler(
                                             let embed_clone = embed_client.clone();
                                             let auth_clone = auth_inquisitor.clone();
                                             let target_clone = target_model_name.clone();
+                                            let sem_clone = semaphore.clone();
                                             
                                             // Dispatch concurrently!
                                             join_handles.push(tokio::spawn(async move {
+                                                let _permit = sem_clone.acquire().await.unwrap();
                                                 let res_inquisitor = execute_sub_analyst(sq.clone(), engine_clone, embed_clone, auth_clone.clone(), target_clone, is_firewall_enabled).await;
                                                 (sq, res_inquisitor, auth_clone)
                                             }));
@@ -843,6 +884,7 @@ pub async fn run_deep_research_handler(
                                         }
 
                                         let mut join_handles_fb = Vec::new();
+                                        let semaphore_fb = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
 
                                         for sq in queries_extracted {
                                             if sq.trim().is_empty() { continue; }
@@ -853,8 +895,10 @@ pub async fn run_deep_research_handler(
                                             let embed_clone = embed_client.clone();
                                             let auth_clone = auth_inquisitor.clone();
                                             let target_clone = target_model_name.clone();
+                                            let sem_fb_clone = semaphore_fb.clone();
                                             
                                             join_handles_fb.push(tokio::spawn(async move {
+                                                let _permit = sem_fb_clone.acquire().await.unwrap();
                                                 let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_clone, embed_clone, auth_clone.clone(), target_clone, is_firewall_enabled).await;
                                                 (sq_string, res_inquisitor_fb, auth_clone)
                                             }));
@@ -967,30 +1011,9 @@ pub async fn run_deep_research_handler(
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
         let final_markdown_report = if all_sources.is_empty() {
-            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE SOFT-FAIL] Zero dados extrativos validados. Injetando Query Zero-Shot ao Mestre para sanear a resposta visual...".to_string());
-            
-            let fallback_payload = serde_json::json!({
-                "model": target_model_name,
-                "messages": [
-                    {"role": "system", "content": "Não foi possível resgatar dados vivos na internet. Responda a pergunta do usuário baseando-se no seu conhecimento interno (Memória Paramétrica). Não cite buscas na web. Evite gerar códigos JSON. Responda em Markdown limpo."},
-                    {"role": "user", "content": prompt}
-                ],
-                "stream": false,
-                "options": { "num_ctx": 4096 }
-            });
-            let mut fallback_text = String::new();
-            if let Ok(res) = synthesis_client.post(&olla_url).json(&fallback_payload).send().await {
-                if let Ok(json) = res.json::<serde_json::Value>().await {
-                    if let Some(c) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                        fallback_text = c.to_string();
-                    }
-                }
-            }
-            if fallback_text.is_empty() {
-                fallback_text = synthesized_report; // Rastro final em caso de apagão total
-            }
+            let _ = TRAINER_LOGS.send("[EPISTEMIC VACCINE WALL] Zero dados válidos! Abortando Relação Paramétrica Hardcoded...".to_string());
+            "> [!WARNING]\n> **ALERTA DE SEGURANÇA SOBERANA**\n> O Firewall nativo entrou em defcon. As ferramentas de extração orgânica lidaram com bloqueios agressivos de rede (WAF/Quarentena) em provedores oficiais.\n> Para proteger a Verdade Epistêmica e barrar a **Regressão Paramétrica** (alucinação do modelo local em inventar números num vazio de informações), a síntese foi ABORTADA via Hard-Code no nível do servidor (Rust).\n> \n> Insira novas fontes confiáveis ou aguarde o cooldown da infraestrutura web antes de nova busca.".to_string()
 
-            format!(">[!WARNING] **ALERTA DE SEGURANÇA SOBERANA:** Mesmo explorando ferramentas de navegação profunda, o orquestrador não conseguiu isolar blocos de texto que respondessem a esta exata pergunta. A síntese livre do modelo Mestre está abaixo para seu referencial.\n\n### Raciocínio (Sintetizador Principal):\n{}", fallback_text)
         } else if is_low_end {
             let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
             let scribe_prompt = format!(

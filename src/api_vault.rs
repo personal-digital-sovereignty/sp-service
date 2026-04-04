@@ -747,6 +747,34 @@ pub async fn vault_graph_handler(
 }
 
 #[derive(Deserialize)]
+pub struct ChartParams {
+    pub path: String,
+    pub sheet: String,
+}
+
+pub async fn vault_office_chart_handler(
+    Query(params): Query<ChartParams>,
+) -> impl IntoResponse {
+    let p = PathBuf::from(&params.path);
+    if !p.exists() || !p.is_file() {
+        return (axum::http::StatusCode::NOT_FOUND, "File not found").into_response();
+    }
+
+    match crate::office_parser::parse_spreadsheet_chart(&params.path, &params.sheet) {
+        Ok(svg) => {
+            (
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "image/svg+xml")],
+                svg
+            ).into_response()
+        },
+        Err(e) => {
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("Chart Generate Error: {}", e)).into_response()
+        }
+    }
+}
+
+#[derive(Deserialize)]
 pub struct MediaQuery {
     pub path: String,
     pub workspace_id: Option<i64>,

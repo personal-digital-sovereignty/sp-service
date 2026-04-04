@@ -99,7 +99,7 @@ pub async fn create_project_handler(
         "progress_percent": 0,
         "is_archived": false,
         "columns_json": "[\"To Do\", \"In Progress\", \"Done\"]",
-        "created_at": chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+        "created_at": chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
     })).into_response()
 }
 

@@ -10,7 +10,7 @@ pub async fn start_plan_and_execute(
     let log_sender = state.log_sender.clone();
     let db = state.db.clone();
     let _ = log_sender.send(LogEntry {
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        timestamp: chrono::Local::now().to_rfc3339(),
         level: "agent".to_string(),
         message: format!("🧠 [Plan & Execute] Inicializando Macro-Orquestração para: '{}'", query),
     });
@@ -45,7 +45,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
     });
 
     let _ = log_sender.send(LogEntry {
-        timestamp: chrono::Utc::now().to_rfc3339(),
+        timestamp: chrono::Local::now().to_rfc3339(),
         level: "system".to_string(),
         message: "⏳ Solicitando ao LLM a quebra da tarefa raiz em Grafo JSON (Strict Pattern)...".to_string(),
     });
@@ -66,7 +66,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
             match serde_json::from_str::<PlanExecuteBlueprint>(msg) {
                 Ok(blueprint) => {
                     let _ = log_sender.send(LogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        timestamp: chrono::Local::now().to_rfc3339(),
                         level: "agent".to_string(),
                         message: format!("✅ Plano Tático Gerado com Sucesso: {} steps detectados.", blueprint.plan.len()),
                     });
@@ -76,7 +76,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
 
                     for (i, step) in blueprint.plan.iter().enumerate() {
                         let _ = log_sender.send(LogEntry {
-                            timestamp: chrono::Utc::now().to_rfc3339(),
+                            timestamp: chrono::Local::now().to_rfc3339(),
                             level: "agent".to_string(),
                             message: format!("⚙️ Executando Step {}/{} [{}] -> {}", i + 1, blueprint.plan.len(), step.action, step.task),
                         });
@@ -103,7 +103,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                                                 let arguments = func.get("arguments").cloned().unwrap_or(json!({}));
                                                 
                                                 let _ = log_sender.send(LogEntry {
-                                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                                    timestamp: chrono::Local::now().to_rfc3339(),
                                                     level: "mcp".to_string(), // Especial p/ Frontend
                                                     message: format!("🔓 Autorização MCP Acionada: Agente invocou ferramenta [{}]", name),
                                                 });
@@ -121,7 +121,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                     }
 
                     let _ = log_sender.send(LogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        timestamp: chrono::Local::now().to_rfc3339(),
                         level: "agent".to_string(),
                         message: "🏁 Todo o pipeline Plan & Execute foi resolvido. A Orquestração Macro finalizou o Job!".to_string(),
                     });
@@ -133,7 +133,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                 },
                 Err(e) => {
                     let _ = log_sender.send(LogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        timestamp: chrono::Local::now().to_rfc3339(),
                         level: "error".to_string(),
                         message: format!("❌ O LLM quebrou o Chain JSON! Deserialização falhou: {}", e),
                     });
