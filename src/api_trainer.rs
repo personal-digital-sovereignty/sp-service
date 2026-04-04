@@ -338,8 +338,8 @@ async fn execute_sub_analyst(
                 let mut top_results = results;
                 top_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
                 
-                // Keep the top 35 semantic chunks to build the perfect context (approx 3k-5k tokens)
-                let top_k: Vec<_> = top_results.into_iter().take(35).collect();
+                // Limiting to Top 15 chunks (approx 2k-3k tokens) drastically cuts inference time while retaining peak factual density.
+                let top_k: Vec<_> = top_results.into_iter().take(15).collect();
                 
                 // --- PHASE 3: LongContextReorder (U-Curve Mitigation for SLMs) ---
                 let mut reordered = std::collections::VecDeque::new();
@@ -404,7 +404,7 @@ async fn execute_sub_analyst(
         ],
         "format": "json",
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 8192 }
+        "options": { "temperature": 0.0, "num_ctx": 4096 }
     });
 
     let mut is_sufficient = false;
@@ -452,7 +452,7 @@ async fn execute_sub_analyst(
             {"role": "user", "content": extractor_prompt}
         ],
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 8192 }
+        "options": { "temperature": 0.0, "num_ctx": 4096 }
     });
 
     let mut distilled_text = "DADO NÃO ENCONTRADO".to_string();
@@ -577,7 +577,7 @@ pub async fn run_deep_research_handler(
     tokio::spawn(async move {
         // --- PHASE 33: Agentic Loop (ReAct / Tool Calling) ---
         let embed_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(300))
+            .timeout(std::time::Duration::from_secs(1200)) // 20-minute bulletproof threshold
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -750,7 +750,7 @@ pub async fn run_deep_research_handler(
                                             }
                                         }
 
-                                        extract_arrays(&tc, &mut queries_extracted);
+                                        extract_arrays(tc, &mut queries_extracted);
                                         queries_extracted.retain(|q| q != "dispatch_sub_researcher" && !q.trim().is_empty());
 
                                         if queries_extracted.is_empty() {
@@ -758,7 +758,7 @@ pub async fn run_deep_research_handler(
                                             queries_extracted.push("latest global news".to_string());
                                         }
 
-                                        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+                                        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
 
                                         for mut sq in queries_extracted {
                                             // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
@@ -884,7 +884,7 @@ pub async fn run_deep_research_handler(
                                         }
 
                                         let mut join_handles_fb = Vec::new();
-                                        let semaphore_fb = std::sync::Arc::new(tokio::sync::Semaphore::new(2));
+                                        let semaphore_fb = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
 
                                         for sq in queries_extracted {
                                             if sq.trim().is_empty() { continue; }

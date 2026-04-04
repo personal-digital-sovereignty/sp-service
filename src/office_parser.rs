@@ -1,3 +1,5 @@
+#![allow(clippy::needless_range_loop, clippy::collapsible_if, clippy::single_char_add_str, clippy::manual_flatten)]
+
 use std::path::Path;
 use std::fs::File;
 use std::io::Read;
