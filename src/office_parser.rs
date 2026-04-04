@@ -444,25 +444,11 @@ fn parse_spreadsheet(path: &str) -> Result<String, String> {
 
             if let Some(subgrid) = find_chartable_subgrid(&matrix) {
                 let chart_matrix = extract_subgrid_matrix(&matrix, &subgrid);
-                let mut title = sheet.clone();
-                
-                // Attempt to find a title from rows above the chart
-                for r in (0..subgrid.row_start).rev() {
-                    let mut found = false;
-                    for c in 0..matrix[r].len() {
-                        let cell = matrix[r][c].trim();
-                        if !cell.is_empty() {
-                            title = cell.to_string();
-                            found = true;
-                            break;
-                        }
-                    }
-                    if found { break; }
-                }
 
-                let svg = generate_svg_bar_chart(&chart_matrix, &title);
-                let b64 = STANDARD.encode(svg.as_bytes());
-                result_md.push_str(&format!("__CHART_BASE64_START__{}__CHART_BASE64_END__\n\n", b64));
+
+                // Use standard TipTap Image Markdown Syntax pointing to the live local Sovereign Vault API!
+                let url = format!("http://localhost:38001/v1/vault/office_chart?path={}&sheet={}", urlencoding::encode(path), urlencoding::encode(&sheet));
+                result_md.push_str(&format!("![Native Chart]({})\n\n", url));
             }
 
             if !matrix.is_empty() {
@@ -504,6 +490,64 @@ fn parse_spreadsheet(path: &str) -> Result<String, String> {
     }
 
     Ok(result_md)
+}
+
+pub fn parse_spreadsheet_chart(path: &str, target_sheet: &str) -> Result<String, String> {
+    use calamine::{open_workbook_auto, Reader, Data};
+    let mut workbook = open_workbook_auto(path).map_err(|e| format!("Failed to open workbook: {}", e))?;
+
+    if let Ok(range) = workbook.worksheet_range(target_sheet) {
+        let mut matrix: Vec<Vec<String>> = Vec::new();
+        for row in range.rows() {
+            let row_data: Vec<String> = row.iter().map(|c| {
+                match c {
+                    Data::String(s) => s.trim().to_string(),
+                    Data::Float(f) => f.to_string(),
+                    Data::Int(i) => i.to_string(),
+                    Data::Bool(b) => b.to_string(),
+                    Data::DateTime(d) => d.to_string(),
+                    Data::DateTimeIso(d) => d.to_string(),
+                    Data::DurationIso(d) => d.to_string(),
+                    Data::Error(e) => e.to_string(),
+                    Data::Empty => String::new(),
+                }
+            }).collect();
+            matrix.push(row_data);
+        }
+
+        if let Some(subgrid) = find_chartable_subgrid(&matrix) {
+            let mut chart_matrix: Vec<Vec<String>> = Vec::new();
+            for r in subgrid.row_start..subgrid.row_end {
+                let mut row = Vec::new();
+                for c in subgrid.col_start..subgrid.col_end {
+                    row.push(matrix[r][c].clone());
+                }
+                chart_matrix.push(row);
+            }
+
+            let mut title = "Native Chart".to_string();
+            // Try to find a title just above the subgrid
+            for r in (0..subgrid.row_start).rev() {
+                let mut found = false;
+                for c in 0..matrix[r].len() {
+                    let cell = matrix[r][c].trim();
+                    if !cell.is_empty() {
+                        title = cell.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if found { break; }
+            }
+
+            let svg = generate_svg_bar_chart(&chart_matrix, &title);
+            return Ok(svg);
+        } else {
+            return Err("No chartable data matrix found in this sheet.".to_string());
+        }
+    }
+
+    Err(format!("Sheet '{}' not found or could not be read.", target_sheet))
 }
 
 fn parse_csv(path: &str) -> Result<String, String> {
