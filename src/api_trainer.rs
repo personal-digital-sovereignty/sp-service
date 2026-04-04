@@ -628,6 +628,40 @@ pub async fn run_deep_research_handler(
                     "required": ["prompt"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "search_api_directory",
+                "description": "Busca no banco de dados do Sovereign API Gateway por APIs livres, públicas e abertas para consumo (JSON) baseadas num tópico ou palavra-chave (ex: 'crypto', 'weather', 'finance'). Use para evitar o Web Scraper genérico.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "O tema da API em Inglês. Exemplo: 'currency', 'news'."
+                        }
+                    },
+                    "required": ["topic"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_json_endpoint",
+                "description": "Dispara uma requisição HTTP GET real para a base da API e retorna os dados brutos (JSON) para que você sintetize a resposta sem precisar de Scraping HTML sujo.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "A URL EXATA para chamar, obrigatoriamente montada baseada na Base URL descoberta via directory."
+                        }
+                    },
+                    "required": ["url"]
+                }
+            }
         }]);
 
         let target_model_name = req.model.clone().unwrap_or_else(|| "qwen2.5:7b".to_string());
@@ -839,7 +873,8 @@ pub async fn run_deep_research_handler(
                                             }));
                                         }
                                     } else if let Some(func) = tc.get("function") {
-                                        if func.get("name").and_then(|n| n.as_str()) == Some("dispatch_visual_artist") {
+                                        let func_n = func.get("name").and_then(|n| n.as_str());
+                                        if func_n == Some("dispatch_visual_artist") {
                                             let mut visual_prompt = String::new();
                                             if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
                                                 if let Some(p) = args.get("prompt").and_then(|s| s.as_str()) { visual_prompt = p.to_string(); }
@@ -869,6 +904,40 @@ pub async fn run_deep_research_handler(
                                                         Err(e) => format!("FALHA na conexão Multimodal Engine: {}", e)
                                                     };
                                                     (visual_prompt, img_res, "Doutrinador Visual".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("search_api_directory") {
+                                            let mut api_topic = String::new();
+                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(t) = args.get("topic").and_then(|s| s.as_str()) { api_topic = t.to_string(); }
+                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(t) = parsed.get("topic").and_then(|s| s.as_str()) { api_topic = t.to_string(); }
+                                                }
+                                            }
+                                            
+                                            if !api_topic.is_empty() {
+                                                let _ = TRAINER_LOGS.send(format!("[Sovereign API Gateway] Indexer Invoked - Localizando APIs públicas para o Core Topic: '{}'", api_topic));
+                                                let api_res = crate::api_gateway::search_api_directory(&api_topic);
+                                                join_handles.push(tokio::spawn(async move {
+                                                    (api_topic, api_res, "API Directory Locator".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("fetch_json_endpoint") {
+                                            let mut fetch_url = String::new();
+                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(u) = args.get("url").and_then(|s| s.as_str()) { fetch_url = u.to_string(); }
+                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(u) = parsed.get("url").and_then(|s| s.as_str()) { fetch_url = u.to_string(); }
+                                                }
+                                            }
+                                            
+                                            if !fetch_url.is_empty() {
+                                                let _ = TRAINER_LOGS.send(format!("[Sovereign API Gateway] Dispatching GET request à URL Pública: '{}'", fetch_url));
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let json_res = crate::api_gateway::fetch_json_endpoint(&fetch_url).await;
+                                                    (fetch_url, json_res, "API JSON Fetcher".to_string())
                                                 }));
                                             }
                                         }

@@ -16,6 +16,7 @@ mod auto_evaluator;
 mod api_mesh;
 mod api_mcp;
 mod api_multimodal;
+pub mod api_gateway;
 pub mod kms;
 pub mod network;
 pub mod rewoo;

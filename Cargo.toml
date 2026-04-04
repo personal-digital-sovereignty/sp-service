@@ -3,6 +3,7 @@ name = "sovereign-core"
 version = "0.9.9"
 edition = "2024"
 license = "MIT"
+build = "build.rs"
 
 [dependencies]
 # Web Framework & Async Runtime (O novo FastAPI / Uvicorn)
