@@ -206,7 +206,7 @@ if payload.visual_artist_mode.unwrap_or(false) && !human_prompt.trim().is_empty(
     
     // Store User Prompt in DB just like the normal flow
     tokio::spawn(async move {
-        let _ = sqlx::query("INSERT INTO messages (session_id, role, content, parent_id) VALUES (?, ?, ?, NULL)")
+        let _ = sqlx::query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)")
             .bind(session_guard)
             .bind("user")
             .bind(&cloned_prompt)
@@ -236,7 +236,7 @@ if payload.visual_artist_mode.unwrap_or(false) && !human_prompt.trim().is_empty(
                 let status = r.status();
                 if !status.is_success() {
                     tracing::error!("❌ [Sovereign Vision] Erro HTTP da Rota de Imagem: {}", status);
-                    let _ = sqlx::query("INSERT INTO messages (session_id, role, content, parent_id) VALUES (?, ?, ?, NULL)").bind(session_guard_bot).bind("assistant").bind(format!("❌ [Sovereign Vision] Erro HTTP da Rota de Imagem: {}", status)).execute(&db_clone_bot).await;
+                    let _ = sqlx::query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)").bind(session_guard_bot).bind("assistant").bind(format!("❌ [Sovereign Vision] Erro HTTP da Rota de Imagem: {}", status)).execute(&db_clone_bot).await;
                 } else if let Ok(j) = r.json::<serde_json::Value>().await {
                     if let Some(url) = j.get("data").and_then(|arr| arr.as_array()).and_then(|a| a.first()).and_then(|f| f.get("url")).and_then(|u| u.as_str()) {
                         tracing::info!("✅ [Sovereign Vision] Imagem concluída! Renderizando URL: {}", url);
@@ -247,10 +247,10 @@ if payload.visual_artist_mode.unwrap_or(false) && !human_prompt.trim().is_empty(
                             choices: vec![crate::models::OpenAIChatChunkChoice { index: 0, delta: crate::models::OpenAIChatChunkDelta { role: Some("assistant".to_string()), content: Some(markdown_img.clone()), tool_calls: None }, finish_reason: Some("stop".to_string()) }], usage: None,
                         };
                         let _ = tx.send(Ok(axum::response::sse::Event::default().data(serde_json::to_string(&ok_chunk).unwrap_or_default())));
-                        let _ = sqlx::query("INSERT INTO messages (session_id, role, content, parent_id) VALUES (?, ?, ?, NULL)").bind(session_guard_bot).bind("assistant").bind(&markdown_img).execute(&db_clone_bot).await;
+                        let _ = sqlx::query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)").bind(session_guard_bot).bind("assistant").bind(&markdown_img).execute(&db_clone_bot).await;
                     } else {
                         tracing::error!("❌ [Sovereign Vision] Payload JSON Retornou 200 OK mas não continha data[0].url! Raw: {}", j);
-                        let _ = sqlx::query("INSERT INTO messages (session_id, role, content, parent_id) VALUES (?, ?, ?, NULL)").bind(session_guard_bot).bind("assistant").bind("❌ Erro JSON da Image Engine.").execute(&db_clone_bot).await;
+                        let _ = sqlx::query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)").bind(session_guard_bot).bind("assistant").bind("❌ Erro JSON da Image Engine.").execute(&db_clone_bot).await;
                     }
                 } else {
                     tracing::error!("❌ [Sovereign Vision] Falha ao parsear reposta JSON do Engine de Imagens.");
@@ -258,7 +258,7 @@ if payload.visual_artist_mode.unwrap_or(false) && !human_prompt.trim().is_empty(
             },
             Err(e) => {
                 tracing::error!("❌ [Sovereign Vision] Falha Crítica de Conexão com a própria Engine: {}", e);
-                let _ = sqlx::query("INSERT INTO messages (session_id, role, content, parent_id) VALUES (?, ?, ?, NULL)").bind(session_guard_bot).bind("assistant").bind(format!("❌ Falha local de Conexão SD.cpp: {}", e)).execute(&db_clone_bot).await;
+                let _ = sqlx::query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)").bind(session_guard_bot).bind("assistant").bind(format!("❌ Falha local de Conexão SD.cpp: {}", e)).execute(&db_clone_bot).await;
             }
         }
         let _ = tx.send(Ok(axum::response::sse::Event::default().data("[DONE]")));
