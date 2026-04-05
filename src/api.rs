@@ -871,18 +871,33 @@ if !is_custom_cluster && ollama_base_url == "http://host.docker.internal:11434" 
 
 let endpoint = format!("{}/api/chat", ollama_base_url);
 
-let res = match state
-    .http_client
-    .post(&endpoint)
-    .json(&ollama_payload)
-    .send()
-    .await
-{
-    Ok(r) if r.status().is_success() => r,
-    Ok(r) => {
-        let status = r.status();
-        let err_body = r.text().await.unwrap_or_default();
-        error!("❌ Ollama recusou a requisição HTTP. Status: {} - Body: {}", status, err_body);
+let mut retry_count = 0;
+let res = loop {
+    let response_result = state
+        .http_client
+        .post(&endpoint)
+        .json(&ollama_payload)
+        .send()
+        .await;
+
+    match response_result {
+        Ok(r) if r.status().is_success() => break r,
+        Ok(r) => {
+            let status = r.status();
+            let err_body = r.text().await.unwrap_or_default();
+
+            // Interceptador de Auto-Cura para modelos alheios a Tool-Calling via API
+            if retry_count == 0 && status == reqwest::StatusCode::BAD_REQUEST && (err_body.contains("does not support") || err_body.contains("tools")) {
+                tracing::warn!("⚠️ Modelo Ollama [{}] rejeitou a payload via API ({}). Removendo Tools e re-entrando em ciclo autônomo...", ollama_model, err_body);
+                if let Some(obj) = ollama_payload.as_object_mut() {
+                    obj.remove("tools");
+                    obj.remove("tool_choice");
+                }
+                retry_count += 1;
+                continue;
+            }
+
+            error!("❌ Ollama recusou a requisição HTTP. Status: {} - Body: {}", status, err_body);
         
         let err_msg = if status == reqwest::StatusCode::NOT_FOUND && err_body.contains("not found") {
             format!("*(Conexão Remota)* 🚨 **Falha: Modelo Ausente no Nó Remoto**\nO modelo `{}` não está instalado no seu nó remoto (`{}`).\n\n**Solução:** Vá em 'Gerenciar Nós' nas configurações e execute o Download/Pull deste modelo para que nossos agentes possam usá-lo.", ollama_model, endpoint)
@@ -916,14 +931,14 @@ let res = match state
         return;
     },
     Err(e) => {
-        if is_custom_cluster {
-            tracing::warn!("🔄 OCI/Mesh Node Offline ({}). Iniciando Autonomia de Fallback para Localhost (127.0.0.1:11434)...", e);
-            let local_endpoint = "http://127.0.0.1:11434/api/chat";
-            match state.http_client.post(local_endpoint).json(&ollama_payload).send().await {
-                Ok(fallback_r) if fallback_r.status().is_success() => {
-                    tracing::info!("✅ [Sovereign Core] Autonomia de Fallback ativada com sucesso. Servindo LLM Localmente!");
-                    fallback_r
-                },
+            if is_custom_cluster {
+                tracing::warn!("🔄 OCI/Mesh Node Offline ({}). Iniciando Autonomia de Fallback para Localhost (127.0.0.1:11434)...", e);
+                let local_endpoint = "http://127.0.0.1:11434/api/chat";
+                match state.http_client.post(local_endpoint).json(&ollama_payload).send().await {
+                    Ok(fallback_r) if fallback_r.status().is_success() => {
+                        tracing::info!("✅ [Sovereign Core] Autonomia de Fallback ativada com sucesso. Servindo LLM Localmente!");
+                        break fallback_r;
+                    },
                 _ => {
                     error!("🚨 Falha FATAL no nó mestre e no nó escravo.");
                     let err_msg = format!("*(Sovereign Core)* 🚨 **Severidade Máxima: Abandono de Frota**\nO Cluster OCI Oracle não respondeu (`{}`) E o Fallback Autônomo Local (127.0.0.1:11434) também está offline! Impossível iniciar inferência.", e);
@@ -983,7 +998,8 @@ let res = match state
             return;
         }
     }
-};
+    } // closes match
+}; // closes loop
 
 // Criamos o Túnel de Transmissão contínua em Rust
 // Variáveis locais puras para contabilização na Closure do Stream
