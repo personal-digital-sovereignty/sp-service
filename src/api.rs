@@ -230,7 +230,7 @@ if payload.visual_artist_mode.unwrap_or(false) && !human_prompt.trim().is_empty(
         let _ = tx.send(Ok(axum::response::sse::Event::default().data(serde_json::to_string(&loading_chunk).unwrap_or_default())));
         
         tracing::info!("⚙️ Disparando POST interno para http://127.0.0.1:38001/v1/images/generations...");
-        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build().unwrap_or_default();
+        let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(1800)).build().unwrap_or_default();
         match client.post("http://127.0.0.1:38001/v1/images/generations").json(&serde_json::json!({ "prompt": cloned_prompt2, "n": 1 })).send().await {
             Ok(r) => {
                 let status = r.status();
