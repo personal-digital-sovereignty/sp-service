@@ -102,8 +102,8 @@ pub async fn generate_image_handler(
     let sd_payload = json!({
         "prompt": payload.prompt,
         "negative_prompt": "blurry, low quality, deformed, mutated, ugly, bad anatomy",
-        "steps": 20,
-        "cfg_scale": 7.0,
+        "steps": 4,
+        "cfg_scale": 1.5,
         "width": 1024,
         "height": 1024,
         "sampler_name": "Euler a"
@@ -135,8 +135,8 @@ pub async fn generate_image_handler(
                             }
                             
                             // Map the absolute path to a URL reachable by Svelte UI / LLM
-                            // Assuming /v1/vault/images/... can serve this, or we just pass the URL back via the Office Parser vault trick
-                            let img_url = format!("http://localhost:38001/v1/vault/live?path={}", urlencoding::encode(&file_path.to_string_lossy()));
+                            // Assuming /v1/vault/media/... can serve this, or we just pass the URL back via the Office Parser vault trick
+                            let img_url = format!("http://localhost:38001/v1/vault/media?path={}", urlencoding::encode(&file_path.to_string_lossy()));
                             
                             return (StatusCode::OK, Json(json!({
                                 "created": chrono::Utc::now().timestamp(),
