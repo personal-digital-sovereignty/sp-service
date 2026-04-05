@@ -1093,7 +1093,17 @@ pub async fn run_deep_research_handler(
                                         continue; // Volta ao Agentic Loop iterativo sem quebrar a pipeline!
                             }
                             
-                            // Caso passe pela Nanny ou não tenha JSON vazado, finaliza o Chain of Thought.
+                            // Caso passe pela Nanny original ou não tenha JSON vazado, analisamos se escapou Json genérico (outras tools).
+                            if content.contains("\"type\":\"function\"") || content.contains("\"type\": \"function\"") || content.contains("search_api_directory") || content.contains("fetch_json_endpoint") {
+                                let _ = TRAINER_LOGS.send("[Thought Nanny] JSON Tool Esquema de API detectado no Plain-Text! OLLAMA falhou no parse nativo. Disciplinando modelo para forçar Abstract Markdown...".to_string());
+                                messages.push(msg_obj.clone());
+                                messages.push(serde_json::json!({
+                                    "role": "user",
+                                    "content": "[SYSTEM OVERRIDE]: Falha de invocação detectada! Você tentou invocar uma ferramenta via Plain-Text ao invés de Native Tool Call. PARE de invocar ferramentas. Leia TODO o contexto [Zero-Shot Router] acima que já contém a extração massiva dos dados e escreva AGORA o RELATÓRIO FINAL EM MARKDOWN ABSOLUTO. PROIBIDO ABRIR CHAVES '{'."
+                                }));
+                                continue;
+                            }
+
                             synthesized_report = content.to_string();
                             let _ = TRAINER_LOGS.send("[Síntese Concluída] O Mestre finalizou o Raciocínio (Chain of Thought exit).".to_string());
                             
