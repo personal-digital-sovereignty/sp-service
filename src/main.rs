@@ -108,6 +108,46 @@ async fn shutdown_signal() {
     std::process::exit(0);
 }
 
+/// Invoca dinamicamente o Binário Local C++ de Visão (sd.cpp) se ele estiver presente,
+/// garantindo uma subida atrelada ao backend da aplicação "Zero-Config".
+fn spawn_vision_daemon() {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/home/jefersonlopes".to_string());
+    let vision_path = std::path::PathBuf::from(&home).join("Sovereign_LLM/Vision");
+    
+    // Determina o caminho exato independente do script de compilação
+    let bin1 = vision_path.join("sd_bin/sd");
+    let bin2 = vision_path.join("stable-diffusion.cpp/build/bin/sd");
+    
+    let target_bin = if bin1.exists() {
+        Some(bin1)
+    } else if bin2.exists() {
+        Some(bin2)
+    } else {
+        None
+    };
+
+    if let Some(bin) = target_bin {
+        let model = vision_path.join("models/sdxl_turbo.gguf");
+        if model.exists() {
+            tracing::info!("🎨 [Multimodal Vision] Artista Visual Offline Detectado no disco. Iniciando Daemon Zumbi na Porta 7860...");
+            
+            std::thread::spawn(move || {
+                let _ = std::process::Command::new(bin)
+                    .arg("--mode")
+                    .arg("server")
+                    .arg("--port")
+                    .arg("7860")
+                    .arg("-m")
+                    .arg(model)
+                    // Isolamento acústico de Log (SD.cpp pode ser muito verboso, mantemos o TUI limpo)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+        }
+    }
+}
+
 // Estado Global (Músculo Cíbrido) compartilhado entre Threads
 pub struct AppState {
     pub http_client: Client,
@@ -131,6 +171,9 @@ async fn main() {
         .init();
 
     tracing::info!("🦀 Sovereign Core (Rust) Initializing...");
+
+    // BOOT ASYNC DAEMONS PARALELOS
+    spawn_vision_daemon();
 
     // ------------------------------------------------------------------------------------------
     // [MESH ENTRYPOINT] Zero-Touch Auto-Deployment Catch (Interactive CLI Installer Bypass)
