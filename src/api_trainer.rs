@@ -1039,8 +1039,15 @@ pub async fn run_deep_research_handler(
                                 queries_extracted.retain(|q| q != "dispatch_sub_researcher" && !q.trim().is_empty());
 
                                 if queries_extracted.is_empty() {
-                                    let _ = TRAINER_LOGS.send("[Thought Nanny] Falha de JSON do Mestre. Forçando disparo com a Diretiva Original do Comandante.".to_string());
-                                    queries_extracted.push(prompt.clone());
+                                    let _ = TRAINER_LOGS.send("[Thought Nanny] Falha de JSON estrutural do Mestre. Modelo não gerou um [search_queries] válido. Revertendo turno para forçar formatação correta...".to_string());
+                                    // Em vez de passar o Prompt do usuário inteiro (o que destrói a pesquisa do DuckDuckGo), 
+                                    // disciplinamos o LLM a tentar corrigir seu próprio JSON no próximo ciclo.
+                                    messages.push(msg_obj.clone());
+                                    messages.push(serde_json::json!({
+                                        "role": "user",
+                                        "content": "[SYSTEM OVERRIDE]: Falha de Invocação de Ferramenta! Você gerou texto puro ou um JSON quebrado em vez de usar as ferramentas de forma nativa. O sistema AINDA não tem os dados necessários.\n\nSua ÚNICA saída aceita agora é um array estrito de buscas. Exemplo Absoluto OBRIGATÓRIO:\n{ \"search_queries\": [\"topico 1 palavras chave ano\", \"topico 2 palavras chave\"] }\n\nCORRIJA a sintaxe e me envie as buscas para que eu possa raspar a internet para você."
+                                    }));
+                                    continue;
                                 }
 
                                         let mut join_handles_fb = Vec::new();
