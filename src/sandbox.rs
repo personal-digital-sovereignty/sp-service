@@ -62,11 +62,9 @@ pub async fn setup_python_sandbox() -> bool {
             .arg(&venv_dir)
             .status();
 
-        if let Ok(st) = status {
-            if st.success() {
-                venv_created = true;
-                break;
-            }
+        if status.is_ok_and(|st| st.success()) {
+            venv_created = true;
+            break;
         }
     }
 
@@ -91,11 +89,9 @@ pub async fn setup_python_sandbox() -> bool {
         .arg("duckdb")
         .status();
 
-    if let Ok(st) = install_status {
-        if st.success() {
-            info!("✅ [Sovereign Sandbox] Ambiente Matemático e Analítico isolado com sucesso!");
-            return true;
-        }
+    if install_status.is_ok_and(|st| st.success()) {
+        info!("✅ [Sovereign Sandbox] Ambiente Matemático e Analítico isolado com sucesso!");
+        return true;
     }
     
     warn!("⚠️ [Sovereign Sandbox] Venv criado, mas a instalação de pacotes via pip falhou.");

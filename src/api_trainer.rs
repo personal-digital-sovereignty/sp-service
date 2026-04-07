@@ -325,9 +325,21 @@ async fn execute_sub_analyst(
         let chunk_lower = chunk.to_lowercase();
         // Simple Lexical Filter: if it contains at least one significant word from the query, keep it.
         let has_keyword = query_words.is_empty() || query_words.iter().any(|&w| chunk_lower.contains(w));
-        if has_keyword || relevant_chunks.len() < 5 { // Always keep at least 5 chunks to avoid empty semantic matrix
+        
+        // --- SOVEREIGN SAFETY: SSR / JSON PAYLOAD BYPASS ---
+        // Se o Ghost Scraper extraiu dados nus de tabelas React (ex: `[1654041600000, 87.5]`), 
+        // esses dados cruciais NÃO terão as palavras "petróleo" ou "brasil". 
+        // Temos que blindar a retenção de chunks ricos em chaves numéricas ou brackets JSON!
+        let is_rich_data = chunk.contains("[{") || chunk.contains(":[") || chunk.contains("\":");
+        
+        if has_keyword || is_rich_data || relevant_chunks.len() < 5 { // Always keep at least 5 chunks to avoid empty semantic matrix
             relevant_chunks.push(chunk);
         }
+        
+        // --- SOVEREIGN SAFETY: CPU BOTTLENECK GUILLOTINE ---
+        // O BGE_RERANKER roda no Host CPU cruzando atenção. Se enviarmos 1000 chunks (200MB de HTML), a CPU trava por 25 Minutos!
+        // Guilhotina Lexical: Capamos estritamente a 60 blocos lexicais massivos (~10 segundos de Rerank CPU)
+        if relevant_chunks.len() >= 60 { break; }
     }
 
     let mut reranked_md = String::new();
@@ -404,7 +416,7 @@ async fn execute_sub_analyst(
         ],
         "format": "json",
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 4096, "repeat_penalty": 1.15 }
+        "options": { "temperature": 0.0, "num_ctx": 4096, "repeat_penalty": 1.03 }
     });
 
     let mut is_sufficient = false;
@@ -422,6 +434,7 @@ async fn execute_sub_analyst(
                     if let Some(reason) = parsed.get("reason").and_then(|r| r.as_str()) {
                         missing_reason = reason.to_string();
                     }
+                    tracing::info!("🧠 [Sufficiency Gate Internal Thought]: {}", parsed.to_string());
                 }
             } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
                 tracing::warn!("[Sufficiency Gate] Ollama Error: {}", err);
@@ -452,7 +465,7 @@ async fn execute_sub_analyst(
             {"role": "user", "content": extractor_prompt}
         ],
         "stream": false,
-        "options": { "temperature": 0.0, "num_ctx": 4096, "repeat_penalty": 1.15 }
+        "options": { "temperature": 0.35, "num_ctx": 4096, "repeat_penalty": 1.03, "num_predict": 1200 }
     });
 
     let mut distilled_text = "DADO NÃO ENCONTRADO".to_string();
@@ -472,6 +485,8 @@ async fn execute_sub_analyst(
                 }
                 
                 let clean_upper = clean.to_uppercase();
+                tracing::info!("📝 [Literal Extractor Internal Harvest]:\n{}", clean.chars().take(300).collect::<String>());
+                
                 if clean_upper.contains("DADO NÃO ENCONTRADO") {
                     distilled_text = "DADO NÃO ENCONTRADO".to_string();
                 } else if clean.len() > 10 {
@@ -527,7 +542,7 @@ async fn execute_sub_analyst(
             ],
             "format": "json",
             "stream": false,
-            "options": { "temperature": 0.0, "num_ctx": 8192, "repeat_penalty": 1.15 }
+            "options": { "temperature": 0.0, "num_ctx": 8192, "repeat_penalty": 1.03 }
         });
 
         if let Ok(res_verif) = client.post("http://127.0.0.1:11434/api/chat").json(&verifier_payload).send().await
@@ -666,6 +681,52 @@ pub async fn run_deep_research_handler(
         {
             "type": "function",
             "function": {
+                "name": "fetch_financial_ticker",
+                "description": "Acessa a Sovereign Open-Data Matrix (yfinance) para baixar diretamente dados históricos fechados de Ações, Petróleo, Ouro ou Câmbio. USE SEMPRE ESTA FERRAMENTA PARA COMMODITIES, AÇÕES OU PREÇO DO DÓLAR EM VEZ DO SCRAPER WEB.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "O símbolo financeiro. Exemplo: 'BRENT' (Petróleo Brent), 'WTI' (Petróleo Texas), 'DOLAR' (Dólar/BRL), 'PETROBRAS' (Ações)."
+                        },
+                        "years": {
+                            "type": "string",
+                            "description": "A quantidade de anos de histórico necessários. Exemplo: '5'."
+                        }
+                    },
+                    "required": ["symbol", "years"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "fetch_macroeconomy",
+                "description": "Acessa a Sovereign Open-Data Matrix (Banco Central API) para baixar taxas macroeconômicas oficiais de um país, como Inflação, Selic, IGPM. USE SEMPRE ESTA FERRAMENTA PARA DADOS ECONÔMICOS DE INFLAÇÃO E JUROS EM VEZ DO SCRAPER WEB.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "indicator": {
+                            "type": "string",
+                            "description": "O indicador (ex: 'IPCA', 'SELIC', 'IGPM', 'INPC')."
+                        },
+                        "country": {
+                            "type": "string",
+                            "description": "O código do país (ex: 'BR'). Atualmente focado em 'BR'."
+                        },
+                        "years": {
+                            "type": "string",
+                            "description": "A quantidade de anos de histórico necessários. Exemplo: '5'."
+                        }
+                    },
+                    "required": ["indicator", "country", "years"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "execute_python_code",
                 "description": "Ferramenta para executar código Python seguro localmente. Ideal para matemática complexa, cruzamento de dados de inflação/preços, cálculos precisos, e extração manipulada de arrays. Você DEVE imprimir os resultados finais EXPLICITAMENTE (via print()) para conseguir ler a resposta e utiliza-la para redigir seu relatório.",
                 "parameters": {
@@ -681,8 +742,12 @@ pub async fn run_deep_research_handler(
             }
         }]);
 
-        let target_model_name = req.model.clone().unwrap_or_else(|| "qwen2.5:7b".to_string());
-        let is_low_end = target_model_name.contains("3.2") || target_model_name.contains("qwen2.5:1.5b") || target_model_name.contains("3b");
+        let mut target_model_name = req.model.clone().unwrap_or_else(|| "qwen2.5:7b".to_string());
+        if target_model_name.contains("0.5b") || target_model_name.contains("1.5b") || target_model_name.contains("0.") || target_model_name.contains("1b") || target_model_name.contains("2b") {
+            let _ = TRAINER_LOGS.send(format!("⚠️ [Proteção Cognitiva] Modelo selecionado ({}) é instável para Tool Calling estrutural. Escalonando Master Agent para 'qwen3:4b'!", target_model_name));
+            target_model_name = "qwen3:4b".to_string();
+        }
+        let is_low_end = target_model_name.contains("3.2") || target_model_name.contains("qwen2.5:1.5b") || target_model_name.contains("3b") || target_model_name.contains("4b");
         
         let anchor_directive = format!("[DIRETRIZ MATEMÁTICA ABSOLUTA] O ano real atual é {}. Se for exigido 'N' anos atrás, obrigatoriamente calcule a data subtraindo 'N' de {}. É terminantemente PROIBIDO usar seu ano de treinamento base como âncora temporal.", current_year, current_year);
 
@@ -691,32 +756,33 @@ pub async fn run_deep_research_handler(
                 "Você é Sophy, a IA Especialista Sênior do Sovereign Pair.\n\
                 [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
                 {}\n\
-                [DIRETRIZES TÁTICAS PARA OMNI-SEARCH E TOOL CALLING]\n\
-                1. Você DEVE obrigatoriamente usar a ferramenta `dispatch_sub_researcher` para extrair os fatos reais.\n\
-                2. O Tool Schema exige APENAS a chave \"search_queries\" contendo um ARRAY de strings restritas a palavras-chave vitais. Decomponha problemas matriciais em listas atômicas (ex: `{{\"search_queries\": [\"entidade A conceito\", \"entidade B ano\"]}}`).\n\
-                3. Sempre que a pergunta exigir dados recentes, você DEVE INCLUIR o ano (ex: '{}') dentro de CADA string da query.\n\
-                4. É ESTRITAMENTE PROIBIDO gerar análises teóricas vazias ANTES de usar a ferramenta.\n\
-                5. Quando possuir os dados, ESTRUTURE SEU RELATÓRIO FINAL: Crie Índices e Conclusões baseadas em evidências.",
-                anchor_directive, current_year
+                [DIRETRIZES TÁTICAS DE TOOL CALLING]\n\
+                1. Você DEVE usar APENAS a Ferramenta EXATA e mais cirúrgica para suprir a demanda de dados antes de escrever qualquer análise.\n\
+                2. Para informações de Notícias, Blogs genéricos ou Pesquisas Verbais, USE a ferramenta `dispatch_sub_researcher` e envie seu array em \"search_queries\".\n\
+                3. Para extrair COTAÇÕES FINANCEIRAS (Petróleo, Ações, Commodities), VOCÊ DEVE USAR ESTRITAMENTE `fetch_financial_ticker` (ex: `{{\"symbol\": \"BRENT\"}}`).\n\
+                4. Para extrair DADOS MACROECONÔMICOS GOVERNAMENTAIS (Inflação, IPCA, Selic, Desemprego), VOCÊ DEVE USAR ESTRITAMENTE `fetch_macroeconomy` (ex: `{{\"indicator\": \"INFLACAO\"}}`).\n\
+                5. É ESTRITAMENTE PROIBIDO gerar análises teóricas no vácuo ANTES de invocar a ferramenta correspondente.",
+                anchor_directive
             )
         } else {
             format!(
                 "Você é Sophy, a IA Especialista Sênior do Sovereign Pair (Operando no Loop ReAct).\n\
                 [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
                 {}\n\
-                [DIRETRIZES TÁTICAS PARA OMNI-SEARCH E TOOL CALLING]\n\
-                1. Você DEVE usar a ferramenta `dispatch_sub_researcher` ANTES de escrever análises.\n\
-                2. A ferramenta exige ESTRITAMENTE um ARRAY de strings (Chave: \"search_queries\"). QUEBRE o prompt original em múltiplas buscas curtas e analíticas focadas apenas em palavras-chave brutas (ex: `{{\"search_queries\": [\"topico principal ano foco\", \"assunto cruzado secundário ano\"]}}`).\n\
-                3. Sempre que a pergunta exigir contexto temporal, INCLUA o ano (ex: '{}') em todas as strings chaves.\n\
-                4. É ESTRITAMENTE PROIBIDO gerar resumos rasos ou sentenças em linguagem natural ali dentro. Extraia palavras-chave atômicas precisas na Tool.\n\
-                5. Ao redigir a análise final, APLIQUE UMA ESTRUTURA MARKDOWN DE ALTO NÍVEL suportando seus fatos.",
-                anchor_directive, current_year
+                [DIRETRIZES TÁTICAS ORQUESTRAIS DE TOOL CALLING]\n\
+                1. Você DEVE avaliar a solicitação do usuário e selecionar ESTRITAMENTE a Ferramenta NATIVA correta.\n\
+                2. Para Pesquisas Contextuais, Textos, Entidades, Notícias -> USE `dispatch_sub_researcher` e emita suas palavras chave limpas.\n\
+                3. Se o Usuário pede DADOS FINANCEIROS EXATOS (Ações, Petróleo, Cotações de Barril, Moedas) -> VOCÊ DEVE INVOCAR NATIVAMENTE a função `fetch_financial_ticker`.\n\
+                4. Se o Usuário pede DADOS INFLACIONÁRIOS E ECONÔMICOS (Inflação de países, Taxas Base) -> VOCÊ DEVE INVOCAR NATIVAMENTE a função `fetch_macroeconomy`.\n\
+                5. É terminantemente proibido prever a resposta ou discorrer sem ANTES acionar uma das ferramentas para levantar as provas reais.\n\
+                6. Ao receber o retorno da ferramenta, cruze os dados limpos e redija seu relatório suportado por formatação Markdown Absoluta.",
+                anchor_directive
             )
         };
 
         let mut messages = vec![
             serde_json::json!({"role": "system", "content": synthesis_prompt}),
-            serde_json::json!({"role": "user", "content": format!("{}\n\n[SYSTEM OVERRIDE/SECURITY]: Você AINDA NÃO POSSUI NENHUM DADO EXTRAÍDO. É expressamente PROIBIDO responder com sínteses vazias ou teóricas para o usuário. Sua próxima resposta DEVE ser ÚNICA E EXCLUSIVAMENTE a invocação da ferramenta `dispatch_sub_researcher` para buscar informações factuais.", prompt.clone())})
+            serde_json::json!({"role": "user", "content": format!("{}\n\n[SYSTEM OVERRIDE/SECURITY]: Você AINDA NÃO POSSUI NENHUM DADO EXTRAÍDO. É expressamente PROIBIDO responder com sínteses vazias ou teóricas para o usuário. Sua próxima resposta DEVE ser ÚNICA E EXCLUSIVAMENTE O JSON DE INVOCACÃO da ferramenta apropriada para buscar informações factuais.", prompt.clone())})
         ];
 
 
@@ -757,45 +823,9 @@ pub async fn run_deep_research_handler(
         for cycle in 1..=3 {
             if wait_or_cancel(200, &token).await { return; }
             
-            // --- G.2: THE MOM/DAD (Zero-Shot Rust Router) ---
-            if cycle == 1 && is_firewall_enabled {
-                let _ = TRAINER_LOGS.send("[The Mom (Router)] Vetorizando o Prompt nativamente (Zero LLM Overhead)...".to_string());
-                
-                let stopwords = ["desenhe", "crie", "imagem", "arte", "analise", "busque", "procure", "encontre", "dados", "quais", "qual", "como", "sobre", "para", "este", "esse", "esta", "essa", "pelo", "pela", "onde", "quando"];
-                let keywords: Vec<String> = prompt.split(|c: char| !c.is_alphanumeric())
-                    .map(|s| s.trim().to_lowercase())
-                    .filter(|s| s.len() > 3 && !stopwords.contains(&s.as_str()))
-                    .take(6)
-                    .collect();
-                
-                let sq = keywords.join(" ");
-                if !sq.is_empty() {
-                    let _ = TRAINER_LOGS.send(format!("[The Mom (Router)] Keywords extraídas em <1ms: '{}'", sq));
-                    
-                    let engine_clone = engine_arc.clone();
-                    let embed_clone = embed_client.clone();
-                    let auth_clone = auth_inquisitor.clone();
-                    let target_clone = target_model_name.clone();
-                    
-                    let res_slm = execute_sub_analyst(sq.clone(), engine_clone, embed_clone, auth_clone.clone(), target_clone, true).await;
-                    
-                    if !res_slm.contains("DADO NÃO ENCONTRADO") && !res_slm.contains("Falha do aluno") {
-                        all_sources.push(res_slm.clone());
-                        messages.push(serde_json::json!({
-                            "role": "user",
-                            "content": format!("[Zero-Shot Router]: O Omni-Scraper rastreou a internet instantaneamente e encontrou estes fatos soberanos. Use-os para formatar sua resposta se necessário:\n\n{}", res_slm)
-                        }));
-                        let _ = TRAINER_LOGS.send("[The Mom (Router)] Fatos injetados nas veias do pipeline. A Mente Mestra finalmente vai despertar para avaliar.".to_string());
-                        
-                        let scaped_count = res_slm.lines().filter(|l| l.starts_with("## Source:")).count();
-                        if scaped_count > 0 { let _ = TRAINER_LOGS.send(format!("[Omni-Scraper] {} Fontes Capturadas no Roteamento Prévio.", scaped_count)); }
-                        
-                        continue; // SKIP MASTER LLM ON CYCLE 1 - JUMP TRIGGER
-                    } else {
-                        let _ = TRAINER_LOGS.send("[The Mom (Router)] Zero-Shot RAG não convergiu (possível prompt criativo). Delegando orquestração original para a Mente Mestra.".to_string());
-                    }
-                }
-            }
+            // --- G.2: DYNAMIC RAG INJECTOR (LOCAL VAULT) ---
+            // A Mom não raspa a web ativamente. A web e orquestração ativa ficam exclusivas do Grafo da Mente Mestra.
+            // Para injetar dados do DB (memória/vault) estaticamente, este seria o local.
             
             let _ = TRAINER_LOGS.send(format!("[Worker Graph - Stage {}/3] Invocando Mente Mestra ({})...", cycle, target_model_name));
 
@@ -806,7 +836,7 @@ pub async fn run_deep_research_handler(
                 "options": {
                     "num_ctx": dynamic_num_ctx,
                     "temperature": 0.05,
-                    "repeat_penalty": 1.15
+                    "repeat_penalty": 1.03
                 }
             });
 
@@ -899,9 +929,9 @@ pub async fn run_deep_research_handler(
                                         let func_n = func.get("name").and_then(|n| n.as_str());
                                         if func_n == Some("dispatch_visual_artist") {
                                             let mut visual_prompt = String::new();
-                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
                                                 if let Some(p) = args.get("prompt").and_then(|s| s.as_str()) { visual_prompt = p.to_string(); }
-                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(p) = parsed.get("prompt").and_then(|s| s.as_str()) { visual_prompt = p.to_string(); }
                                                 }
@@ -931,9 +961,9 @@ pub async fn run_deep_research_handler(
                                             }
                                         } else if func_n == Some("search_api_directory") {
                                             let mut api_topic = String::new();
-                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
                                                 if let Some(t) = args.get("topic").and_then(|s| s.as_str()) { api_topic = t.to_string(); }
-                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(t) = parsed.get("topic").and_then(|s| s.as_str()) { api_topic = t.to_string(); }
                                                 }
@@ -948,9 +978,9 @@ pub async fn run_deep_research_handler(
                                             }
                                         } else if func_n == Some("fetch_json_endpoint") {
                                             let mut fetch_url = String::new();
-                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
                                                 if let Some(u) = args.get("url").and_then(|s| s.as_str()) { fetch_url = u.to_string(); }
-                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(u) = parsed.get("url").and_then(|s| s.as_str()) { fetch_url = u.to_string(); }
                                                 }
@@ -965,16 +995,16 @@ pub async fn run_deep_research_handler(
                                             }
                                         } else if func_n == Some("execute_python_code") {
                                             let mut py_code = String::new();
-                                            if let Some(args) = tc.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
                                                 if let Some(c) = args.get("code").and_then(|s| s.as_str()) { py_code = c.to_string(); }
-                                            } else if let Some(args_str) = tc.get("arguments").and_then(|a| a.as_str()) {
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(c) = parsed.get("code").and_then(|s| s.as_str()) { py_code = c.to_string(); }
                                                 }
                                             }
                                             
                                             if !py_code.is_empty() {
-                                                let _ = TRAINER_LOGS.send(format!("[Sovereign Code Sandbox] Orquestrando Script Matemático Python..."));
+                                                let _ = TRAINER_LOGS.send("[Sovereign Code Sandbox] Orquestrando Script Matemático Python...".to_string());
                                                 join_handles.push(tokio::spawn(async move {
                                                     let execution_res = crate::sandbox::execute_python_code(&py_code).await;
                                                     let parsed_res = match execution_res {
@@ -982,6 +1012,89 @@ pub async fn run_deep_research_handler(
                                                         Err(stderr) => format!("### PYTHON SANDBOX OUTPUT (FAILURE):\n```text\n{}\n```\nAtenção: O plano falhou. Você precisa corrigir as variáveis Python ou importar a biblioteca certa.", stderr),
                                                     };
                                                     (py_code, parsed_res, "Python Code Sandbox".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("fetch_financial_ticker") {
+                                            let mut symbol = String::new();
+                                            let mut years = "1".to_string();
+                                            
+                                            // Suporte para ambas as arquiteturas JSON (Ollama Native Object OR Stringified Payload)
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(s) = args.get("symbol").and_then(|x| x.as_str()) { symbol = s.to_string(); }
+                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(s) = parsed.get("symbol").and_then(|x| x.as_str()) { symbol = s.to_string(); }
+                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                }
+                                            }
+
+                                            if !symbol.is_empty() {
+                                                let _ = TRAINER_LOGS.send(format!("[Sovereign Open-Data Matrix] Acessando ticker financeiro oficial: {} ({} anos)...", symbol, years));
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let matrix_script = std::env::current_dir().unwrap_or_default().join("core").join("python_workers").join("sovereign_matrix.py");
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg("finance")
+                                                        .arg(&symbol)
+                                                        .arg(&years)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (symbol, format!("### Sovereign Open-Data Output:\n{}", res), "Open-Data Ledger".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("fetch_macroeconomy") {
+                                            let mut ind = String::new();
+                                            let mut country = "BR".to_string();
+                                            let mut years = "1".to_string();
+                                            
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(i) = args.get("indicator").and_then(|x| x.as_str()) { ind = i.to_string(); }
+                                                if let Some(c) = args.get("country").and_then(|x| x.as_str()) { country = c.to_string(); }
+                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(i) = parsed.get("indicator").and_then(|x| x.as_str()) { ind = i.to_string(); }
+                                                    if let Some(c) = parsed.get("country").and_then(|x| x.as_str()) { country = c.to_string(); }
+                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                }
+                                            }
+                                            
+                                            if !ind.is_empty() {
+                                                let _ = TRAINER_LOGS.send(format!("[Sovereign Open-Data Matrix] Acessando base macroeconômica ({}) para {} ({} anos)...", country, ind, years));
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let matrix_script = std::env::current_dir().unwrap_or_default().join("core").join("python_workers").join("sovereign_matrix.py");
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg("macro")
+                                                        .arg(&ind)
+                                                        .arg(&country)
+                                                        .arg(&years)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (ind, format!("### Sovereign Open-Data Output:\n{}", res), "Open-Data Ledger".to_string())
                                                 }));
                                             }
                                         }
@@ -1036,120 +1149,81 @@ pub async fn run_deep_research_handler(
                         } 
                         // 2. O Modelo entregou a resposta final em plain text!
                         else if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
-                            // Firewall Cognitivo: Fallback se o ciclo for 1 (ele DEVE buscar dados) ou se vazou JSON
-                            if cycle == 1 || content.contains("\"dispatch_sub_researcher\"") || content.contains("\"search_queries\"") {
-                                let _ = TRAINER_LOGS.send("[Firewall Cognitivo] Interceptando plain-text! Curando a alucinação do LLM (Phase 7)...".to_string());
-                                let mut queries_extracted: Vec<String> = Vec::new();
-                                
+                            // Firewall Cognitivo: Fallback Universal (Thought Nanny)
+                            if cycle == 1 || content.contains("\"dispatch_sub_researcher\"") || content.contains("\"search_queries\"") || content.contains("\"fetch_financial_ticker\"") || content.contains("\"fetch_macroeconomy\"") || content.contains("\"type\":\"function\"") || content.contains("\"symbol\"") || content.contains("\"indicator\"") {
+                                // Tenta raspar JSON vazado no texto:
+                                let mut recovered_json: Option<serde_json::Value> = None;
                                 if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}')) {
                                     if start < end {
-                                        let json_str = &content[start..=end];
-                                        
-                                        if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(json_str) {
-                                            fn extract_arrays(val: &serde_json::Value, out: &mut Vec<String>) {
-                                                match val {
-                                                    serde_json::Value::Object(map) => {
-                                                        if let Some(sq) = map.get("search_queries").and_then(|s| s.as_array()) {
-                                                            for item in sq {
-                                                                if let Some(s) = item.as_str() { out.push(s.to_string()); }
-                                                            }
-                                                        } else if let Some(sq) = map.get("search_query").and_then(|s| s.as_str()) {
-                                                            out.push(sq.to_string());
-                                                        } else {
-                                                            for (_, v) in map {
-                                                                if let Some(v_str) = v.as_str() {
-                                                                    if v_str.trim().starts_with('{') {
-                                                                        if let Ok(inner) = serde_json::from_str::<serde_json::Value>(v_str) {
-                                                                            extract_arrays(&inner, out);
-                                                                        }
-                                                                    }
-                                                                }
-                                                                extract_arrays(v, out);
-                                                            }
-                                                        }
-                                                    },
-                                                    serde_json::Value::Array(arr) => {
-                                                        for item in arr { extract_arrays(item, out); }
-                                                    },
-                                                    _ => {}
-                                                }
-                                            }
-                                            extract_arrays(&pseudo_json, &mut queries_extracted);
+                                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content[start..=end]) {
+                                            recovered_json = Some(parsed);
                                         }
                                     }
                                 }
-
-                                queries_extracted.retain(|q| q != "dispatch_sub_researcher" && !q.trim().is_empty());
-
-                                if queries_extracted.is_empty() {
-                                    let _ = TRAINER_LOGS.send("[Thought Nanny] Falha de JSON estrutural do Mestre. Modelo não gerou um [search_queries] válido. Revertendo turno para forçar formatação correta...".to_string());
-                                    // Em vez de passar o Prompt do usuário inteiro (o que destrói a pesquisa do DuckDuckGo), 
-                                    // disciplinamos o LLM a tentar corrigir seu próprio JSON no próximo ciclo.
-                                    messages.push(msg_obj.clone());
-                                    messages.push(serde_json::json!({
-                                        "role": "user",
-                                        "content": "[SYSTEM OVERRIDE]: Falha de Invocação de Ferramenta! Você gerou texto puro ou um JSON quebrado em vez de usar as ferramentas de forma nativa. O sistema AINDA não tem os dados necessários.\n\nSua ÚNICA saída aceita agora é um array estrito de buscas. Exemplo Absoluto OBRIGATÓRIO:\n{ \"search_queries\": [\"topico 1 palavras chave ano\", \"topico 2 palavras chave\"] }\n\nCORRIJA a sintaxe e me envie as buscas para que eu possa raspar a internet para você."
-                                    }));
-                                    continue;
-                                }
-
-                                        let mut join_handles_fb = Vec::new();
-                                        let semaphore_fb = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
-
-                                        for sq in queries_extracted {
-                                            if sq.trim().is_empty() { continue; }
-                                            let _ = TRAINER_LOGS.send(format!("[Thought Nanny] O Mestre alucinado foi domado e teve seu Schema expurgado. Disparando pesquisa curada: '{}'", sq));
-                                            
-                                            let sq_string = sq.to_string();
-                                            let engine_clone = engine_arc.clone();
-                                            let embed_clone = embed_client.clone();
-                                            let auth_clone = auth_inquisitor.clone();
-                                            let target_clone = target_model_name.clone();
-                                            let sem_fb_clone = semaphore_fb.clone();
-                                            
-                                            join_handles_fb.push(tokio::spawn(async move {
-                                                let _permit = sem_fb_clone.acquire().await.unwrap();
-                                                let res_inquisitor_fb = execute_sub_analyst(sq_string.clone(), engine_clone, embed_clone, auth_clone.clone(), target_clone, is_firewall_enabled).await;
-                                                (sq_string, res_inquisitor_fb, auth_clone)
-                                            }));
+                                
+                                if let Some(pseudo_json) = recovered_json {
+                                    let mut final_result = String::new();
+                                    
+                                    // Resgate Direto (SLMs costumam omitir a 'name' e vazar direto os 'arguments' ou vice versa)
+                                    if content.contains("fetch_financial_ticker") || pseudo_json.get("symbol").is_some() || pseudo_json.get("arguments").and_then(|a| a.get("symbol")).is_some() {
+                                        let mut symbol = String::new();
+                                        
+                                        if let Some(s) = pseudo_json.get("symbol").and_then(|v| v.as_str()) { symbol = s.to_string(); }
+                                        else if let Some(args) = pseudo_json.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(s) = args.get("symbol").and_then(|v| v.as_str()) { symbol = s.to_string(); }
                                         }
-
-                                        let mut final_reports = Vec::new();
-
-                                        for handle in join_handles_fb {
-                                            if let Ok((_sq, res_inquisitor_fb, _auth_clone)) = handle.await {
-                                                let inquisitor_failed_fb = if is_firewall_enabled { res_inquisitor_fb.contains("DADO NÃO ENCONTRADO") || res_inquisitor_fb.contains("Falha do aluno") } else { false };
-                                                
-                                                if !inquisitor_failed_fb {
-                                                    final_reports.push(res_inquisitor_fb);
-                                                }
+                                        
+                                        if !symbol.is_empty() {
+                                            let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON de Finanças ({}) vazado no plain-text...", symbol));
+                                            let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                            let matrix_script = std::env::current_dir().unwrap_or_default().join("core").join("python_workers").join("sovereign_matrix.py");
+                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("fetch").arg(&symbol).arg("5y").output().await {
+                                                final_result = String::from_utf8_lossy(&out.stdout).to_string();
                                             }
                                         }
+                                    } 
+                                    else if content.contains("fetch_macroeconomy") || pseudo_json.get("indicator").is_some() || pseudo_json.get("arguments").and_then(|a| a.get("indicator")).is_some() {
+                                        let mut ind = String::new();
+                                        if let Some(i) = pseudo_json.get("indicator").and_then(|v| v.as_str()) { ind = i.to_string(); }
+                                        else if let Some(args) = pseudo_json.get("arguments").and_then(|a| a.as_object()) {
+                                            if let Some(i) = args.get("indicator").and_then(|v| v.as_str()) { ind = i.to_string(); }
+                                        }
                                         
-                                        let final_result = if final_reports.is_empty() {
-                                            "NÃO EXISTEM DADOS MATEMÁTICOS PARA ESTAS QUERIES NO HTML RASPADO (POSSÍVEL BLOQUEIO OU SINGLE PAGE APPLICATION). RECOMENDE API EXTERNA.".to_string()
-                                        } else {
-                                            let _ = TRAINER_LOGS.send("[The Honest Inquisitor] Extração Validada no Fallback Nanny!".to_string());
-                                            final_reports.join("\n\n---\n\n")
-                                        };
+                                        if !ind.is_empty() {
+                                            let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON Macroeconômico ({}) vazado no plain-text...", ind));
+                                            let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                            let matrix_script = std::env::current_dir().unwrap_or_default().join("core").join("python_workers").join("sovereign_matrix.py");
+                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("macro").arg(&ind).arg("BR").arg("5").output().await {
+                                                final_result = String::from_utf8_lossy(&out.stdout).to_string();
+                                            }
+                                        }
+                                    }
+                                    else if content.contains("dispatch_sub_researcher") || pseudo_json.get("search_queries").is_some() {
+                                         let mut sq = String::new();
+                                         if let Some(s) = pseudo_json.get("search_queries").and_then(|v| v.as_array()) {
+                                             if let Some(first) = s.get(0).and_then(|v| v.as_str()) { sq = first.to_string(); }
+                                         }
+                                         
+                                         if !sq.is_empty() {
+                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando Web Scrape ({}) vazado no plain-text...", sq));
+                                             final_result = execute_sub_analyst(sq.clone(), engine_arc.clone(), embed_client.clone(), auth_inquisitor.clone(), target_model_name.clone(), is_firewall_enabled).await;
+                                         }
+                                    }
 
-                                        let _ = TRAINER_LOGS.send("[Firewall Cognitivo] Acareamento Low-End do The Honest Inquisitor processado com Guardrails.".to_string());
-                                        
+                                    if !final_result.is_empty() {
                                         messages.push(serde_json::json!({
                                             "role": "user",
-                                            "content": format!("[SISTEMA INTERNO]: O Tool Call alucinado foi curado e executado através dos Guardrails Nanny. Aqui estão os fatos minerados para essa etapa:\n\n{}", final_result)
+                                            "content": format!("[SISTEMA INTERNO]: O Tool Call vazado em texto foi extraído forçadamente. Fatos minerados no backend:\n\n{}", final_result)
                                         }));
-                                        
-                                        continue; // Volta ao Agentic Loop iterativo sem quebrar a pipeline!
-                            }
-                            
-                            // Caso passe pela Nanny original ou não tenha JSON vazado, analisamos se escapou Json genérico (outras tools).
-                            if content.contains("\"type\":\"function\"") || content.contains("\"type\": \"function\"") || content.contains("search_api_directory") || content.contains("fetch_json_endpoint") {
-                                let _ = TRAINER_LOGS.send("[Thought Nanny] JSON Tool Esquema de API detectado no Plain-Text! OLLAMA falhou no parse nativo. Disciplinando modelo para forçar Abstract Markdown...".to_string());
+                                        continue;
+                                    }
+                                }
+
+                                let _ = TRAINER_LOGS.send("[Thought Nanny] Falha Estrutural do Mestre: O modelo não gerou chamadas formatadas. Disciplinando sintaxe...".to_string());
                                 messages.push(msg_obj.clone());
                                 messages.push(serde_json::json!({
                                     "role": "user",
-                                    "content": "[SYSTEM OVERRIDE]: Falha de invocação detectada! Você tentou invocar uma ferramenta via Plain-Text ao invés de Native Tool Call. PARE de invocar ferramentas. Leia TODO o contexto [Zero-Shot Router] acima que já contém a extração massiva dos dados e escreva AGORA o RELATÓRIO FINAL EM MARKDOWN ABSOLUTO. PROIBIDO ABRIR CHAVES '{'."
+                                    "content": "[SYSTEM OVERRIDE]: Falha de Invocação de Ferramenta! Você gerou texto puro em vez de invocar a ferramenta no backend. O sistema AINDA não tem os dados necessários.\n\nSua ÚNICA saída aceita agora é FECHAR A BOCA e responder ESTRITAMENTE com o JSON correspondente à Variavel/Função (dispatch_sub_researcher, fetch_financial_ticker, fetch_macroeconomy ou execute_python_code). Não escreva NENHUM outro texto! APENAS O JSON NATIIVO."
                                 }));
                                 continue;
                             }
@@ -1235,14 +1309,9 @@ pub async fn run_deep_research_handler(
 
         } else if is_low_end {
             let _ = TRAINER_LOGS.send("[The Scribe] Low-End Engine detectada. Invocando Agent especialista para formatar os fatos brutos em Markdown...".to_string());
-            let scribe_prompt = format!(
-                "Você é The Scribe, um formatador técnico de elite do Sovereign Pair.\n\
-                [CRONOLOGIA SOBERANA] Hoje é exatamente: {current_date}.\n\
-                Abaixo estão Fatos Brutos e o Prompt Original do Usuário. Seu ÚNICO objetivo é criar um relatório Markdown detalhado, hiper-estruturado e visualmente atraente respondendo ao Prompt original, APENAS usando os fatos listados. Se os fatos não tiverem a resposta, diga que não há dados.\n\
-                \n[PROMPT DO USUÁRIO]: {}\n\n[FATOS BRUTOS COLETADOS PELA IA PESQUISADORA]:\n{}",
-                prompt, synthesized_report
-            );
-            
+            let scribe_system = format!("Você é The Scribe, um formatador técnico de elite do Sovereign Pair. Hoje é: {current_date}. Seu ÚNICO objetivo é criar um relatório Markdown detalhado, estruturado e impecável respondendo ao Prompt original, APENAS baseando-se nos fatos listados. Se faltarem dados, escreva claramente que faltam. Evite gerar 'O's repetidos ou alucinar.");
+            let scribe_user = format!("[PROMPT DO USUÁRIO]: {}\n\n[FATOS BRUTOS COLETADOS PELA IA PESQUISADORA]:\n{}", prompt, synthesized_report);
+
             // A Scribe Phase EXIGE formatadores experientes porque o SLM local era muito fraco.
             // Escalonando verticalmente para matemática pura sem hardcode.
             let scribe_model = crate::api::discover_cognitive_model_by_tier("senior").await;
@@ -1253,13 +1322,15 @@ pub async fn run_deep_research_handler(
             let scribe_payload = serde_json::json!({
                 "model": scribe_model,
                 "messages": [
-                    {"role": "user", "content": scribe_prompt}
+                    {"role": "system", "content": scribe_system},
+                    {"role": "user", "content": scribe_user}
                 ],
                 "stream": false,
                 "options": {
-                    "num_ctx": 4096,
-                    "temperature": 0.1,
-                    "repeat_penalty": 1.15
+                    "num_ctx": 6144,
+                    "temperature": 0.35,
+                    "repeat_penalty": 1.03,
+                    "num_predict": 2048
                 }
             });
             

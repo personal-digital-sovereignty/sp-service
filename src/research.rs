@@ -193,7 +193,8 @@ impl DeepResearchEngine {
                         }
 
                         if markdown.len() > 200 && !markdown.to_lowercase().contains("enable javascript") && !markdown.contains("Access Denied") && !markdown.contains("Just a moment...") {
-                            tracing::info!("☁️ [Cloud Reader Offload] Markdown resgatado com sucesso via {} ({} bytes). CPU protegida!", reader_url.split('/').nth(2).unwrap_or("Proxy"), markdown.len());
+                            let snippet: String = markdown.replace('\n', " ").chars().take(150).collect();
+                            tracing::info!("☁️ [Cloud Reader Offload] Markdown resgatado com sucesso via {} ({} bytes). CPU protegida!\n[PAYLOAD SNIPPET]: {}...", reader_url.split('/').nth(2).unwrap_or("Proxy"), markdown.len(), snippet);
                             self.update_domain_ledger(&url, true, false).await;
                             return Ok(markdown);
                         }
@@ -225,7 +226,8 @@ impl DeepResearchEngine {
         // Se a página for um SPA brutalmente ofuscado (Ex: Next.js), aborta o parsing
         // de DOM (que estaria vazio) e saca diretamente do cofre JSON original!
         if let Some(json_payload) = self.extract_hydration_json(&html_content) {
-            tracing::info!("🎯 [Ghost Scraper] Payload SSR Interceptado! Ignorando DOM Tree parser e entregando Ouro Puro.");
+            let snippet: String = json_payload.replace('\n', " ").chars().take(150).collect();
+            tracing::info!("🎯 [Ghost Scraper] Payload SSR Interceptado! Ignorando DOM Tree parser e entregando Ouro Puro.\n[PAYLOAD SNIPPET]: {}...", snippet);
             self.update_domain_ledger(&url, true, false).await;
             return Ok(json_payload);
         }

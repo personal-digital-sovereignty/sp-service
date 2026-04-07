@@ -1149,10 +1149,8 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                             if let Some(args_val) = func.get("arguments") {
                                                 if args_val.is_object() {
                                                     visual_prompt = args_val.get("prompt").and_then(|p| p.as_str()).unwrap_or("").to_string();
-                                                } else if let Some(args_str) = args_val.as_str() {
-                                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
-                                                        visual_prompt = parsed.get("prompt").and_then(|p| p.as_str()).unwrap_or("").to_string();
-                                                    }
+                                                } else if let Some(parsed) = args_val.as_str().and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()) {
+                                                    visual_prompt = parsed.get("prompt").and_then(|p| p.as_str()).unwrap_or("").to_string();
                                                 }
                                             }
                                         }
@@ -1378,6 +1376,18 @@ let final_stream = async_stream::stream! {
 Sse::new(final_stream)
     .keep_alive(axum::response::sse::KeepAlive::new())
     .into_response()
+}
+
+/// Spawns the Sovereign Pair Desktop GUI (Tauri App) process natively from the OS.
+pub async fn launch_gui_handler() -> impl IntoResponse {
+    tracing::info!("🚀 [Sovereign Core] Invocação de GUI Recebida! Spawning Sovereign Tauri Desktop...");
+    // Tenta spawnar o binário instalado globalmente no path do Linux (.deb / pacman)
+    if std::process::Command::new("sovereign-pair").spawn().is_err() {
+        // Fallback robusto para o ambiente de compilação de desenvolvimento local
+        let dev_bin_path = "/home/jefersonlopes/Developer/local-repositories/sovereign-pair/svelte-ui/src-tauri/target/release/sovereign-pair";
+        let _ = std::process::Command::new(dev_bin_path).spawn();
+    }
+    axum::response::Json(serde_json::json!({ "status": "gui_dispatched" }))
 }
 
 pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {

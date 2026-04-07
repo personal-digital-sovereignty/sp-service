@@ -248,6 +248,8 @@ async fn main() {
     auto_evaluator::start_evaluator_loop(state.clone()).await;
 
     let app = Router::new()
+        // ------------------ System Actions & Launchers ---------------
+        .route("/v1/system/launch-gui", axum::routing::post(api::launch_gui_handler))
         // ------------------ LLMOps Telemetry & Logs ------------------
         .route("/v1/analytics/telemetry", axum::routing::get(api::telemetry_snapshot_handler))
         .route("/v1/analytics/hallucinations", axum::routing::get(api_trainer::get_hallucinations_ledger_handler))
