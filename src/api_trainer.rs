@@ -1148,10 +1148,20 @@ pub async fn run_deep_research_handler(
                                     // Se inserirmos milhares de linhas JSON do yfinance na memória do Mestre (ex: Qwen 4096 ctx),
                                     // o System Prompt será varrido do limite mental, e ele será forçado a alucinar texto puro no próximo loop.
                                     // Nós guardamos o 'final_result' completo no 'all_sources', mas damos uma versão compacta à mente do Mestre.
-                                    let limited_result = if final_result.len() > 8000 {
-                                        format!("{}\n...[DATA TRUNCATED FOR MEMORY DENSITY. Raw data securely stashed in memory. Proceed with your NEXT tool call to gather any remaining metrics.]", final_result.chars().take(8000).collect::<String>())
+                                    let plain_text_content = if let Ok(parsed_json) = serde_json::from_str::<serde_json::Value>(&final_result) {
+                                        if let Some(data_field) = parsed_json.get("data_compressed").and_then(|d| d.as_str()) {
+                                            data_field.to_string()
+                                        } else {
+                                            final_result.clone()
+                                        }
                                     } else {
                                         final_result.clone()
+                                    };
+                                    
+                                    let limited_result = if plain_text_content.len() > 8000 {
+                                        format!("{}\n...[DATA TRUNCATED FOR MEMORY DENSITY. Raw data securely stashed in memory. Proceed with your NEXT tool call to gather any remaining metrics.]", plain_text_content.chars().take(8000).collect::<String>())
+                                    } else {
+                                        plain_text_content
                                     };
 
                                     // Devolve a resposta do Tool para a memória do Mestre

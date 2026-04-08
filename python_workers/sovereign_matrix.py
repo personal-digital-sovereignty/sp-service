@@ -177,6 +177,10 @@ def fetch_finance(ticker, years):
     }))
 
 def fetch_macro(indicator, country, years):
+    # Lexical Forgiveness for LLMs that use descriptive queries
+    if "GASOLINA" in indicator.upper(): indicator = "GASOLINA"
+    elif "DIESEL" in indicator.upper(): indicator = "DIESEL"
+    
     if country.upper() != 'BR':
         print(json.dumps({"error": "Currently only 'BR' macroeconomic indicators are supported natively."}))
         sys.exit(1)
