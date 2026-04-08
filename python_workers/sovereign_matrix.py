@@ -18,14 +18,21 @@ def fetch_finance(ticker, years):
         clean_years = "1"
         
     period = f"{clean_years}y"
+    
+    semantic_name = ticker
     if ticker.upper() == 'BRENT':
-        ticker = 'BZ=F' # Brent Crude Oil Futures
+        ticker = 'BZ=F'
+        semantic_name = 'Barril de Petróleo (BRENT Crude)'
     elif ticker.upper() == 'WTI':
-        ticker = 'CL=F' # Crude Oil Futures
+        ticker = 'CL=F'
+        semantic_name = 'Barril de Petróleo (WTI Crude)'
     elif ticker.upper() == 'DOLAR' or ticker.upper() == 'USD':
-        ticker = 'BRL=X' # USD to BRL
+        ticker = 'BRL=X'
+        semantic_name = 'Taxa de Câmbio (Dólar / BRL)'
     elif ticker.upper() == 'PETROBRAS':
         ticker = 'PETR4.SA'
+        semantic_name = 'Ações Petrobras (PETR4)'
+        
         
 
     start_date = (datetime.datetime.now() - datetime.timedelta(days=int(clean_years)*365)).strftime('%Y-%m-%d')
@@ -159,6 +166,7 @@ def fetch_finance(ticker, years):
         "status": "success",
         "source": source_used,
         "ticker": ticker, 
+        "semantic_name": semantic_name,
         "period": period, 
         "data": data
     }))
