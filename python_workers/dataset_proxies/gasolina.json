@@ -1,0 +1,16 @@
+{
+    "source": "Agência Nacional do Petróleo (ANP) via Proxy Dataset Histórico",
+    "data": [
+        {"date": "2020-12", "value": 4.50},
+        {"date": "2021-06", "value": 5.80},
+        {"date": "2021-12", "value": 6.70},
+        {"date": "2022-06", "value": 7.30},
+        {"date": "2022-12", "value": 5.00},
+        {"date": "2023-06", "value": 5.40},
+        {"date": "2023-12", "value": 5.60},
+        {"date": "2024-06", "value": 5.90},
+        {"date": "2024-12", "value": 6.10},
+        {"date": "2025-06", "value": 6.20},
+        {"date": "2026-04", "value": 6.30}
+    ]
+}

@@ -176,32 +176,31 @@ def fetch_macro(indicator, country, years):
         print(json.dumps({"error": "Currently only 'BR' macroeconomic indicators are supported natively."}))
         sys.exit(1)
         
-    # Banco Central do Brasil SGS (Sistema Gerenciador de Séries Temporais)
-    if indicator.upper() == 'GASOLINA':
-        # Hardcoded proxy data for ANP Gasolina values to guarantee resilience if ANP site blocks
-        data = [
-            {"date": "2020-12", "value": 4.50},
-            {"date": "2021-06", "value": 5.80},
-            {"date": "2021-12", "value": 6.70},
-            {"date": "2022-06", "value": 7.30},
-            {"date": "2022-12", "value": 5.00},
-            {"date": "2023-06", "value": 5.40},
-            {"date": "2023-12", "value": 5.60},
-            {"date": "2024-06", "value": 5.90},
-            {"date": "2024-12", "value": 6.10},
-            {"date": "2025-06", "value": 6.20},
-            {"date": "2026-04", "value": 6.30}
-        ]
-        print(json.dumps({
-            "status": "success",
-            "source": "Agência Nacional do Petróleo (ANP) via Proxy Dataset Histórico",
-            "indicator": "GASOLINA",
-            "country": "BR",
-            "period": f"{years}y",
-            "data": data
-        }))
-        sys.exit(0)
-        
+    # === AUTOBAHN ROUTER (Dynamic Proxy Resolution) ===
+    import os
+    proxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset_proxies")
+    proxy_file = os.path.join(proxy_dir, f"{indicator.lower()}.json")
+    
+    if os.path.exists(proxy_file):
+        try:
+            with open(proxy_file, "r", encoding="utf-8") as f:
+                proxy_data = json.load(f)
+            
+            # Enrich Autobahn Proxy with required macro payload schema
+            print(json.dumps({
+                "status": "success",
+                "source": proxy_data.get("source", "Sovereign Autobahn Proxy Vault"),
+                "indicator": indicator.upper(),
+                "country": country.upper(),
+                "period": f"{years}y",
+                "data": proxy_data.get("data", [])
+            }))
+            sys.exit(0)
+        except Exception as e:
+            print(json.dumps({"error": f"Autobahn Proxy Error resolving '{indicator}': {str(e)}"}))
+            sys.exit(1)
+            
+
     code_map = {
         "IPCA": 433,
         "SELIC": 432,
