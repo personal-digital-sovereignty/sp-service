@@ -6,6 +6,10 @@ import urllib.request
 import urllib.error
 
 def fetch_finance(ticker, years):
+    # Cross-Router: Forgive LLM mapping hallucinations for known macro items
+    if ticker.upper() in ["GASOLINA", "DIESEL", "IPCA", "IGPM", "SELIC", "INPC", "OURO", "ARROZ"]:
+        return fetch_macro(ticker.upper(), "BR", years)
+        
     try:
         import yfinance as yf
         import pandas as pd
