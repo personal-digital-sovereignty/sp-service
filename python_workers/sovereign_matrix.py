@@ -6,9 +6,19 @@ import urllib.request
 import urllib.error
 
 def fetch_finance(ticker, years):
-    # Cross-Router: Forgive LLM mapping hallucinations for known macro items
-    if ticker.upper() in ["GASOLINA", "DIESEL", "IPCA", "IGPM", "SELIC", "INPC", "OURO", "ARROZ"]:
+    # Cross-Router: Check standard Macro indicators
+    if ticker.upper() in ["IPCA", "IGPM", "SELIC", "INPC"]:
         return fetch_macro(ticker.upper(), "BR", years)
+        
+    # Dynamically check Autobahn Proxies (Forgive financial mapping of local datasets)
+    import os
+    proxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset_proxies")
+    if os.path.exists(proxy_dir):
+        for f_name in os.listdir(proxy_dir):
+            if f_name.endswith(".json"):
+                base_name = f_name[:-5]
+                if base_name.lower() in ticker.lower() or ticker.lower() in base_name.lower():
+                    return fetch_macro(base_name.upper(), "BR", years)
         
     try:
         import yfinance as yf
@@ -177,10 +187,6 @@ def fetch_finance(ticker, years):
     }))
 
 def fetch_macro(indicator, country, years):
-    # Lexical Forgiveness for LLMs that use descriptive queries
-    if "GASOLINA" in indicator.upper(): indicator = "GASOLINA"
-    elif "DIESEL" in indicator.upper(): indicator = "DIESEL"
-    
     if country.upper() != 'BR':
         print(json.dumps({"error": "Currently only 'BR' macroeconomic indicators are supported natively."}))
         sys.exit(1)
@@ -188,6 +194,17 @@ def fetch_macro(indicator, country, years):
     # === AUTOBAHN ROUTER (Dynamic Proxy Resolution) ===
     import os
     proxy_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset_proxies")
+    
+    # Autobahn Wildcard Resolver: If the LLM uses a descriptive phrase (e.g. "PRECO DA GASOLINA"),
+    # we scan the proxies folder to see if any proxy filename (e.g. "gasolina") is a substring.
+    if os.path.exists(proxy_dir):
+        for f_name in os.listdir(proxy_dir):
+            if f_name.endswith(".json"):
+                base_name = f_name[:-5].lower()
+                if base_name in indicator.lower() or indicator.lower() in base_name:
+                    indicator = base_name.upper()
+                    break
+
     proxy_file = os.path.join(proxy_dir, f"{indicator.lower()}.json")
     
     if os.path.exists(proxy_file):
