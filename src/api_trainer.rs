@@ -759,7 +759,7 @@ pub async fn run_deep_research_handler(
                 [DIRETRIZES TÁTICAS DE TOOL CALLING]\n\
                 1. Você DEVE usar APENAS a Ferramenta EXATA e mais cirúrgica para suprir a demanda de dados antes de escrever qualquer análise.\n\
                 2. Para informações de Notícias, Blogs genéricos ou Pesquisas Verbais, USE a ferramenta `dispatch_sub_researcher` e envie seu array em \"search_queries\".\n\
-                3. Para extrair COTAÇÕES FINANCEIRAS (Petróleo, Ações, Commodities), VOCÊ DEVE USAR ESTRITAMENTE `fetch_financial_ticker` (ex: `{{\"symbol\": \"BRENT\"}}`).\n\
+                3. Para extrair COTAÇÕES FINANCEIRAS (Petróleo, Ações, Commodities), VOCÊ DEVE USAR ESTRITAMENTE `fetch_financial_ticker` (ex: `{{\"symbol\": \"BRENT\"}}`). ATENÇÃO ABSOLUTA: Se o usuário pedir preço do BARRIL DE PETRÓLEO, invoque ESTRITAMENTE a commodity 'BRENT'. É terminantemente PROIBIDO invocar o ticket da 'PETROBRAS' como proxy para o valor do barril!\n\
                 4. Para extrair DADOS MACROECONÔMICOS GOVERNAMENTAIS (Inflação, IPCA, Selic, Desemprego), VOCÊ DEVE USAR ESTRITAMENTE `fetch_macroeconomy` (ex: `{{\"indicator\": \"IPCA\"}}`).\n\
                 5. É ESTRITAMENTE PROIBIDO gerar análises teóricas no vácuo ANTES de invocar a ferramenta correspondente.\n\
                 6. EXAUSTÃO COMBINATÓRIA: Se a instrução do usuário exigir múltiplas métricas (ex: Petróleo E Inflação E Gasolina), você DEVE extrair UMA de cada vez sequencialmente. Ao receber a resposta de UMA ferramenta, no turno posterior você DEVE acionar a PRÓXIMA ferramenta. NÃO OUSE iniciar a sua síntese final até ter chamado ferramentas para TODOS os sub-elementos da query original!",
@@ -773,7 +773,7 @@ pub async fn run_deep_research_handler(
                 [DIRETRIZES TÁTICAS ORQUESTRAIS DE TOOL CALLING]\n\
                 1. Você DEVE avaliar a solicitação do usuário e selecionar ESTRITAMENTE a Ferramenta NATIVA correta.\n\
                 2. Para Pesquisas Contextuais, Textos, Entidades, Notícias -> USE `dispatch_sub_researcher` e emita suas palavras chave limpas.\n\
-                3. Se o Usuário pede DADOS FINANCEIROS EXATOS (Ações, Petróleo, Cotações de Barril, Moedas) -> VOCÊ DEVE INVOCAR NATIVAMENTE a função `fetch_financial_ticker`.\n\
+                3. Se o Usuário pede DADOS FINANCEIROS EXATOS (Ações, Petróleo, Cotações de Barril, Moedas) -> VOCÊ DEVE INVOCAR NATIVAMENTE a função `fetch_financial_ticker`. ATENÇÃO ABSOLUTA: Para barril de petróleo, convoque OBRIGATORIAMENTE o ticker 'BRENT'. Nunca assuma ações de empresas como 'PETROBRAS'!\n\
                 4. COMMODITIES NACIONAIS & MACROECONOMIA (Inflação, Taxas Selic, Preço da Gasolina, Diesel, Cestas) -> VOCÊ DEVE INVOCAR NATIVAMENTE a função `fetch_macroeconomy` passando o nome exato do ítem como indicator (ex: 'GASOLINA', 'IPCA').\n\
                 5. É terminantemente proibido prever a resposta ou discorrer sem ANTES acionar uma das ferramentas para levantar as provas reais.\n\
                 6. EXAUSTÃO COMBINATÓRIA: Se a instrução do usuário exigir múltiplas métricas (ex: Petróleo E Inflação E Gasolina), você DEVE extrair UMA de cada vez sequencialmente. Ao receber a resposta de UMA ferramenta, no turno posterior você DEVE acionar a PRÓXIMA ferramenta. NÃO OUSE iniciar a sua síntese até ter chamado ferramentas para TODOS os sub-elementos da query original!\n\
