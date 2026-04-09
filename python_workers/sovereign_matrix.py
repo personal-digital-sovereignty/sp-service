@@ -242,12 +242,15 @@ def fetch_macro(indicator, country, years):
         "IPCA": 433,
         "SELIC": 432,
         "IGPM": 189,
-        "INPC": 188
+        "INPC": 188,
+        "ANP_OCORRENCIA": 1393,
+        "ANP_PRODUCAO": 1393,
+        "PETROLEO_SGS": 1393
     }
     
     ind_code = code_map.get(indicator.upper())
     if not ind_code:
-        print(json.dumps({"error": f"Unknown macro indicator '{indicator}'. Supported: IPCA, SELIC, IGPM, INPC"}))
+        print(json.dumps({"error": f"Unknown macro indicator '{indicator}'. Supported: IPCA, SELIC, IGPM, INPC, ANP_OCORRENCIA"}))
         sys.exit(1)
         
     end_date = datetime.datetime.now()

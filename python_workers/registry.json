@@ -125,13 +125,13 @@
         "type": "function",
         "function": {
             "name": "fetch_macroeconomy",
-            "description": "Acessa a Sovereign Open-Data Matrix (Banco Central API) para baixar taxas macroeconômicas oficiais de um país, como Inflação, Selic, IGPM. USE SEMPRE ESTA FERRAMENTA PARA DADOS ECONÔMICOS DE INFLAÇÃO E JUROS EM VEZ DO SCRAPER WEB.",
+            "description": "Acessa a Sovereign Open-Data Matrix (Banco Central API) para baixar taxas macroeconômicas oficiais de um país, como Inflação, Selic, IGPM, e Petróleo/ANP. USE SEMPRE ESTA FERRAMENTA PARA DADOS ECONÔMICOS, DE INFLAÇÃO, JUROS, OU OCORRÊNCIAS/PRODUÇÃO ANP (Agência Nacional do Petróleo) EM VEZ DO SCRAPER WEB.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "indicator": {
                         "type": "string",
-                        "description": "O indicador (ex: 'IPCA', 'SELIC', 'IGPM', 'INPC')."
+                        "description": "O indicador (ex: 'IPCA', 'SELIC', 'IGPM', 'INPC', 'ANP_OCORRENCIA')."
                     },
                     "country": {
                         "type": "string",
