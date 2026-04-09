@@ -693,6 +693,7 @@ pub async fn run_deep_research_handler(
         let auth_inquisitor = crate::api::query_most_honest_model(engine_arc.db_pool.as_ref(), &fallback_inquisitor).await;
         
         let mut all_sources = Vec::new();
+        let mut has_failed_tools = false;
         
         // --- THE WORKER GRAPH LOOP (MAX 5 STAGES: GATHER, ANALYZE, SYNTHESIZE) ---
         for cycle in 1..=5 {
@@ -1219,10 +1220,31 @@ pub async fn run_deep_research_handler(
                     } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
                         tracing::error!("[Ollama Synthesizer ERRO]: {}", err);
                         
+                        if err.contains("does not support tools") {
+                            if !has_failed_tools {
+                                has_failed_tools = true;
+                                let _ = TRAINER_LOGS.send(format!("⚠️ [Agentic Firewall] O modelo '{}' recusa Tools. Procurando rescate de mesmo peso...", target_model_name));
+                                let mut fallbacks = vec!["qwen", "llama", "mistral", "mixtral", "command-r", "phi3"];
+                                if target_model_name.contains("0.5b") || target_model_name.contains("1.5b") { fallbacks = vec!["qwen2.5:1.5b", "qwen2.5:0.5b"]; }
+                                else if target_model_name.contains("3b") || target_model_name.contains("4b") { fallbacks = vec!["qwen3:4b", "qwen2.5:3b", "llama3.2"]; }
+                                else if target_model_name.contains("8b") || target_model_name.contains("7b") { fallbacks = vec!["llama3.1:8b", "llama3:8b", "qwen2.5:7b", "mistral", "gemma2:9b"]; }
+                                
+                                target_model_name = crate::api::discover_best_model(fallbacks, "qwen2.5:7b").await;
+                                let _ = TRAINER_LOGS.send(format!("🚀 [Auto-Healing] Fallback ativado. Reiniciando orquestração com mente capaz: '{}'.", target_model_name));
+                                continue;
+                            }
+                            
+                            let _ = TRAINER_LOGS.send("❌ [Agentic Firewall] Fallback falhou na validação dupla. Abortando rastreio.".to_string());
+                        }
+
                         let pt_br_error = if err.contains("does not support tools") {
-                            "O modelo neural selecionado não possui suporte nativo à arquitetura Agentic Loop (Uso Autorizado de Ferramentas). Por favor, eleja um modelo compatível como Mestre Orquestrador (ex: Qwen 2.5, Llama 3.1+ ou Mistral).".to_string()
+                            let _ = TRAINER_LOGS.send("💡 **AÇÃO NECESSÁRIA**: Seu ecossistema local carece de modelos compatíveis com funções Agentic (Tools). Abra seu terminal (fora da interface) e extraia um cérebro compatível executando: `ollama run qwen2.5:7b` ou `ollama run llama3.1:8b`.".to_string());
+                            "O modelo neural selecionado e os fallbacks autônomos falharam ao suportar arquitetura Agentic Loop (Uso Autorizado de Ferramentas). Por favor, resolva as deficiências locais instalando Qwen 2.5 ou Llama 3.1+.".to_string()
                         } else if err.contains("not found") {
-                            "O modelo não foi localizado no seu registro local do Ollama.".to_string()
+                            if has_failed_tools {
+                                let _ = TRAINER_LOGS.send("💡 **AÇÃO NECESSÁRIA**: O Sovereign tentou instanciar um motor tático para salva-lo, mas falhou pois sua máquina está limpa e escassa. Abra o terminal e rode: `ollama run qwen2.5:7b` ou `ollama run llama3.1:8b` para habilitar orquestração autonôma Cíbrida.".to_string());
+                            }
+                            "O modelo neural de sub-rotina ou de fallback não foi localizado no seu registro local do Ollama.".to_string()
                         } else if err.to_lowercase().contains("connection refused") {
                             "Conexão com o nó do Ollama foi recusada.".to_string()
                         } else if err.to_lowercase().contains("timeout") {
