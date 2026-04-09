@@ -29,6 +29,7 @@ pub struct TelemetryState {
     // Buffer para armazenar as ultimas N sessoes (tokens, millis)
     recent_sessions: VecDeque<(usize, u128)>,
     pub models_usage: HashMap<String, usize>,
+    pub live_tps: f64,
     
     // Hardware Sensors (Requires mutable access for diffing)
     pub sys: System,
@@ -86,6 +87,7 @@ impl TelemetryState {
             estimated_cost: 0.0,
             recent_sessions: VecDeque::with_capacity(10),
             models_usage: HashMap::new(),
+            live_tps: 0.0,
             sys,
             networks,
             gpu_name,
@@ -115,6 +117,8 @@ impl TelemetryState {
             self.recent_sessions.pop_front();
         }
         self.recent_sessions.push_back((tokens, duration_ms));
+        
+        self.live_tps = 0.0;
     }
 
     pub fn refresh_hardware(&mut self) {
@@ -144,6 +148,10 @@ impl TelemetryState {
             }
         }
         
+        if self.live_tps > 0.0 {
+            tps = self.live_tps;
+        }
+
         // Extract CPU Cores Array
         let mut cpu_cores = Vec::new();
         for core in self.sys.cpus() {
@@ -151,7 +159,7 @@ impl TelemetryState {
         }
 
         // Memory Conversion
-        let ram_usage_mb = self.sys.used_memory() as f64 / 1024.0 / 1024.0;
+        let ram_usage_mb = (self.sys.total_memory() - self.sys.available_memory()) as f64 / 1024.0 / 1024.0;
         let ram_total_gb = self.sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
 
         // Network Aggregate

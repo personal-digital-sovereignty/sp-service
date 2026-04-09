@@ -806,6 +806,22 @@ if let Some(pid) = payload.project_id
             }
     }
 
+if project_context.is_empty() {
+    if let Ok(active_projs) = sqlx::query("SELECT name, purpose FROM projects WHERE is_archived = 0 OR is_archived IS NULL")
+        .fetch_all(&state.db)
+        .await {
+            if !active_projs.is_empty() {
+                project_context.push_str("INSTRUÇÃO SISTÊMICA (CONSCIÊNCIA DE PROJETOS): O usuário possui os seguintes Projetos ativos no Kanban local neste exato momento:\n");
+                for p in active_projs {
+                    let n: String = sqlx::Row::get(&p, "name");
+                    let purp: Option<String> = sqlx::Row::get(&p, "purpose");
+                    project_context.push_str(&format!("- KANBAN '{}': {}\n", n, purp.unwrap_or_default()));
+                }
+                project_context.push_str("Use esta consciência periférica se o usuário pedir ajuda para gerenciar o seu dia, idéias ou se for relevante durante a conversa.\n");
+            }
+        }
+}
+
 if !project_context.is_empty() {
     purified_messages.push(json!({
         "role": "system",
@@ -1217,6 +1233,16 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                 && !content.is_empty() {
                                     session_tokens += 1;
                                     
+                                    // Live TPS Broadcast: Atualiza a métrica em tempo real se a engine de telemetria estiver operando
+                                    if session_tokens % 5 == 0 {
+                                        let live_duration_sec = start_time.elapsed().as_secs_f64();
+                                        if live_duration_sec > 0.0 {
+                                            if let Ok(mut t) = tracking_telemetry.write() {
+                                                t.live_tps = (session_tokens as f64 / live_duration_sec * 100.0).round() / 100.0;
+                                            }
+                                        }
+                                    }
+
                                     // Sovereign DeepSeek Paradigm: Translating <think> on-the-fly to beautiful UI details
                                     let mapped_content = content.replace("<think>", "\n<details class=\"mb-4 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-sm\"><summary class=\"cursor-pointer bg-zinc-900/50 px-4 py-2 text-sm font-semibold text-indigo-400 hover:bg-zinc-800/50 transition-colors select-none\">🧠 Pré-Raciocínio Dinâmico (Sovereign Expert)</summary><div class=\"border-l-2 border-indigo-500/50 p-4 text-sm italic text-zinc-400 bg-zinc-950/80 m-0 whitespace-pre-wrap\">\n")
                                         .replace("</think>", "\n</div></details>\n\n");

@@ -24,8 +24,15 @@ def fetch_finance(ticker, years):
         import yfinance as yf
         import pandas as pd
     except ImportError:
-        print(json.dumps({"error": "Packages 'yfinance' and 'pandas' are missing. Run 'pip install yfinance pandas'."}))
-        sys.exit(1)
+        import subprocess
+        import sys
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "yfinance", "pandas"])
+            import yfinance as yf
+            import pandas as pd
+        except Exception as e:
+            print(json.dumps({"error": f"Packages 'yfinance' and 'pandas' are missing. Auto-healing failed: {str(e)}"}))
+            sys.exit(1)
         
     clean_years = years.replace('y', '').replace('Y', '')
     if not clean_years.isdigit():
