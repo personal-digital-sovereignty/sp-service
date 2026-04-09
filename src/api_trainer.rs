@@ -974,6 +974,13 @@ pub async fn run_deep_research_handler(
                                                 }));
                                             }
                                         } else if let Some(fname) = func_n {
+                                            // [SecOps Firewall] Path Traversal Validation
+                                            let is_safe = !fname.is_empty() && fname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                                            if !is_safe {
+                                                let _ = TRAINER_LOGS.send(format!("⚠️ [SecOps Firewall] Tentativa de Tool Path Traversal abortada. Nome malicioso: '{}'", fname));
+                                                continue;
+                                            }
+
                                             // UNIVERSAL REFLEXIVE DISPATCHER
                                             let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
                                             let cur_dir = std::env::current_dir().unwrap_or_default();
