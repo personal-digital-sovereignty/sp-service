@@ -887,7 +887,7 @@ if turn_count > 3 {
 // EPIC 11: AGENTIC MLA (Latent Context Compression)
 // Objetivo: Preservar 1 Turno (3 Msgs) + 4 Latent Memories (Reranked)
 // ==========================================
-let mut active_messages = Vec::new();
+let active_messages;
 let mut mla_compressed_context = String::new();
 
 if turn_count > 3 {
