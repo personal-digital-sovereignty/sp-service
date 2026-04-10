@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS sovereign_chunks (
 -- ---------------------------------------------------------
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT DEFAULT 'default',
     title TEXT NOT NULL,
     folder_name TEXT,
     tags_json TEXT,

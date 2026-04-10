@@ -230,6 +230,10 @@ async fn main() {
     let _ = sqlx::query(r#"UPDATE workspaces SET path = REPLACE(path, '\\?\', '')"#).execute(&db_pool).await;
     let _ = sqlx::query(r#"UPDATE sensus_documents SET path = REPLACE(path, '\\?\', '')"#).execute(&db_pool).await;
 
+    // Hotfix 1.2.0: Multi-Tenancy Chat Isolation (Adiciona workspace_id pra separar histórico do Vault / Projetos)
+    tracing::info!("🔒 [Sovereign DB] Injetando Multi-tenancy Isolation no Chat History...");
+    let _ = sqlx::query("ALTER TABLE chat_sessions ADD COLUMN workspace_id TEXT DEFAULT 'default'").execute(&db_pool).await;
+
     // Inicializa o Motor Físico RAG O.S Multi-Drive
     let r_sync_engine = sync_engine::SyncEngine::new(db_pool.clone());
     r_sync_engine.start_watcher().await;

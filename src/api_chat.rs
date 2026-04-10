@@ -13,6 +13,7 @@ pub struct ChatSessionRow {
     pub id: i64,
     pub title: Option<String>,
     pub folder_name: Option<String>,
+    pub workspace_id: Option<String>,
     pub created_at: Option<chrono::NaiveDateTime>,
     pub updated_at: Option<chrono::NaiveDateTime>,
 }
@@ -39,11 +40,21 @@ pub struct ChatSessionResponse {
     pub messages: Vec<ChatMessageRow>,
 }
 
+#[derive(Deserialize)]
+pub struct SessionQuery {
+    pub workspace_id: Option<String>,
+}
+
 /// A Rota V1 Legada (Recriada em Rust) que alimenta o Menu Esquerdo c/ Historico
-pub async fn get_sessions_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn get_sessions_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<SessionQuery>
+) -> impl IntoResponse {
+    let ws_param = query.workspace_id.unwrap_or_else(|| "default".to_string());
     let rows = sqlx::query_as::<_, ChatSessionRow>(
-        "SELECT id, title, folder_name, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC"
+        "SELECT id, title, folder_name, workspace_id, created_at, updated_at FROM chat_sessions WHERE coalesce(workspace_id, 'default') = ? ORDER BY updated_at DESC"
     )
+    .bind(ws_param)
     .fetch_all(&state.db)
     .await;
 
@@ -62,7 +73,7 @@ pub async fn get_session_by_id_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let session = sqlx::query_as::<_, ChatSessionRow>(
-        "SELECT id, title, folder_name, created_at, updated_at FROM chat_sessions WHERE id = ?"
+        "SELECT id, title, folder_name, workspace_id, created_at, updated_at FROM chat_sessions WHERE id = ?"
     )
     .bind(id)
     .fetch_optional(&state.db)
@@ -164,6 +175,7 @@ pub async fn get_or_create_session(
     db: &sqlx::SqlitePool,
     session_id: Option<i64>,
     first_msg: &str,
+    workspace_id: &str,
 ) -> i64 {
     if let Some(id) = session_id {
         return id;
@@ -172,8 +184,9 @@ pub async fn get_or_create_session(
     // Título autogerado baseado no Início do Prompt
     let title = first_msg.chars().take(40).collect::<String>();
 
-    let res = sqlx::query("INSERT INTO chat_sessions (title) VALUES (?)")
+    let res = sqlx::query("INSERT INTO chat_sessions (title, workspace_id) VALUES (?, ?)")
         .bind(&title)
+        .bind(workspace_id)
         .execute(db)
         .await;
 

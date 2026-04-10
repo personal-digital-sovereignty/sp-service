@@ -865,7 +865,8 @@ if payload.deep_research.unwrap_or(false) {
 }
 // =========================================================
 
-let active_session_id = crate::api_chat::get_or_create_session(&state.db, payload.session_id, &human_prompt).await;
+let workspace_id = payload.workspace_id.clone().unwrap_or_else(|| "default".to_string());
+let active_session_id = crate::api_chat::get_or_create_session(&state.db, payload.session_id, &human_prompt, &workspace_id).await;
 
 // Grava no Banco a pergunta Humana
 crate::api_chat::save_message(&state.db, active_session_id, "user", &human_prompt).await;
