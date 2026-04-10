@@ -1127,6 +1127,108 @@ pub async fn run_deep_research_handler(
                                                     (t_clone, format!("### Engineering/DevOps Output:\n{}", res), "Engineering WebCrawler".to_string())
                                                 }));
                                             }
+                                        } else if func_n == Some("fetch_encyclopedia") {
+                                            let mut queries: Vec<String> = Vec::new();
+                                            let mut lang: String = "pt".to_string();
+                                            
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(arr) = args.get("queries").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                }
+                                                if let Some(l) = args.get("language").and_then(|s| s.as_str()) {
+                                                    lang = l.to_string();
+                                                }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(arr) = parsed.get("queries").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                    }
+                                                    if let Some(l) = parsed.get("language").and_then(|s| s.as_str()) {
+                                                        lang = l.to_string();
+                                                    }
+                                                }
+                                            }
+
+                                            for query in queries {
+                                                let q_clone = query.clone();
+                                                let l_clone = lang.clone();
+                                                let _ = TRAINER_LOGS.send(format!("[Encyclopedia Engine] Acessando Wiki sobre '{}' ({})...", q_clone, l_clone));
+                                                
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
+                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("wiki_matrix.py") } else { cur_dir.join("core").join("python_workers").join("wiki_matrix.py") };
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg(&q_clone)
+                                                        .arg(&l_clone)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (q_clone, format!("### Wikipedia Output:\n{}", res), "Wiki Node".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("fetch_cultural_data") {
+                                            let mut queries: Vec<String> = Vec::new();
+                                            let mut sources: Vec<String> = Vec::new();
+                                            
+                                            // Arrays parser
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(arr) = args.get("queries").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                }
+                                                if let Some(arr) = args.get("sources").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(s) = item.as_str() { sources.push(s.to_string()); } }
+                                                }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(arr) = parsed.get("queries").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                    }
+                                                    if let Some(arr) = parsed.get("sources").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(s) = item.as_str() { sources.push(s.to_string()); } }
+                                                    }
+                                                }
+                                            }
+                                            if sources.is_empty() { sources.push("TMDB".to_string()); }
+
+                                            for (i, query) in queries.iter().enumerate() {
+                                                let src = sources.get(i).unwrap_or(&sources[0]).clone();
+                                                let q_clone = query.clone();
+                                                let _ = TRAINER_LOGS.send(format!("[Cultural Bridge] Recuperando arte '{}' ({})...", q_clone, src));
+                                                
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
+                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("culture_matrix.py") } else { cur_dir.join("core").join("python_workers").join("culture_matrix.py") };
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg(&q_clone)
+                                                        .arg(&src)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (q_clone, format!("### Cultural Database Output:\n{}", res), "Culture Matrix".to_string())
+                                                }));
+                                            }
                                         } else if let Some(fname) = func_n {
                                             // [SecOps Firewall] Path Traversal Validation
                                             let is_safe = !fname.is_empty() && fname.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');

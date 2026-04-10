@@ -378,3 +378,87 @@ pub async fn set_cold_storage_handler(
 
     Json(serde_json::json!({"status": "ok"})).into_response()
 }
+
+// ---------------------------------------------------------
+// SECOPS VAULT: TENANT API KEYS (CRUD)
+// ---------------------------------------------------------
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct TenantApiKeyRow {
+    pub id: String,
+    pub provider_name: String,
+    pub created_at: Option<chrono::NaiveDateTime>,
+    // Nós NUNCA retornamos a chave em texto plano para o Frontend
+}
+
+#[derive(Deserialize)]
+pub struct CreateTenantKeyReq {
+    pub provider_name: String,
+    pub api_key_value: String,
+}
+
+/// GET /v1/settings/tenant_keys
+pub async fn get_tenant_keys_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let rows = sqlx::query_as::<_, TenantApiKeyRow>("SELECT id, provider_name, created_at FROM tenant_api_keys ORDER BY created_at DESC")
+        .fetch_all(&state.db)
+        .await;
+
+    match rows {
+        Ok(keys) => Json(keys).into_response(),
+        Err(_) => Json(Vec::<TenantApiKeyRow>::new()).into_response()
+    }
+}
+
+/// POST /v1/settings/tenant_keys
+pub async fn create_tenant_key_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateTenantKeyReq>,
+) -> impl IntoResponse {
+    let new_id = uuid::Uuid::new_v4().to_string();
+    
+    // Criptografa a chave usando o KMS nativo (AES-GCM at rest)
+    let encrypted_key = match kms::encrypt_vault_secret(&req.api_key_value) {
+        Some(cipher) => cipher,
+        None => return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true, "message": "KMS Encryption failed"}))).into_response(),
+    };
+
+    let res = sqlx::query("INSERT INTO tenant_api_keys (id, provider_name, api_key_value) VALUES (?, ?, ?)")
+        .bind(&new_id)
+        .bind(&req.provider_name)
+        .bind(&encrypted_key)
+        .execute(&state.db)
+        .await;
+
+    match res {
+        Ok(_) => Json(serde_json::json!({"status": "created", "id": new_id})).into_response(),
+        Err(e) => {
+            if e.to_string().contains("UNIQUE") {
+                // Upsert se já existir
+                let _ = sqlx::query("UPDATE tenant_api_keys SET api_key_value = ?, updated_at = CURRENT_TIMESTAMP WHERE provider_name = ?")
+                    .bind(&encrypted_key)
+                    .bind(&req.provider_name)
+                    .execute(&state.db)
+                    .await;
+                Json(serde_json::json!({"status": "updated"})).into_response()
+            } else {
+                (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true, "message": "Database Error"}))).into_response()
+            }
+        }
+    }
+}
+
+/// DELETE /v1/settings/tenant_keys/:id
+pub async fn delete_tenant_key_handler(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let res = sqlx::query("DELETE FROM tenant_api_keys WHERE id = ?")
+        .bind(id)
+        .execute(&state.db)
+        .await;
+
+    match res {
+        Ok(_) => Json(serde_json::json!({"status": "deleted"})).into_response(),
+        Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true, "message": "Database Error"}))).into_response(),
+    }
+}

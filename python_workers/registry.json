@@ -225,5 +225,67 @@
                 "required": ["topics", "sources"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_encyclopedia",
+            "description": "Acesso direto à Wikipedia/Wikimedia para recuperar em alta velocidade dados de conhecimentos gerais, históricos, políticos, geográficos e biográficos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Lista de entidades, nomes ou fatos para pesquisar nativamente na Wiki (ex: ['Alan Turing', 'Revolução Francesa'])."
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Língua nativa alvo (ex: 'pt' para Português, 'en' para Inglês)."
+                    }
+                },
+                "required": ["queries", "language"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_cultural_data",
+            "description": "Extrator massivo de cultura pop, artes e entretenimento. Acessa as bibliotecas TMDB (Filmes/Séries), IGDB (Jogos) e MusicBrainz (Música). As restrições de limite de acesso (Rate Limits) para opções corporativas são mitigadas automaticamente pelo motor caso o Usuário não possua chave.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Obras, filmes, nomes de álbuns ou jogos em questão (ex: ['O Poderoso Chefão', 'The Legend of Zelda', 'Pink Floyd'])."
+                    },
+                    "sources": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "O repositório cultural correspondente (ex: ['TMDB', 'IGDB', 'MusicBrainz', 'TheMet'])."
+                    }
+                },
+                "required": ["queries", "sources"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_geopolitics_wikileaks",
+            "description": "[PLANO FUTURO] Extrator para banco de dados avançado do WikiLeaks e inteligência geopolítica descentralizada. Traz transparência radical e análise profunda baseada em documentos vazados autênticos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Entidade de interesse de Estado ou diplomacia (ex: 'Vault 7', 'Guantanamo Bay')."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
     }
 ]

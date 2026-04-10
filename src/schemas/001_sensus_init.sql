@@ -241,3 +241,14 @@ CREATE TABLE IF NOT EXISTS public_api_directory (
     cors TEXT,
     category TEXT
 );
+
+-- ---------------------------------------------------------
+-- 9. SECOPS VAULT (USER PRIVATE APIS)
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tenant_api_keys (
+    id TEXT PRIMARY KEY,
+    provider_name TEXT NOT NULL UNIQUE,
+    api_key_value TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
