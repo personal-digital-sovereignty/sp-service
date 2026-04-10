@@ -1,46 +1,53 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, sqlx::FromRow)]
 pub struct PublicApiEntry {
     pub name: String,
     pub url: String,
-    pub description: String,
-    pub auth: String,
-    pub https: String,
-    pub cors: String,
-    pub category: String,
+    pub description: Option<String>,
+    pub auth: Option<String>,
+    pub https: Option<String>,
+    pub cors: Option<String>,
+    pub category: Option<String>,
 }
 
-// Embedded Base64 Payload compiled into the executable directly via build.rs
-const API_B64: &str = include_str!("public_apis.b64");
+pub async fn search_api_directory(query: &str, pool: &sqlx::SqlitePool) -> String {
+    let q = format!("%{}%", query.to_lowercase());
+    
+    // Search SQLite for matching APIs
+    let matches: Result<Vec<PublicApiEntry>, sqlx::Error> = sqlx::query_as::<_, PublicApiEntry>(
+        r#"
+        SELECT name, url, description, auth, https, cors, category 
+        FROM public_api_directory 
+        WHERE LOWER(name) LIKE ? OR LOWER(description) LIKE ? OR LOWER(category) LIKE ? 
+        LIMIT 20
+        "#,
+    )
+    .bind(&q).bind(&q).bind(&q)
+    .fetch_all(pool)
+    .await;
 
-lazy_static::lazy_static! {
-    pub static ref PUBLIC_APIS: Vec<PublicApiEntry> = {
-        use base64::{Engine as _, engine::general_purpose};
-        let decoded = general_purpose::STANDARD.decode(API_B64.trim()).unwrap_or_default();
-        serde_json::from_slice(&decoded).unwrap_or_else(|_| Vec::new())
-    };
-}
-
-pub fn search_api_directory(query: &str) -> String {
-    let q = query.to_lowercase();
-    let matches: Vec<&PublicApiEntry> = PUBLIC_APIS.iter()
-        .filter(|api| api.name.to_lowercase().contains(&q) || 
-                      api.description.to_lowercase().contains(&q) ||
-                      api.category.to_lowercase().contains(&q))
-        .take(20) // Limit to 20 results to avoid Context Window Overflow
-        .collect();
-
-    if matches.is_empty() {
-        return format!("Nenhuma API pública aberta sob o termo '{}' foi encontrada na lista autorizada do Sovereign.", query);
+    match matches {
+        Ok(apis) if apis.is_empty() => {
+            format!("Nenhuma API pública aberta sob o termo '{}' foi encontrada na lista autorizada do Sovereign.", query)
+        },
+        Ok(apis) => {
+            let mut result = format!("### Catálogo de APIs Free Resgatado (Termo: '{}')\n\nVocê tem autorização Tática para acessar estas URLs diretamente ao invés de buscar no Google!\n\n", query);
+            for api in apis {
+                let desc = api.description.clone().unwrap_or_else(|| "Sem descrição".to_string());
+                let auth = api.auth.clone().unwrap_or_else(|| "Unknown".to_string());
+                let cors = api.cors.clone().unwrap_or_else(|| "Unknown".to_string());
+                let cat = api.category.clone().unwrap_or_else(|| "Unknown".to_string());
+                
+                result.push_str(&format!("- **{}** (Categoria: {})\n  Descrição: {}\n  Auth Necessária: {} | CORS: {}\n  Endpoint Básico Autorizado para uso: `{}`\n", 
+                    api.name, cat, desc, auth, cors, api.url));
+            }
+            result
+        },
+        Err(e) => {
+            format!("[ERRO] Falha ao consultar o banco de dados public_api_directory: {}", e)
+        }
     }
-
-    let mut result = format!("### Catálogo de APIs Free Resgatado (Termo: '{}')\n\nVocê tem autorização Tática para acessar estas URLs diretamente ao invés de buscar no Google!\n\n", query);
-    for api in matches {
-        result.push_str(&format!("- **{}** (Categoria: {})\n  Descrição: {}\n  Auth Necessária: {} | CORS: {}\n  Endpoint Básico Autorizado para uso: `{}`\n", 
-            api.name, api.category, api.description, api.auth, api.cors, api.url));
-    }
-    result
 }
 
 pub async fn fetch_json_endpoint(url: &str) -> String {

@@ -179,5 +179,51 @@
                 ]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_academic_papers",
+            "description": "Busca artigos científicos, abstracts originais e relatórios técnicos em bibliotecas de alto impacto (arXiv para Física/Matemática/Computação, PubMed para Biomédica, NASA para Aeroespacial/Geociências). Utilize matrizes de termos em 'queries' para obter dados de ponta.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Lista de temas ou dorks de pesquisa acadêmica (ex: ['quantum computing', 'LLM cross attention'])."
+                    },
+                    "disciplines": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Áreas de foco correspondentes para roteamento (ex: ['arXiv', 'PubMed', 'NASA'])."
+                    }
+                },
+                "required": ["queries", "disciplines"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_engineering_docs",
+            "description": "Busca em repositórios oficiais e comunidades de base sobre Engenharia de Software, Cloud, DevOps e SRE (ex: StackExchange, Github, Microsoft Learn, Docker Hub, Hugging Face). Traz documentações estruturais e códigos de produção solucionados.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topics": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Lista de ferramentas ou problemas de infraestrutura (ex: ['Docker swarm limitations', 'Kubernetes ingress controller', 'Azure SLA'])."
+                    },
+                    "sources": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Fontes de consulta de engenharia a direcionar (ex: ['StackExchange', 'Github', 'MicrosoftLearn', 'DockerHub', 'HuggingFace'])."
+                    }
+                },
+                "required": ["topics", "sources"]
+            }
+        }
     }
 ]

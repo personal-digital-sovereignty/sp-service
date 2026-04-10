@@ -873,13 +873,15 @@ pub async fn run_deep_research_handler(
                                                     if let Some(t) = parsed.get("topic").and_then(|s| s.as_str()) { api_topic = t.to_string(); }
                                                 }
                                             }
-                                            
                                             if !api_topic.is_empty() {
                                                 let _ = TRAINER_LOGS.send(format!("[Sovereign API Gateway] Indexer Invoked - Localizando APIs públicas para o Core Topic: '{}'", api_topic));
-                                                let api_res = crate::api_gateway::search_api_directory(&api_topic);
-                                                join_handles.push(tokio::spawn(async move {
-                                                    (api_topic, api_res, "API Directory Locator".to_string())
-                                                }));
+                                                if let Some(pool) = engine_arc.db_pool.clone() {
+                                                    let api_topic_clone = api_topic.clone();
+                                                    join_handles.push(tokio::spawn(async move {
+                                                        let api_res = crate::api_gateway::search_api_directory(&api_topic_clone, &pool).await;
+                                                        (api_topic_clone, api_res, "API Directory Locator".to_string())
+                                                    }));
+                                                }
                                             }
                                         } else if func_n == Some("fetch_json_endpoint") {
                                             let mut fetch_url = String::new();
@@ -1020,6 +1022,110 @@ pub async fn run_deep_research_handler(
                                                         (ind_clone, format!("### Sovereign Open-Data Output:\n{}", res), "Open-Data Ledger".to_string())
                                                     }));
                                                 }
+                                            }
+                                        } else if func_n == Some("fetch_academic_papers") {
+                                            let mut queries: Vec<String> = Vec::new();
+                                            let mut disciplines: Vec<String> = Vec::new();
+                                            
+                                            // Arrays parser
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(arr) = args.get("queries").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                }
+                                                if let Some(arr) = args.get("disciplines").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(d) = item.as_str() { disciplines.push(d.to_string()); } }
+                                                }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(arr) = parsed.get("queries").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(q) = item.as_str() { queries.push(q.to_string()); } }
+                                                    }
+                                                    if let Some(arr) = parsed.get("disciplines").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(d) = item.as_str() { disciplines.push(d.to_string()); } }
+                                                    }
+                                                }
+                                            }
+                                            if disciplines.is_empty() { disciplines.push("arxiv".to_string()); }
+
+                                            for (i, query) in queries.iter().enumerate() {
+                                                let disc = disciplines.get(i).unwrap_or(&disciplines[0]).clone();
+                                                let q_clone = query.clone();
+                                                let _ = TRAINER_LOGS.send(format!("[Academic Bridge] Consultando artigos para '{}' ({})...", q_clone, disc));
+                                                
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
+                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("academic_matrix.py") } else { cur_dir.join("core").join("python_workers").join("academic_matrix.py") };
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg(&q_clone)
+                                                        .arg(&disc)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (q_clone, format!("### Academic Research Output:\n{}", res), "Academic Crawler".to_string())
+                                                }));
+                                            }
+                                        } else if func_n == Some("fetch_engineering_docs") {
+                                            let mut topics: Vec<String> = Vec::new();
+                                            let mut sources: Vec<String> = Vec::new();
+                                            
+                                            // Arrays parser
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(arr) = args.get("topics").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(t) = item.as_str() { topics.push(t.to_string()); } }
+                                                }
+                                                if let Some(arr) = args.get("sources").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(s) = item.as_str() { sources.push(s.to_string()); } }
+                                                }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(arr) = parsed.get("topics").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(t) = item.as_str() { topics.push(t.to_string()); } }
+                                                    }
+                                                    if let Some(arr) = parsed.get("sources").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(s) = item.as_str() { sources.push(s.to_string()); } }
+                                                    }
+                                                }
+                                            }
+                                            if sources.is_empty() { sources.push("stackexchange".to_string()); }
+
+                                            for (i, topic) in topics.iter().enumerate() {
+                                                let src = sources.get(i).unwrap_or(&sources[0]).clone();
+                                                let t_clone = topic.clone();
+                                                let _ = TRAINER_LOGS.send(format!("[Engineering Pipeline] Buscando documentação DevOps para '{}' ({})...", t_clone, src));
+                                                
+                                                join_handles.push(tokio::spawn(async move {
+                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
+                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("engineering_matrix.py") } else { cur_dir.join("core").join("python_workers").join("engineering_matrix.py") };
+                                                    
+                                                    let output = tokio::process::Command::new(venv_python)
+                                                        .arg(matrix_script.to_string_lossy().as_ref())
+                                                        .arg(&t_clone)
+                                                        .arg(&src)
+                                                        .output()
+                                                        .await;
+                                                    
+                                                    let res = match output {
+                                                        Ok(out) => {
+                                                            let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                            let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                            if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                        },
+                                                        Err(e) => format!("System execution error: {}", e)
+                                                    };
+                                                    (t_clone, format!("### Engineering/DevOps Output:\n{}", res), "Engineering WebCrawler".to_string())
+                                                }));
                                             }
                                         } else if let Some(fname) = func_n {
                                             // [SecOps Firewall] Path Traversal Validation

@@ -227,3 +227,17 @@ CREATE TABLE IF NOT EXISTS project_documents (
     PRIMARY KEY(project_id, file_path),
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
 );
+
+-- ---------------------------------------------------------
+-- 8. SOVEREIGN API GATEWAY (SANDBOX & O-DATA)
+-- ---------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public_api_directory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    description TEXT,
+    auth TEXT,
+    https TEXT,
+    cors TEXT,
+    category TEXT
+);
