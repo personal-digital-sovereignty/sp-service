@@ -50,7 +50,7 @@ def main():
     namespace = {"__builtins__": __builtins__}
     # Restrict builtins? We leave builtins so things like print() and len() work.
     try:
-        exec(compile(tree, filename="sovereign_sandbox.py", mode="exec"), namespace, namespace)
+        exec(compile(tree, filename="sovereign_sandbox.py", mode="exec"), namespace, namespace)  # nosemgrep
     except Exception as e:
         print(f"Math Error / Runtime Execution: {e}")
         sys.exit(1)

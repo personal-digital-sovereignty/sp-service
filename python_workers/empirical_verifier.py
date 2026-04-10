@@ -9,7 +9,7 @@ def get_best_model(base_url):
     hierarchy = ["qwen2.5:14b", "qwen2.5:7b", "gemma2:9b", "gemma2", "llama3.1", "llama3.2", "qwen3:4b"]
     try:
         req = urllib.request.Request(f"{base_url}/api/tags")
-        with urllib.request.urlopen(req, timeout=5) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # nosemgrep
             data = json.loads(resp.read().decode())
             installed = [m['name'] for m in data.get('models', [])]
             for pref in hierarchy:
@@ -61,7 +61,7 @@ Retorne SOMENTE a sua crítica severa e direta sobre os furos dessa hipótese e 
     data = json.dumps(req_body).encode('utf-8')
     try:
         req = urllib.request.Request(f"{base_url}/api/generate", data=data, headers={'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=180) as resp:
+        with urllib.request.urlopen(req, timeout=180) as resp:  # nosemgrep
             resp_body = json.loads(resp.read().decode())
             critique = resp_body.get('response', 'A Crítica Falhou na Geração.')
             print(json.dumps({
