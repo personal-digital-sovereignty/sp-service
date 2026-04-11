@@ -44,6 +44,9 @@ pub async fn init_pool() -> SqlitePool {
         let qs = format!("ALTER TABLE model_capabilities ADD COLUMN {} BOOLEAN DEFAULT 0", col);
         let _ = sqlx::query(&qs).execute(&pool).await; // Ignora o erro se a coluna já existir
     }
+    
+    // PATCH AUTOMIGRATION (OFFLINE SYNC FALLBACK)
+    let _ = sqlx::query("ALTER TABLE model_capabilities ADD COLUMN is_installed BOOLEAN DEFAULT 1").execute(&pool).await;
 
     // PATCH 1.2.0 (MULTI-TENANCY): Resgata históricos antigos sem ID e os prende ao Workspace Primário
     let _ = sqlx::query("UPDATE chat_sessions SET workspace_id = '1' WHERE workspace_id IS NULL OR workspace_id = '' OR workspace_id = 'default'")

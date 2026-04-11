@@ -479,11 +479,12 @@ pub struct ModelMatrixRow {
     pub is_coder: bool,
     pub is_chat: bool,
     pub is_project: bool,
+    pub is_installed: bool,
 }
 
 /// GET /v1/settings/model_capabilities
 pub async fn get_matrix_capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let q = "SELECT model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project FROM model_capabilities ORDER BY parameter_size DESC";
+    let q = "SELECT model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project, is_installed FROM model_capabilities ORDER BY parameter_size DESC";
     match sqlx::query_as::<_, ModelMatrixRow>(q).fetch_all(&state.db).await {
         Ok(rows) => Json(rows).into_response(),
         Err(_) => Json(Vec::<ModelMatrixRow>::new()).into_response(),

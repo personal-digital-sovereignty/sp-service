@@ -147,6 +147,10 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
     if let Ok(res) = client.get(format!("{}/api/tags", base_url)).send().await
         && let Ok(json) = res.json::<serde_json::Value>().await
         && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+            
+            // Amnésia Cognitiva: Invalida toda a topologia física no banco (mas mantém configs e restrições)
+            let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 0").execute(pool).await;
+            
             for m in models {
                 if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
                     let mut size_val = 0.0;
@@ -239,6 +243,12 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                             
                         tracing::info!("🧠 [Model Capabilities] Profiling {}: Size={}B, Tools={}, Reasoner={}, Master={}, Scribe={}", name, size_val, supports_tools, is_reasoner, is_master, is_scribe);
                     }
+                    
+                    // Independentemente de ser novo ou herdado, reascendemos sua Presença Física na Matrix
+                    let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 1 WHERE model_name = ?")
+                        .bind(name)
+                        .execute(pool)
+                        .await;
                 }
             }
         }
