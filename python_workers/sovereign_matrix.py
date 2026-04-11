@@ -167,10 +167,10 @@ def fetch_finance(ticker, years):
             try:
                 if int(clean_years) > 1:
                     df['YearMonth'] = df.index.strftime('%Y-%m')
-                    df = df.groupby('YearMonth').last()
+                    df = df.groupby('YearMonth').mean()
                     
                     df_usd['YearMonth'] = df_usd.index.strftime('%Y-%m')
-                    df_usd = df_usd.groupby('YearMonth').last()
+                    df_usd = df_usd.groupby('YearMonth').mean()
                     
                     df = df.join(df_usd['Close'], rsuffix='_usd', how='inner')
                     df['Close_brl'] = df['Close'] * df['Close_usd']
@@ -184,7 +184,7 @@ def fetch_finance(ticker, years):
         try:
             if int(clean_years) > 1:
                 df['YearMonth'] = df.index.strftime('%Y-%m')
-                df = df.groupby('YearMonth').last()
+                df = df.groupby('YearMonth').mean()
         except:
             pass
             
@@ -270,6 +270,9 @@ def fetch_macro(indicator, country, years):
         "SELIC": 432,
         "IGPM": 189,
         "INPC": 188,
+        "DOLAR_PTAX": 3698,
+        "CAMBIO": 3698,
+        "USD": 3698,
         "ANP_OCORRENCIA": 1393,
         "ANP_PRODUCAO": 1393,
         "PETROLEO_SGS": 1393
