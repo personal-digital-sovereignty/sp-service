@@ -462,3 +462,66 @@ pub async fn delete_tenant_key_handler(
         Err(_) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true, "message": "Database Error"}))).into_response(),
     }
 }
+
+// ---------------------------------------------------------
+// MODEL CAPABILITIES MATRIX API (EPIC 4)
+// ---------------------------------------------------------
+
+#[derive(Serialize, Deserialize, sqlx::FromRow)]
+pub struct ModelMatrixRow {
+    pub model_name: String,
+    pub parameter_size: f32,
+    pub supports_tools: bool,
+    pub is_reasoner: bool,
+    pub is_master: bool,
+    pub is_scribe: bool,
+    pub is_agent: bool,
+    pub is_coder: bool,
+    pub is_chat: bool,
+    pub is_project: bool,
+}
+
+/// GET /v1/settings/model_capabilities
+pub async fn get_matrix_capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let q = "SELECT model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project FROM model_capabilities ORDER BY parameter_size DESC";
+    match sqlx::query_as::<_, ModelMatrixRow>(q).fetch_all(&state.db).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(_) => Json(Vec::<ModelMatrixRow>::new()).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UpdateMatrixReq {
+    pub model_name: String,
+    pub is_master: bool,
+    pub is_scribe: bool,
+    pub is_agent: bool,
+    pub is_coder: bool,
+    pub is_chat: bool,
+    pub is_project: bool,
+}
+
+/// POST /v1/settings/model_capabilities/toggles
+pub async fn update_matrix_toggles_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpdateMatrixReq>,
+) -> impl IntoResponse {
+    let res = sqlx::query("UPDATE model_capabilities SET is_master = ?, is_scribe = ?, is_agent = ?, is_coder = ?, is_chat = ?, is_project = ? WHERE model_name = ?")
+        .bind(req.is_master)
+        .bind(req.is_scribe)
+        .bind(req.is_agent)
+        .bind(req.is_coder)
+        .bind(req.is_chat)
+        .bind(req.is_project)
+        .bind(&req.model_name)
+        .execute(&state.db)
+        .await;
+
+    match res {
+        Ok(_) => Json(serde_json::json!({"status": "success", "message": "Matrix Updated"})).into_response(),
+        Err(e) => {
+            tracing::error!("Matrix Update Error: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true}))).into_response()
+        }
+    }
+}

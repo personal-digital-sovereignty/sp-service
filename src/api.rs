@@ -199,16 +199,45 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                             is_reasoner = true;
                         }
 
-                        let _ = sqlx::query("INSERT OR REPLACE INTO model_capabilities (model_name, parameter_size, supports_tools, is_reasoner, template) VALUES (?, ?, ?, ?, ?)")
+                        let mut is_master = false;
+                        let mut is_scribe = false;
+                        let mut is_agent = false;
+                        let mut is_coder = false;
+                        let mut is_chat = true; // Todo modelo pode chat
+                        let mut is_project = false;
+
+                        // Definição inteligente para facilitar o setup inicial!
+                        if supports_tools && !is_reasoner && size_val >= 7.0 {
+                            is_master = true; 
+                        }
+                        if supports_tools {
+                            is_scribe = true;
+                            is_agent = true;
+                            is_project = true;
+                        }
+                        if !supports_tools {
+                            is_master = false;
+                        }
+                        if name.to_lowercase().contains("coder") || name.to_lowercase().contains("qwen") || name.to_lowercase().contains("deepseek") {
+                            is_coder = true;
+                        }
+
+                        let _ = sqlx::query("INSERT OR REPLACE INTO model_capabilities (model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project, template) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                             .bind(name)
                             .bind(size_val)
                             .bind(supports_tools)
                             .bind(is_reasoner)
+                            .bind(is_master)
+                            .bind(is_scribe)
+                            .bind(is_agent)
+                            .bind(is_coder)
+                            .bind(is_chat)
+                            .bind(is_project)
                             .bind(template_str)
                             .execute(pool)
                             .await;
                             
-                        tracing::info!("🧠 [Model Capabilities] Profiling {}: Size={}B, Tools={}, Reasoner={}", name, size_val, supports_tools, is_reasoner);
+                        tracing::info!("🧠 [Model Capabilities] Profiling {}: Size={}B, Tools={}, Reasoner={}, Master={}, Scribe={}", name, size_val, supports_tools, is_reasoner, is_master, is_scribe);
                     }
                 }
             }
@@ -218,13 +247,20 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
 pub async fn discover_capable_master_agent(pool: Option<&sqlx::SqlitePool>, min_size: f32, require_tools: bool, exclude_reasoner: bool, fallback: &str) -> String {
     if let Some(p) = pool {
         let mut query = "SELECT model_name FROM model_capabilities WHERE parameter_size >= ?".to_string();
-        if require_tools { query.push_str(" AND supports_tools = 1"); }
+        
+        // Matrix Routing
+        if require_tools { 
+            query.push_str(" AND is_master = 1"); 
+        } else {
+            query.push_str(" AND is_scribe = 1");
+        }
+        
         if exclude_reasoner { query.push_str(" AND is_reasoner = 0"); }
         query.push_str(" ORDER BY parameter_size DESC LIMIT 1");
         
         if let Ok(Some(row)) = sqlx::query(&query).bind(min_size).fetch_optional(p).await
             && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
-                tracing::info!("✨ [Dynamic Discovery] Mestre Dinâmico Ativado: {}", name);
+                tracing::info!("✨ [Dynamic Discovery] Matrix Elegida: {}", name);
                 return name;
             }
     }

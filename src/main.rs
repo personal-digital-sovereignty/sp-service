@@ -182,18 +182,67 @@ pub struct AppState {
     pub adblock_engine: adblocker::AdblockHandle,
 }
 
+struct StringVisitor {
+    message: String,
+}
+impl StringVisitor {
+    fn new() -> Self { Self { message: String::new() } }
+}
+impl tracing::field::Visit for StringVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value); // Note: that usually includes quotes, maybe we need formatting, but let's keep it simple
+        }
+    }
+}
+
+struct SseLogLayer {
+    sender: broadcast::Sender<models::LogEntry>,
+}
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for SseLogLayer {
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+        let mut visitor = StringVisitor::new();
+        event.record(&mut visitor);
+        // Clean leading/trailing quotes if any
+        let clean_msg = visitor.message.trim_matches('"').to_string();
+        
+        let _ = self.sender.send(models::LogEntry {
+            timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+            level: event.metadata().level().to_string(),
+            message: clean_msg,
+        });
+    }
+}
+
+pub async fn system_logs_sse_handler(State(state): State<Arc<AppState>>) -> axum::response::sse::Sse<impl futures::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>> {
+    let mut rx = state.log_sender.subscribe();
+    let stream = async_stream::stream! {
+        while let Ok(log) = rx.recv().await {
+            // Encode as JSON
+            if let Ok(json) = serde_json::to_string(&log) {
+                yield Ok(axum::response::sse::Event::default().data(json));
+            }
+        }
+    };
+    axum::response::sse::Sse::new(stream)
+}
+
 #[tokio::main]
 async fn main() {
-    // Inicializa a Telemetria (Logs avançados estilo Uvicorn)
+    // Inicializa o Corredor de Eventos Cíbridos antes do Tracing para capturar tudo
+    let (log_tx, _) = broadcast::channel(500);
+
+    // Inicializa a Telemetria e injeta o broadcast layer
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "sovereign_core=info,axum=info".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_timer(LocalTimer))
+        .with(SseLogLayer { sender: log_tx.clone() })
         .init();
 
-    tracing::info!("🦀 Sovereign Core (Rust) Initializing...");
+    tracing::info!("🦀 Sovereign Core (Rust) Initializing Native Terminal Capture...");
 
     // BOOT ASYNC DAEMONS PARALELOS
     spawn_vision_daemon();
@@ -238,9 +287,6 @@ async fn main() {
     let r_sync_engine = sync_engine::SyncEngine::new(db_pool.clone());
     r_sync_engine.start_watcher().await;
     let sync_tx = r_sync_engine.tx.clone();
-
-    // Inicializa o Corredor de Eventos Cíbridos (Capacidade p/ 100 Logs antes de lag)
-    let (log_tx, _) = broadcast::channel(100);
 
     // Despacha o Daemon Assíncrono do AdGuard (Toda a lógica RAG depende das assinaturas dele)
     let adblock_handle = adblocker::start_adblock_daemon(active_vault.clone(), db_pool.clone());
@@ -339,6 +385,9 @@ async fn main() {
         .route("/v1/system/import_config", axum::routing::post(api_settings::import_config_handler))
         .route("/v1/system/available_models", axum::routing::get(api_settings::get_available_models_handler))
         .route("/v1/system/docs/user_guide", axum::routing::get(api_settings::get_user_guide_handler))
+        .route("/v1/system/stream-logs", axum::routing::get(system_logs_sse_handler))
+        .route("/v1/settings/model_capabilities", axum::routing::get(api_settings::get_matrix_capabilities_handler))
+        .route("/v1/settings/model_capabilities/toggles", axum::routing::post(api_settings::update_matrix_toggles_handler))
         // ------------------ RAG Engine Command Center ----------
         .route("/v1/engineer/rag/rules", axum::routing::get(api_rag::get_routing_rules_handler)
             .post(api_rag::create_routing_rule_handler))

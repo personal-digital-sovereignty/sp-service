@@ -38,6 +38,13 @@ pub async fn init_pool() -> SqlitePool {
     // CARREGAMENTO NATIVO DO SCHEMA MESTRE CIBRIDO (EPIC 4)
     let _ = sqlx::query(include_str!("schemas/001_sensus_init.sql")).execute(&pool).await;
 
+    // PATCH AUTOMIGRATION (MATRIX CAPABILITIES): Injela as novas colunas silenciosamente sem destruir DBs antigos
+    let new_cols = vec!["is_master", "is_scribe", "is_agent", "is_coder", "is_chat", "is_project"];
+    for col in new_cols {
+        let qs = format!("ALTER TABLE model_capabilities ADD COLUMN {} BOOLEAN DEFAULT 0", col);
+        let _ = sqlx::query(&qs).execute(&pool).await; // Ignora o erro se a coluna já existir
+    }
+
     // PATCH 1.2.0 (MULTI-TENANCY): Resgata históricos antigos sem ID e os prende ao Workspace Primário
     let _ = sqlx::query("UPDATE chat_sessions SET workspace_id = '1' WHERE workspace_id IS NULL OR workspace_id = '' OR workspace_id = 'default'")
         .execute(&pool)

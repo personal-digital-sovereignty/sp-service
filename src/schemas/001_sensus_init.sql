@@ -135,6 +135,12 @@ CREATE TABLE IF NOT EXISTS model_capabilities (
     parameter_size REAL NOT NULL,
     supports_tools BOOLEAN DEFAULT 0,
     is_reasoner BOOLEAN DEFAULT 0,
+    is_master BOOLEAN DEFAULT 0,
+    is_scribe BOOLEAN DEFAULT 0,
+    is_agent BOOLEAN DEFAULT 0,
+    is_coder BOOLEAN DEFAULT 0,
+    is_chat BOOLEAN DEFAULT 0,
+    is_project BOOLEAN DEFAULT 0,
     template TEXT,
     last_checked TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
