@@ -285,6 +285,22 @@
                     }
                 },
                 "required": ["query"]
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_cloud_pricing",
+            "description": "Ferramenta autônoma que consulta o valor médio atualizado por token (Input/Output) dos modelos de IA proprietários líderes de mercado (Gemini, ChatGPT, Claude) para calcular economia local.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string",
+                        "description": "Fornecedor da Nuvem para consultar os preços (ex: 'All', 'OpenAI', 'Anthropic', 'Google'). Se omitido retorna a média geral."
+                    }
+                },
+                "required": []
             }
         }
     }

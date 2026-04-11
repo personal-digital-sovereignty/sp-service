@@ -259,6 +259,28 @@ async fn main() {
     // Boot the Auto-Evaluator (LLM-as-a-Judge Mesh Loop)
     auto_evaluator::start_evaluator_loop(state.clone()).await;
 
+    // Booting autonomous python worker for Cloud Savings Economy
+    let db_pool_pricing = state.db.clone();
+    let telemetry_ref = state.telemetry.clone();
+    tokio::spawn(async move {
+        tracing::info!("☁️ [Sovereign Hub] Spawning Python worker: market_pricing_matrix.py...");
+        let _ = std::process::Command::new("python3")
+            .arg("core/python_workers/market_pricing_matrix.py")
+            .output();
+
+        let avg_cost = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'avg_cloud_token_cost_1k'")
+            .fetch_one(&db_pool_pricing)
+            .await
+            .unwrap_or_else(|_| "0.00625".to_string())
+            .parse::<f64>()
+            .unwrap_or(0.00625);
+
+        if let Ok(mut t) = telemetry_ref.write() {
+            t.avg_cloud_cost_per_1k = avg_cost;
+            tracing::info!("☁️ [Sovereign Hub] Live Market Pricing Set to: ${:.5}/1k tokens", avg_cost);
+        }
+    });
+
     let app = Router::new()
         // ------------------ System Actions & Launchers ---------------
         .route("/v1/system/launch-gui", axum::routing::post(api::launch_gui_handler))

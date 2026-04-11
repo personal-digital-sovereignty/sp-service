@@ -19,6 +19,7 @@ pub struct TelemetrySnapshot {
     pub avg_tps: f64,
     pub avg_latency_ms: u128,
     pub estimated_cost: f64,
+    pub avg_cloud_cost_per_1k: f64,
     pub models_usage: HashMap<String, usize>,
     pub hardware: HardwareSnapshot,
 }
@@ -36,6 +37,7 @@ pub struct TelemetryState {
     pub networks: Networks,
     pub gpu_name: String,
     pub gpu_vram_total_mb: u64,
+    pub avg_cloud_cost_per_1k: f64,
 }
 
 impl TelemetryState {
@@ -92,6 +94,7 @@ impl TelemetryState {
             networks,
             gpu_name,
             gpu_vram_total_mb,
+            avg_cloud_cost_per_1k: 0.00625, // Default fallback
         }
     }
 
@@ -99,14 +102,16 @@ impl TelemetryState {
     pub fn record_session(&mut self, tokens: usize, duration_ms: u128, model: &str) {
         self.total_tokens += tokens;
         
-        let mut cost_per_1k = 0.0150;
+        // Simula A Economia Diária: Se é modelo Local (livre de taxas), o custo que EXISTIRIA na Cloud 
+        // conta como "Economia" baseada no market pricing matrix.
+        let mut cost_per_1k = 0.0;
         if model.to_lowercase().contains("gpt-4") {
             cost_per_1k = 0.0300;
         } else if model.to_lowercase().contains("claude") {
             cost_per_1k = 0.0150;
         } else {
-            // Local Models (Free)
-            cost_per_1k = 0.0;
+            // Local Sovereign Model -> Nós geramos ECONOMIA (Savings) baseada no Cloud Benchmark
+            cost_per_1k = self.avg_cloud_cost_per_1k;
         }
         self.estimated_cost += (tokens as f64 / 1000.0) * cost_per_1k;
 
@@ -175,6 +180,7 @@ impl TelemetryState {
             avg_tps: (tps * 100.0).round() / 100.0, // Arredonda 2 casas
             avg_latency_ms: avg_latency,
             estimated_cost: (self.estimated_cost * 10000.0).round() / 10000.0,
+            avg_cloud_cost_per_1k: self.avg_cloud_cost_per_1k,
             models_usage: self.models_usage.clone(),
             hardware: HardwareSnapshot {
                 cpu_cores,
