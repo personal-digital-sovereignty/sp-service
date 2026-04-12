@@ -970,6 +970,54 @@ pub async fn run_deep_research_handler(
                                                     }));
                                                 }
                                             }
+                                        } else if func_n == Some("fetch_futures_market") {
+                                            let mut commodities: Vec<String> = Vec::new();
+                                            let mut years = "1".to_string();
+                                            
+                                            if let Some(args) = func.get("arguments").and_then(|a| a.as_object()) {
+                                                if let Some(arr) = args.get("commodities").and_then(|s| s.as_array()) {
+                                                    for item in arr { if let Some(s) = item.as_str() { commodities.push(s.to_string()); } }
+                                                } else if let Some(s) = args.get("commodity").and_then(|x| x.as_str()) { commodities.push(s.to_string()); }
+                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                            } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
+                                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
+                                                    if let Some(arr) = parsed.get("commodities").and_then(|s| s.as_array()) {
+                                                        for item in arr { if let Some(s) = item.as_str() { commodities.push(s.to_string()); } }
+                                                    } else if let Some(s) = parsed.get("commodity").and_then(|x| x.as_str()) { commodities.push(s.to_string()); }
+                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                }
+                                            }
+
+                                            for commodity in commodities {
+                                                if !commodity.is_empty() {
+                                                    let _ = TRAINER_LOGS.send(format!("[Sovereign Algorithmic Oracle] Coletando derivativo Futuro de {}: ({} anos)...", commodity, years));
+                                                    let sym_clone = commodity.clone();
+                                                    let y_clone = years.clone();
+                                                    join_handles.push(tokio::spawn(async move {
+                                                        let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                        let cur_dir = std::env::current_dir().unwrap_or_default();
+                                                        let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                                        
+                                                        let output = tokio::process::Command::new(venv_python)
+                                                            .arg(matrix_script.to_string_lossy().as_ref())
+                                                            .arg("futures")
+                                                            .arg(&sym_clone)
+                                                            .arg(&y_clone)
+                                                            .output()
+                                                            .await;
+                                                        
+                                                        let res = match output {
+                                                            Ok(out) => {
+                                                                let stdout = String::from_utf8_lossy(&out.stdout).to_string();
+                                                                let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+                                                                if out.status.success() { stdout } else { format!("Error: {}", stderr) }
+                                                            },
+                                                            Err(e) => format!("System execution error: {}", e)
+                                                        };
+                                                        (sym_clone, format!("### Sovereign Especulative Oracle Output:\n{}", res), "Market Futures Ledger".to_string())
+                                                    }));
+                                                }
+                                            }
                                         } else if func_n == Some("fetch_macroeconomy") {
                                             let mut indicators: Vec<String> = Vec::new();
                                             let mut country = "BR".to_string();
