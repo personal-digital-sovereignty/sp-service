@@ -1687,7 +1687,7 @@ pub async fn run_deep_research_handler(
 [ESTRUTURA OBRIGATÓRIA - C-LEVEL MARKDOWN]:\n\
 1. SÍNTESE EXECUTIVA (EXECUTIVE SUMMARY): Um parágrafo coeso evidenciando os percentuais, a conclusão matemática e as constatações-chave, usando o \"Data Storytelling\".\n\
 2. ANÁLISE FUNDAMENTALISTA DE IMPACTO: Crie seções (###) abordando os paralelos estatísticos e causa/efeito extraídos pelas ferramentas Python/Pandas que você recebeu na memória.\n\
-3. MODELO DE TABELA CONSOLIDADA DE SÉRIES HISTÓRICAS: Se receber séries longas (ex: 60 meses), unifique todas em uma ÚNICA TABELA MESTRA. Construa exaustivamente todas as linhas sem pular (progressão histórica), lado a lado.\n\n\
+3. MODELO DE TABELA CONSOLIDADA DE SÉRIES HISTÓRICAS: Se a Matriz de Dados (Pandas) já lhe forneceu a tabela pronta no log interno, você DEVE REPRODUZIR a tabela NA ÍNTEGRA. É ABSOLUTAMENTE PROIBIDO usar reticências (...) ou resumir linhas da tabela. A omissão de meses gera quebra de auditoria contábil. Caso NÃO TENHA recebido a tabela mastigada nos fatos brutos, construa você mesmo exaustivamente todas as linhas sem pular.\n\n\
 [TRAVAS EPISTÊMICAS E JURÍDICAS]:\n\
 - ALUCINAÇÃO ZERO (GATE ANTI-INTERPOLAÇÃO): NUNCA adivinhe ou espace dados linearmente. Se o dado do mês não chegou, use 'N/A'. Se o usuário pediu inflação de X ano mas ela não rolou na ferramenta, diga 'Dado Indisponível' na Síntese.\n\
 - VERDADE QUALITATIVA: Se questionado sobre carteis, monopólios ou preços estatais abusivos (ex: Petrobras/Gasolina), cite a raiz fiscal sistêmica real (Refinaria ~27%, ICMS Estadual ~24%, Distr/Revenda ~24%, Etanol ~15%, Federais ~10%), informando que alta volatilidade de pauta não caracteriza cartel deliberado sem a conivência dos governadores e União.\n\
