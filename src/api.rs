@@ -138,7 +138,6 @@ pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
     "llama3.2:latest".to_string()
 }
 
-use sqlx::Row;
 
 pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
     let client = reqwest::Client::new();
@@ -275,25 +274,6 @@ pub async fn discover_capable_master_agent(pool: Option<&sqlx::SqlitePool>, min_
             }
     }
     tracing::warn!("⚠️ [Dynamic Discovery] Banco de Capacidades falhou. Acionando Fallback: {}", fallback);
-    fallback.to_string()
-}
-
-pub async fn query_most_honest_model(db_pool: Option<&sqlx::SqlitePool>, fallback: &str) -> String {
-    if let Some(pool) = db_pool {
-        let row = sqlx::query(
-            "SELECT h.model_name FROM model_hallucinations h LEFT JOIN model_capabilities c ON h.model_name = c.model_name WHERE (c.is_reasoner IS NULL OR c.is_reasoner = 0) AND (c.parameter_size IS NULL OR c.parameter_size >= 3.0) ORDER BY h.lies_detected ASC, h.queries_processed DESC LIMIT 1"
-        )
-        .fetch_optional(pool)
-        .await;
-
-        if let Ok(Some(db_row)) = row
-            && let Ok(name) = db_row.try_get::<String, _>("model_name") {
-                tracing::info!("⚖️ [Inquisidor Solitário] Modelo dinâmico eleito (Menos Alucinações & Sem Reasoner): {}", name);
-                return name;
-            }
-    }
-    
-    tracing::warn!("⚠️ [Inquisidor Solitário] Base de Alucinações vazia/imcompatível. Usando fallback: {}", fallback);
     fallback.to_string()
 }
 
