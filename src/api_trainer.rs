@@ -283,7 +283,7 @@ async fn execute_sub_analyst(
             scrape_handles.push(tokio::spawn(async move {
                 if let Ok(md) = engine_clone.scrape_url(&link).await {
                     if md.len() > 100 {
-                        return Some(format!("## Source: {}\n{}\n\n", link, md.chars().take(2500).collect::<String>()));
+                        return Some((link, md));
                     }
                 }
                 None
@@ -292,9 +292,43 @@ async fn execute_sub_analyst(
 
         let results = futures_util::future::join_all(scrape_handles).await;
         for res_task in results {
-            if let Ok(Some(md_content)) = res_task {
-                raw_student_md.push_str(&md_content);
+            if let Ok(Some((link, full_md))) = res_task {
+                raw_student_md.push_str(&format!("## Source: {}\n{}\n\n", link, full_md.chars().take(2500).collect::<String>()));
                 web_scraped_data_found = true;
+
+                // [EPHEMERAL RAG PIPELINE] - Injetar Notícia Bruta Linearmente na Tabela
+                if let Some(pool) = engine_arc.db_pool.as_ref() {
+                    let ephem_id = uuid::Uuid::new_v4().to_string();
+                    let domain = link.split('/').nth(2).unwrap_or("unknown").to_string();
+                    
+                    let _ = sqlx::query("INSERT INTO ephemeral_knowledge (id, source_url, domain, expires_at, content_raw) VALUES (?, ?, ?, datetime('now', '+30 days'), ?)")
+                        .bind(&ephem_id).bind(&link).bind(&domain).bind(&full_md)
+                        .execute(pool).await;
+
+                    // [VECTOR DB CHUNKING] - Usando Nomic
+                    let chunks: Vec<String> = full_md.split("\n\n").map(|s| s.to_string()).filter(|s| s.len() > 50).collect();
+                    let olla_embed = std::env::var("OLLAMA_BASE_URL").unwrap_or("http://127.0.0.1:11434".to_string());
+                    
+                    for (i, ch) in chunks.iter().take(50).enumerate() {
+                        let meta = serde_json::json!({ "source": link, "ingested_at": chrono::Utc::now().to_rfc3339() }).to_string();
+                        if let Ok(res_ch) = sqlx::query("INSERT INTO ephemeral_chunks (ephemeral_id, text_content, chunk_index, metadata_json) VALUES (?, ?, ?, ?)")
+                            .bind(&ephem_id).bind(ch).bind(i as i32).bind(&meta).execute(pool).await {
+                                
+                                let emb_req = serde_json::json!({"model": "nomic-embed-text", "prompt": ch});
+                                if let Ok(emb_res) = client.post(format!("{}/api/embeddings", olla_embed)).json(&emb_req).send().await {
+                                    if let Ok(emb_json) = emb_res.json::<serde_json::Value>().await {
+                                        if let Some(embedding) = emb_json.get("embedding").and_then(|e| e.as_array()) {
+                                            let floats_bytes: Vec<u8> = embedding.iter().filter_map(|v| v.as_f64().map(|f| f as f32)).flat_map(|f| f.to_ne_bytes()).collect();
+                                            let _ = sqlx::query("INSERT INTO vec_ephemeral_chunks (chunk_id, embedding) VALUES (?, ?)")
+                                                .bind(res_ch.last_insert_rowid())
+                                                .bind(floats_bytes)
+                                                .execute(pool).await;
+                                        }
+                                    }
+                                }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1349,12 +1383,13 @@ pub async fn run_deep_research_handler(
                                              if let Some(pool) = &engine_arc.db_pool {
                                                  let uuid_str = uuid::Uuid::new_v4().to_string();
                                                  let pool_clone = pool.clone();
+                                                 let value = auth_clone.clone();
                                                  tokio::spawn(async move {
                                                      let _ = sqlx::query("
                                                          INSERT INTO model_hallucinations (id, model_name, lies_detected, queries_processed, last_lied_at)
                                                          VALUES (?, ?, 1, 1, CURRENT_TIMESTAMP)
                                                          ON CONFLICT(id) DO UPDATE SET lies_detected = lies_detected + 1, queries_processed = queries_processed + 1, last_lied_at = CURRENT_TIMESTAMP
-                                                     ").bind(uuid_str).bind(&auth_clone).execute(&pool_clone).await;
+                                                     ").bind(uuid_str).bind(&value).execute(&pool_clone).await;
                                                  });
                                              }
                                         }
@@ -1369,31 +1404,39 @@ pub async fn run_deep_research_handler(
 
                                     let _ = TRAINER_LOGS.send(format!("[Firewall Cognitivo] Parcela de Busca Paralela resolvida para a sub-query '{}'", sq));
                                     
-                                    // SOBREVIVÊNCIA DE CONTEXTO OOM & PREVENÇÃO DE LOST IN THE MIDDLE (Blind Orchestration - VRAM to Disk Pipeline)
-                                    let safe_sq: String = sq.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').take(50).collect();
-                                    let rand_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
-                                    let tmp_file_path = format!("/tmp/sovereign/sovereign_data_{}_{}.json", safe_sq.to_lowercase(), rand_id);
-                                    
-                                    let _ = std::fs::create_dir_all("/tmp/sovereign");
-                                    let _ = std::fs::write(&tmp_file_path, &final_result);
-                                    
-                                    use sha2::{Sha256, Digest};
-                                    let mut hasher = Sha256::new();
-                                    hasher.update(final_result.as_bytes());
-                                    let hash_result = format!("{:x}", hasher.finalize());
-                                    all_hashes.push(hash_result.clone());
+                                    if auth_clone == "Python Code Sandbox" {
+                                        // O Sandbox não deve ser escondido nem hasheado, o Mestre precisa LER a sua resposta matemática.
+                                        messages.push(serde_json::json!({
+                                            "role": "tool",
+                                            "content": final_result
+                                        }));
+                                    } else {
+                                        // SOBREVIVÊNCIA DE CONTEXTO OOM & PREVENÇÃO DE LOST IN THE MIDDLE (Blind Orchestration - VRAM to Disk Pipeline)
+                                        let safe_sq: String = sq.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').take(50).collect();
+                                        let rand_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+                                        let tmp_file_path = format!("/tmp/sovereign/sovereign_data_{}_{}.json", safe_sq.to_lowercase(), rand_id);
+                                        
+                                        let _ = std::fs::create_dir_all("/tmp/sovereign");
+                                        let _ = std::fs::write(&tmp_file_path, &final_result);
+                                        
+                                        use sha2::{Sha256, Digest};
+                                        let mut hasher = Sha256::new();
+                                        hasher.update(final_result.as_bytes());
+                                        let hash_result = format!("{:x}", hasher.finalize());
+                                        all_hashes.push(hash_result.clone());
 
-                                    // Nós guardamos o 'final_result' completo no 'all_sources' para The Scribe. Mas escondemos do Mestre guiando-o via disco.
-                                    let limited_result = format!(
-                                        "[SUCCESS DE EXTRAÇÃO] Dados massivos obtidos para '{}' (Checksum SHA-256: {}).\nPara prevenir OOM, o conteúdo não será impresso em memória. Ele foi transferido fisicamente para o arquivo de disco local: '{}'.\nAVISO CRÍTICO: NÃO ADIVINHE OS DADOS NEM CRIE ARRAYS FALSOS (PLACEHOLDERS). Você deve agora acionar a ferramenta de Python Sandbox desenvolvendo as linhas de código (ex: `pd.read_json('{}')` ou `open('{}').read()`) para processar diretamente o arquivo de disco. Todo output matemático gerado pela Sandbox DEVE conter o Checksum '{}' explícito nos prints de conclusão de formatação, servindo como Proveniência de Extração.",
-                                        sq, hash_result, tmp_file_path, tmp_file_path, tmp_file_path, hash_result
-                                    );
+                                        // Nós guardamos o 'final_result' completo no 'all_sources' para The Scribe. Mas escondemos do Mestre guiando-o via disco.
+                                        let limited_result = format!(
+                                            "[SUCCESS DE EXTRAÇÃO] Dados massivos obtidos para '{}' (Checksum SHA-256: {}).\nPara prevenir OOM, o conteúdo não será impresso em memória. Ele foi transferido fisicamente para o arquivo de disco local: '{}'.\nAVISO CRÍTICO: NÃO ADIVINHE OS DADOS NEM CRIE ARRAYS FALSOS (PLACEHOLDERS). Você deve agora acionar a ferramenta de Python Sandbox desenvolvendo as linhas de código (ex: `pd.read_json('{}')` ou `open('{}').read()`) para processar diretamente o arquivo de disco. Todo output matemático gerado pela Sandbox DEVE conter o Checksum '{}' explícito nos prints de conclusão de formatação, servindo como Proveniência de Extração.",
+                                            sq, hash_result, tmp_file_path, tmp_file_path, tmp_file_path, hash_result
+                                        );
 
-                                    // Devolve a resposta do Tool para a memória do Mestre
-                                    messages.push(serde_json::json!({
-                                        "role": "tool",
-                                        "content": limited_result
-                                    }));
+                                        // Devolve a resposta do Tool Oculta para a memória do Mestre
+                                        messages.push(serde_json::json!({
+                                            "role": "tool",
+                                            "content": limited_result
+                                        }));
+                                    }
                                 }
                             }
                             // O loop continuará para a próxima inferência (o Qwen lerá a tool response e decidirá)
@@ -1698,10 +1741,10 @@ pub async fn run_deep_research_handler(
             }
 
             if synthesized_report.trim().is_empty() {
-                let _ = TRAINER_LOGS.send("[Agentic Loop] O Mestre finalizou o limite de chamadas sem sintetizar a resposta. Dump direto ativado para o Scribe.".to_string());
                 synthesized_report = final_raw_dump;
             } else {
-                // Junta o que o mestre falou com os fatos brutos formatados
+                // BUGFIX: Sempre concatenar os fatos brutos/Pandas Interceptor 
+                // para que o Scribe (ou auditor) possa processá-los. Modelos grandes tbm precisam ler a Symbiose!
                 synthesized_report = format!("{}\n\n=== FATOS BRUTOS MANTIDOS EM MEMÓRIA ===\n\n{}", synthesized_report, final_raw_dump);
             }
         }
@@ -1717,21 +1760,16 @@ pub async fn run_deep_research_handler(
         } else {
             let _ = TRAINER_LOGS.send("[The Scribe] Invocando Agent especialista para iterar e formatar os fatos brutos em Markdown Histórico...".to_string());
             let scribe_system = format!("Você é 'The Scribe', o Arquiteto Analítico Sênior do Sovereign Pair, redigindo relatórios executivos corporativos de nível C-Level (CIO/CFO/CEO). Hoje é: {current_date}.\n\
-[MISSÃO EXECUTIVA]: Transformar os [FATOS BRUTOS] em um Dossiê Executivo Markdown profundo, irrefutável e esteticamente brilhante.\n\n\
+[MISSÃO EXECUTIVA]: Sua ÚNICA função é escrever o Dossiê de Análise Fundamentalista em prosa técnica. O próprio motor fará o append da Tabela Crud/Markdown no final do arquivo.\n\n\
 [ESTRUTURA OBRIGATÓRIA - C-LEVEL MARKDOWN]:\n\
-1. SÍNTESE EXECUTIVA (EXECUTIVE SUMMARY): Parágrafo evidenciando os insights. SE a Matriz Pandas tiver processado 'Médias' ou 'Correlações', interprete-as. SE os dados repassados na memória forem apenas JSONs longos crus (sem processamento Pandas prévio), declare a limitação matemática e restrinja-se apenas em apontar a variação bruta visual sem inferir tendências complexas.\n\
+1. SÍNTESE EXECUTIVA (EXECUTIVE SUMMARY): Parágrafo evidenciando os insights da tabela. SE os dados repassados na memória forem apenas JSONs longos crus (sem processamento Pandas prévio), declare a limitação matemática.\n\
 2. ANÁLISE FUNDAMENTALISTA DE IMPACTO: Crie seções (###) abordando causa/efeito extraídas do contexto ou eventos associados.\n\
-3. MODELO DE TABELA CONSOLIDADA: Você DEVE REPRODUZIR as tabelas extraídas NA ÍNTEGRA. É ABSOLUTAMENTE PROIBIDO encurtar linhas ou omitir dados usando reticências (...). Despeje todas as linhas integralmente na tabela Markdown.\n\n\
+3. PROIBIÇÃO ABSOLUTA DA REPRODUÇÃO DE TABELAS: VOCÊ É ESTRITAMENTE PROIBIDO DE RECRIAR/TRANSCREVER MATRIZES OU TABELAS INTEIRAS. O Motor Rust as anexará mecanicamente ao rodapé após o seu texto. Apenas comente sobre elas no campo narrativo.\n\n\
 [TRAVAS EPISTÊMICAS E JURÍDICAS]:\n\
-- ALUCINAÇÃO ZERO (CEGUEIRA MATEMÁTICA): VOCÊ É PROIBIDO DE CALCULAR MÉDIAS, CORRELAÇÕES OU PERCENTUAIS 'DE CABEÇA'. Modelos de linguagem não operam matemática. Se os percentuais ou cruzamentos numéricos exatos não estiverem pre-calculados nos [FATOS BRUTOS], jamais os invente. Diga que a correlação estrita requer motor algébrico.\n\
-- GATE ANTI-INTERPOLAÇÃO: Mantenha intacto blocos `> [!NOTE]` do Sovereign sobre proxy ou `ffill()`. NÃO omita disclaimers fiduciários estruturais.\n\
-- CÁLCULOS ESTATÍSTICOS OBRIGATÓRIOS: Só mencione a 'Matriz de Correlação de Pearson ($r$)' se ela estiver LITERALMENTE escrita nos fatos brutos.\n\
-- PRESERVAÇÃO CRIPTOGRÁFICA (REVERSE-AUDITOR): É EXTREMAMENTE PROIBIDO deletar ou omitir metadados como '(Checksum: abc...)'. Se as tabelas/textos de [FATOS BRUTOS] possuírem Hashes SHA-256 e selos de proveniência de disco, você DEVE transcrevê-los ipsis litteris nos rodapés gráficos do Markdown. Limpar hashes para \"embelezar a tabela\" causa falha irrecuperável e explosão operacional.\n\n\
+- ALUCINAÇÃO ZERO (CEGUEIRA MATEMÁTICA): VOCÊ É PROIBIDO DE CALCULAR MÉDIAS, CORRELAÇÕES OU PERCENTUAIS 'DE CABEÇA'. Se cruzar números exatos que não estão visíveis nos [FATOS BRUTOS], nosso Auditor te punirá imediatamente.\n\
 Evite saudações. Reporte com excelência corporativa C-Level, focado estritamente na verdade irrefutável entregada.");
             let scribe_user = format!("[PROMPT DO USUÁRIO]: {}\n\n[FATOS BRUTOS COLETADOS PELA IA PESQUISADORA]:\n{}", prompt, synthesized_report);
 
-            // A Scribe Phase EXIGE formatadores experientes porque o SLM local era muito fraco.
-            // Escalonando verticalmente para matemática pura sem hardcode.
             let mut scribe_model = crate::api::discover_cognitive_model_by_tier("senior").await;
             
             if let Some(pool) = engine_arc.db_pool.as_ref() {
@@ -1747,40 +1785,71 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                 let _ = TRAINER_LOGS.send(format!("[Scribe Orchestrator] Auto-elevação Ativa: Escalonando para '{}' visando formatar a resposta.", scribe_model));
             }
 
-            let scribe_payload = serde_json::json!({
-                "model": scribe_model,
-                "messages": [
-                    {"role": "system", "content": scribe_system},
-                    {"role": "user", "content": scribe_user}
-                ],
-                "stream": false,
-                "options": {
-                    "num_ctx": 16384,
-                    "temperature": 0.25,
-                    "repeat_penalty": 1.03,
-                    "num_predict": 4096
-                }
-            });
+            let mut scribe_messages = vec![
+                serde_json::json!({"role": "system", "content": scribe_system}),
+                serde_json::json!({"role": "user", "content": scribe_user})
+            ];
+
+            let mut final_formatted_report = synthesized_report.clone();
             
-            let mut formatted = synthesized_report.clone();
-            if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await
-                && let Ok(json) = res.json::<serde_json::Value>().await
-                    && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                        let mut cleaned = content.trim().to_string();
-                        if cleaned.starts_with("```markdown") {
-                            cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string();
-                        } else if cleaned.starts_with("```") {
-                            cleaned = cleaned.trim_start_matches("```").trim_start().to_string();
-                        }
-                        if cleaned.ends_with("```") {
-                            cleaned = cleaned.trim_end_matches("```").trim_end().to_string();
-                        }
-                        formatted = cleaned;
-                        let _ = TRAINER_LOGS.send("[The Scribe] Formatação Markdown concluída!".to_string());
+            let max_retries = 3;
+            for attempt in 1..=max_retries {
+                let scribe_payload = serde_json::json!({
+                    "model": scribe_model,
+                    "messages": scribe_messages,
+                    "stream": false,
+                    "options": {
+                        "num_ctx": 16384,
+                        "temperature": 0.25,
+                        "repeat_penalty": 1.03,
+                        "num_predict": 4096
                     }
+                });
+                
+                let mut current_format = String::new();
+                if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await
+                    && let Ok(json) = res.json::<serde_json::Value>().await
+                        && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                            let mut cleaned = content.trim().to_string();
+                            if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
+                            else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
+                            if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
+                            current_format = cleaned;
+                        }
+
+                // The Sycophancy Breaker (Adversarial Auditor) Loop
+                let auditor_prompt = format!("Você é o Mestre de Auditoria. Avalie implacavelmente se o [Relatório] do seu subordinado inventou números, taxas matemáticas, ou falsificou fatos ausentes nos [Fatos Brutos]. Reposte APENAS 'OK' (nada mais) caso o relatório baseie-se estritamente na verdade extraída.\n\nSe ele inventou matemática, DEVOLVA A BRONCA DESTRUTIVA MENCIONANDO O ERRO.\n\n[FATOS BRUTOS]:\n{}\n\n[RELATÓRIO GERADO]:\n{}", synthesized_report, current_format);
+                let auditor_payload = serde_json::json!({
+                    "model": auth_inquisitor,
+                    "messages": [ {"role": "user", "content": auditor_prompt} ],
+                    "stream": false
+                });
+
+                let _ = TRAINER_LOGS.send(format!("[Sycophancy Breaker] Verificando integridade epistêmica da formatação (Tentativa {}/{})...", attempt, max_retries));
+                
+                let mut is_clean = true;
+                if let Ok(aud_res) = synthesis_client.post(&olla_url).json(&auditor_payload).send().await
+                    && let Ok(aud_json) = aud_res.json::<serde_json::Value>().await
+                        && let Some(aud_content) = aud_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                            let clean_eval = aud_content.to_uppercase().trim().trim_matches(|c: char| !c.is_alphabetic()).to_string();
+                            if !clean_eval.starts_with("OK") && aud_content.len() > 10 {
+                                is_clean = false;
+                                let raw_err = aud_content.to_string();
+                                let _ = TRAINER_LOGS.send(format!("🚨 [Auditoria Falhou] Mentira matemática detectada! 'Comendo o toco' do The Scribe (Reprimenda enviada)."));
+                                scribe_messages.push(serde_json::json!({"role": "assistant", "content": current_format}));
+                                scribe_messages.push(serde_json::json!({"role": "user", "content": format!("🚨 [EPISTEMIC REPRIMAND]: O Auditor identificou alucinação grave no seu relatório:\n\n{}\n\nREFAÇA o relatório focado única e exclusivamente na verdade fornecida. NÃO inclua nenhum cálculo percentual dedutivo a menos que esteja claramente impresso na tabela bruta.", raw_err)}));
+                            }
+                        }
+
+                if is_clean || attempt == max_retries {
+                    final_formatted_report = current_format;
+                    let _ = TRAINER_LOGS.send("[The Scribe] Formatação C-Level aprovada pelo Sycophancy Breaker!".to_string());
+                    break;
+                }
+            }
                     
             crate::memory_manager::fire_eviction_protocol(&scribe_model).await;
-            formatted
+            final_formatted_report
         };
 
         // [STEP 3]: Vault Context Injector
@@ -1813,7 +1882,7 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
         let mut has_failed_audit = false;
         if !all_hashes.is_empty() {
             for h in &all_hashes {
-                if !final_markdown_report.contains(h) {
+                if !synthesized_report.contains(h) {
                     has_failed_audit = true;
                     break;
                 }
@@ -1827,9 +1896,10 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                 prompt
             )
         } else {
+            let provenance_block = if all_hashes.is_empty() { String::new() } else { format!("\n\n---\n## 🛡️ Proveniência Criptográfica Rigorosa\nOs arquivos físicos processados contêm as seguintes assinaturas SHA-256 inalteradas:\n- `{}`\n", all_hashes.join("`\n- `")) };
             format!(
-                "# Deep Research Report\n\n**Directive:** {}\n\n>[!INFO] This artifact was autonomously generated by the Sovereign Deep Research loop.\n\n## Abstract (LLM Synthesis)\n{}\n\n---\n## 📚 Fontes Pesquisadas\n{}\n", 
-                prompt, final_markdown_report, sources_block
+                "# Deep Research Report\n\n**Directive:** {}\n\n>[!INFO] This artifact was autonomously generated by the Sovereign Deep Research loop.\n\n## Abstract (LLM Synthesis)\n{}{}\n---\n## 📚 Fontes Pesquisadas\n{}\n", 
+                prompt, final_markdown_report, provenance_block, sources_block
             )
         };
         

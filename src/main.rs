@@ -34,6 +34,7 @@ pub mod multimodal;
 pub mod office_parser;
 pub mod sandbox;
 pub mod memory_manager;
+pub mod garbage_collector; // <-- Adicionado
 
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;
@@ -277,6 +278,9 @@ async fn main() {
 
     // Invoca o SQLite Master O.S
     let db_pool = db::init_pool().await;
+
+    // Booting the GC for Ephemeral Volatile RAG Memory (News/Texts)
+    crate::garbage_collector::spawn_ephemeral_garbage_collector(db_pool.clone()).await;
 
     // Booting Model Capabilities Discovery in background
     let db_pool_sync = db_pool.clone();
