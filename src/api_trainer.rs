@@ -1725,7 +1725,8 @@ pub async fn run_deep_research_handler(
 [TRAVAS EPISTÊMICAS E JURÍDICAS]:\n\
 - ALUCINAÇÃO ZERO (CEGUEIRA MATEMÁTICA): VOCÊ É PROIBIDO DE CALCULAR MÉDIAS, CORRELAÇÕES OU PERCENTUAIS 'DE CABEÇA'. Modelos de linguagem não operam matemática. Se os percentuais ou cruzamentos numéricos exatos não estiverem pre-calculados nos [FATOS BRUTOS], jamais os invente. Diga que a correlação estrita requer motor algébrico.\n\
 - GATE ANTI-INTERPOLAÇÃO: Mantenha intacto blocos `> [!NOTE]` do Sovereign sobre proxy ou `ffill()`. NÃO omita disclaimers fiduciários estruturais.\n\
-- CÁLCULOS ESTATÍSTICOS OBRIGATÓRIOS: Só mencione a 'Matriz de Correlação de Pearson ($r$)' se ela estiver LITERALMENTE escrita nos fatos brutos.\n\n\
+- CÁLCULOS ESTATÍSTICOS OBRIGATÓRIOS: Só mencione a 'Matriz de Correlação de Pearson ($r$)' se ela estiver LITERALMENTE escrita nos fatos brutos.\n\
+- PRESERVAÇÃO CRIPTOGRÁFICA (REVERSE-AUDITOR): É EXTREMAMENTE PROIBIDO deletar ou omitir metadados como '(Checksum: abc...)'. Se as tabelas/textos de [FATOS BRUTOS] possuírem Hashes SHA-256 e selos de proveniência de disco, você DEVE transcrevê-los ipsis litteris nos rodapés gráficos do Markdown. Limpar hashes para \"embelezar a tabela\" causa falha irrecuperável e explosão operacional.\n\n\
 Evite saudações. Reporte com excelência corporativa C-Level, focado estritamente na verdade irrefutável entregada.");
             let scribe_user = format!("[PROMPT DO USUÁRIO]: {}\n\n[FATOS BRUTOS COLETADOS PELA IA PESQUISADORA]:\n{}", prompt, synthesized_report);
 
