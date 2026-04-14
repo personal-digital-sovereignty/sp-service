@@ -791,6 +791,11 @@ pub async fn run_deep_research_handler(
             if cycle < 25 {
                 synthesis_payload["tools"] = tools_schema.clone();
             } else {
+                // GAP-6 FIX: No ciclo 25, abortar se não há dados coletados em vez de forçar síntese paramétrica.
+                if all_sources.is_empty() {
+                    let _ = TRAINER_LOGS.send("🚨 [Ciclo 25] Abortando síntese: nenhuma fonte foi coletada. Evitando alucinação paramétrica.".to_string());
+                    break;
+                }
                 let _ = TRAINER_LOGS.send("[Final Synthesis] Ferramentas desativadas. Forçando Mestre LLM a gerar Markdown Final de Síntese sem interrupções.".to_string());
             }
 
@@ -842,11 +847,17 @@ pub async fn run_deep_research_handler(
                                         queries_extracted.retain(|q| q != "dispatch_sub_researcher" && !q.trim().is_empty());
 
                                         if queries_extracted.is_empty() {
-                                            let _ = TRAINER_LOGS.send("[Firewall Cognitivo] Nenhuma query válida extraída do JSON. Forçando Fallback Base!".to_string());
-                                            queries_extracted.push("latest global news".to_string());
+                                            // GAP-7 FIX: Não inventar query de fallback. Retornar erro ao Mestre para reformular.
+                                            let _ = TRAINER_LOGS.send("[Firewall Cognitivo] Nenhuma query válida extraída do JSON. Reprimendando o Mestre para reformular.".to_string());
+                                            messages.push(msg_obj.clone());
+                                            messages.push(serde_json::json!({"role": "user", "content": "[SYSTEM ERROR]: Sua chamada de ferramenta não continha queries válidas. O campo 'search_queries' estava ausente ou vazio. Reformule sua chamada de ferramenta com queries específicas sobre o tema pesquisado."}));
+                                            continue;
                                         }
 
-                                        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(1));
+                                        // GAP-3 FIX: Semáforo parametrizável via env SOVEREIGN_PARALLEL_QUERIES (default 3).
+                                        // NOTA: Certifique-se que OLLAMA_NUM_PARALLEL >= este valor no servidor Ollama.
+                                        let parallel_limit = std::env::var("SOVEREIGN_PARALLEL_QUERIES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(3);
+                                        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(parallel_limit));
 
                                         for mut sq in queries_extracted {
                                             // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
@@ -1568,6 +1579,20 @@ pub async fn run_deep_research_handler(
                                                 Ok(stdout) => format!("### PYTHON SANDBOX OUTPUT (SUCCESS):\n```text\n{}\n```", stdout),
                                                 Err(stderr) => format!("### PYTHON SANDBOX OUTPUT (FAILURE):\n```text\n{}\n```\nAtenção: O plano falhou. Você precisa corrigir as variáveis Python ou importar a biblioteca certa.", stderr),
                                             };
+                                            // GAP-2 FIX: Nanny também gera proveniência SHA-256 para manter rastreabilidade.
+                                            if !final_result.is_empty() {
+                                                let _ = std::fs::create_dir_all("/tmp/sovereign");
+                                                let nanny_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+                                                let nanny_path = format!("/tmp/sovereign/sovereign_nanny_{}.txt", nanny_id);
+                                                let _ = std::fs::write(&nanny_path, &final_result);
+                                                use sha2::{Sha256, Digest};
+                                                let mut hasher = Sha256::new();
+                                                hasher.update(final_result.as_bytes());
+                                                let nanny_hash = format!("{:x}", hasher.finalize());
+                                                all_hashes.push(nanny_hash.clone());
+                                                all_sources.push(final_result.clone());
+                                                let _ = TRAINER_LOGS.send(format!("[Thought Nanny] Proveniência SHA-256 registrada para output Python: {}", nanny_hash));
+                                            }
                                         }
                                     }
 
@@ -1710,7 +1735,11 @@ pub async fn run_deep_research_handler(
                 let joiner_path = std::env::current_dir().unwrap_or_default().join("python_workers").join("analyze_and_join_time_series.py");
                 
                 if joiner_path.exists() {
-                    let mut cmd = std::process::Command::new("python3");
+                    // GAP-5 FIX: Usar o mesmo venv isolado dos outros workers, não o python3 do sistema.
+                    // Sem isso, pandas/tabulate/scipy podem não estar instalados e a tabela falha silenciosamente.
+                    let venv_py = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                    let python_exe = if venv_py.exists() { venv_py.to_string_lossy().to_string() } else { "python3".to_string() };
+                    let mut cmd = std::process::Command::new(&python_exe);
                     cmd.arg(&joiner_path);
                     
                     use std::io::Write;
