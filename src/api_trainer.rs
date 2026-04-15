@@ -744,9 +744,10 @@ pub async fn run_deep_research_handler(
         
         let mut synthesized_report = String::new();
         let olla_url = format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat").to_string();
-        // Per-stage timeout agressivo: se o LLM não gerar output em 180s, algo travou.
-        // O timeout global de 7200s era um risco mascarando loops patológicos infinitos.
-        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(180)).build().unwrap_or_else(|_| reqwest::Client::new());
+        // Timeout por stage: 420s (7 min) acomoda cold-start de modelo (~3-5 min para
+        // carregar tensores na VRAM em hosts de 27GB) + inferência (~1-2 min com thinking off).
+        // Valor anterior de 180s matava a Stage 1 antes do Ollama terminar de carregar o modelo.
+        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(420)).build().unwrap_or_else(|_| reqwest::Client::new());
         
         // --- PHASE 41: THE HONEST INQUISITOR (SINGLE AGENT) ---
         // Eliminação da Trindade (Quórum) por sobrecarga de processamento. 
@@ -1744,7 +1745,14 @@ pub async fn run_deep_research_handler(
                     }
                 }
             } else {
-                let _ = TRAINER_LOGS.send("Erro de conexão com o Ollama no Loop Agentico.".to_string());
+                // Tolerância de cold-start: se o modelo estava carregando na VRAM,
+                // a primeira request pode dar timeout. Tentar UMA vez mais antes de abortar.
+                if cycle <= 2 {
+                    let _ = TRAINER_LOGS.send(format!("⚠️ [Timeout Recovery] Stage {} falhou (possível cold-start do modelo). Retentando em 5s...", cycle));
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    continue;
+                }
+                let _ = TRAINER_LOGS.send("❌ Erro de conexão persistente com o Ollama no Loop Agentico. Abortando.".to_string());
                 break;
             }
         }
