@@ -291,25 +291,44 @@ pub async fn discover_capable_master_agent(pool: Option<&sqlx::SqlitePool>, min_
 }
 
 
-pub async fn discover_orchestrator_fallback(pool: Option<&sqlx::SqlitePool>, failed_model: &str, fallback: &str) -> String {
+pub async fn discover_orchestrator_fallback(pool: Option<&sqlx::SqlitePool>, failed_model: &str, fallback: &str, failed_models: &std::collections::HashSet<String>) -> String {
     if let Some(p) = pool {
+        // GAP-10 FIX: Filtrar is_installed=1 para não eleger modelos fantasma.
+        // GAP-11 FIX: Excluir modelos que já falharam nesta sessão para evitar bounce infinito.
+        
         // Tentativa primária: Resgatar com outro orchestrator Master engatilhado.
-        let query_master = "SELECT model_name FROM model_capabilities WHERE is_master = 1 AND model_name != ? ORDER BY parameter_size DESC LIMIT 1";
-        if let Ok(Some(row)) = sqlx::query(query_master).bind(failed_model).fetch_optional(p).await
-            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
-                tracing::info!("✨ [Orchestrator Fallback] Fallback Dinâmico de Peso-Pesado ativado! Substituindo '{}' pelo Master reserva: {}", failed_model, name);
-                return name;
+        let rows_master = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_master = 1 AND is_installed = 1 AND model_name != ? ORDER BY parameter_size DESC")
+            .bind(failed_model)
+            .fetch_all(p)
+            .await
+            .unwrap_or_default();
+        
+        for row in &rows_master {
+            if let Ok(name) = sqlx::Row::try_get::<String, _>(row, "model_name") {
+                if !failed_models.contains(&name) {
+                    tracing::info!("✨ [Orchestrator Fallback] Fallback Dinâmico de Peso-Pesado ativado! Substituindo '{}' pelo Master reserva: {}", failed_model, name);
+                    return name;
+                }
+            }
         }
 
-        // Tentativa secundária: Se nenhum Master existir, acione um Agente/Scribe mais denso (entre 5B e 9B, como gemma4 ou qwen3:8b)
-        let query_mid = "SELECT model_name FROM model_capabilities WHERE parameter_size >= 5.0 AND parameter_size <= 9.5 AND model_name != ? ORDER BY parameter_size DESC LIMIT 1";
-        if let Ok(Some(row)) = sqlx::query(query_mid).bind(failed_model).fetch_optional(p).await
-            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
-                tracing::info!("✨ [Orchestrator Fallback] Nenhum Master extra. Evitando modelos 3B e escalando para mid-weight (>5B): {}", name);
-                return name;
+        // Tentativa secundária: Se nenhum Master existir, acione um Agente/Scribe mais denso (entre 5B e 9B)
+        let rows_mid = sqlx::query("SELECT model_name FROM model_capabilities WHERE parameter_size >= 5.0 AND parameter_size <= 9.5 AND is_installed = 1 AND model_name != ? ORDER BY parameter_size DESC")
+            .bind(failed_model)
+            .fetch_all(p)
+            .await
+            .unwrap_or_default();
+        
+        for row in &rows_mid {
+            if let Ok(name) = sqlx::Row::try_get::<String, _>(row, "model_name") {
+                if !failed_models.contains(&name) {
+                    tracing::info!("✨ [Orchestrator Fallback] Nenhum Master extra não-falhado. Escalando para mid-weight (>5B): {}", name);
+                    return name;
+                }
+            }
         }
     }
-    tracing::warn!("⚠️ [Orchestrator Fallback] Banco de IAs insuficientes paramétricas para failover robusto. Cuidado com micro-modelos. Voltando para hard-fallback: {}", fallback);
+    tracing::warn!("⚠️ [Orchestrator Fallback] Todos os modelos instalados já falharam ou banco insuficiente. Hard-fallback: {}", fallback);
     fallback.to_string()
 }
 

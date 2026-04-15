@@ -758,6 +758,8 @@ pub async fn run_deep_research_handler(
         let mut all_hashes = Vec::new();
         let mut has_failed_tools = false;
         let mut json_fail_count = 0;
+        // GAP-11 FIX: Rastrear modelos que já falharam nesta sessão para evitar bounce infinito.
+        let mut failed_models: std::collections::HashSet<String> = std::collections::HashSet::new();
         
         // --- THE WORKER GRAPH LOOP (MAX 25 STAGES: GATHER, ANALYZE, SYNTHESIZE) ---
         for cycle in 1..=25 {
@@ -769,9 +771,9 @@ pub async fn run_deep_research_handler(
             
             let _ = TRAINER_LOGS.send(format!("[Worker Graph - Stage {}/25] Invocando Mente Mestra ({})...", cycle, target_model_name));
 
-            // Ciclos de Tool Calling (1-24): precision budget — JSON de tool call cabe em ~300 tokens.
-            // Ciclo de Síntese Final (25): budget completo para o relatório Markdown.
-            let cycle_num_predict = if cycle < 25 { 768 } else { 4096 };
+            // GAP-14 FIX: Budget de 768 truncava tool calls em modelos >=7B.
+            // 1536 tokens acomoda multi-tool arrays e prefácios de texto dos modelos thinking.
+            let cycle_num_predict = if cycle < 25 { 1536 } else { 4096 };
 
             let mut options_obj = serde_json::json!({
                 "num_ctx": dynamic_num_ctx,
@@ -780,9 +782,22 @@ pub async fn run_deep_research_handler(
                 "num_predict": cycle_num_predict
             });
 
-            // O Dilema de Latência do Raciocínio Híbrido: Capar CoT em ciclos estritamente operacionais (Tools)
+            // GAP-13 FIX: Modelos thinking-nativos (qwen3, gemma4, deepseek-r1) PRECISAM do CoT
+            // interno para planejar tool calls. Desabilitar thinking neles causa respostas vazias.
+            // Somente desabilitar em modelos não-reasoner para otimizar latência.
             if cycle < 25 {
-                options_obj["enable_thinking"] = serde_json::json!(false);
+                let mut is_thinker = false;
+                if let Some(pool) = engine_arc.db_pool.as_ref() {
+                    if let Ok(Some(reasoner_flag)) = sqlx::query_scalar::<_, bool>("SELECT is_reasoner FROM model_capabilities WHERE model_name = ?")
+                        .bind(&target_model_name)
+                        .fetch_optional(pool)
+                        .await {
+                        is_thinker = reasoner_flag;
+                    }
+                }
+                if !is_thinker {
+                    options_obj["enable_thinking"] = serde_json::json!(false);
+                }
             }
 
             let mut synthesis_payload = serde_json::json!({
@@ -1472,7 +1487,10 @@ pub async fn run_deep_research_handler(
                                 }
                             }
 
-                            if cycle < 5 && (all_sources.is_empty() || has_dynamic_tool || content.contains("\"type\":\"function\"") || content.contains("\"search_queries\"") || content.contains("\"symbol\"") || content.contains("\"indicator\"") || content.contains("\"topic\"") || content.contains("\"url\"") || content.contains("\"code\"")) {
+                            // GAP-12 FIX: A janela de rescue era cycle<5 (muito estreita).
+                            // Condição dinâmica: se nunca coletou dados, sempre tente resgatar.
+                            let nanny_rescue_eligible = cycle < 10 || all_sources.is_empty();
+                            if nanny_rescue_eligible && (all_sources.is_empty() || has_dynamic_tool || content.contains("\"type\":\"function\"") || content.contains("\"search_queries\"") || content.contains("\"symbol\"") || content.contains("\"indicator\"") || content.contains("\"topic\"") || content.contains("\"url\"") || content.contains("\"code\"")) {
                                 // Tenta raspar JSON vazado no texto de forma robusta (ignora texto no meio):
                                 let mut recovered_json: Option<serde_json::Value> = None;
                                 let chars: Vec<(usize, char)> = content.char_indices().collect();
@@ -1612,15 +1630,29 @@ pub async fn run_deep_research_handler(
                                     }
                                 }
 
-                                let _ = TRAINER_LOGS.send(format!("[Thought Nanny] Falha Estrutural do Mestre: O modelo não gerou chamadas formatadas. Disciplinando sintaxe...\n[DEBUG RAW LLM CONTENT]:\n{}", content));
-                                json_fail_count += 1;
+                                // GAP-9 FIX: Detectar conteúdo vazio ANTES de gastar ciclo com reprimenda inútil.
+                                // Modelos thinking retornam "" quando enable_thinking está capado. Disciplinar o vazio
+                                // só desperdiça ciclos; melhor escalar imediatamente.
+                                if content.trim().is_empty() {
+                                    let _ = TRAINER_LOGS.send(format!("[Thought Nanny] Resposta VAZIA da Mente Mestra ({}). Escalando imediatamente...", target_model_name));
+                                    json_fail_count += 2; // Conta como falha dupla para forçar escalação rápida
+                                } else {
+                                    let _ = TRAINER_LOGS.send(format!("[Thought Nanny] Falha Estrutural do Mestre: O modelo não gerou chamadas formatadas. Disciplinando sintaxe...\n[DEBUG RAW LLM CONTENT]:\n{}", content));
+                                    json_fail_count += 1;
+                                }
                                 
                                 if json_fail_count >= 2 {
-                                    let fallback_agent = crate::api::discover_orchestrator_fallback(engine_arc.db_pool.as_ref(), &target_model_name, &target_model_name).await;
-                                    if fallback_agent != target_model_name {
+                                    // GAP-11 FIX: Marcar o modelo atual como falhado e excluí-lo das próximas tentativas.
+                                    failed_models.insert(target_model_name.clone());
+                                    let fallback_agent = crate::api::discover_orchestrator_fallback(engine_arc.db_pool.as_ref(), &target_model_name, &target_model_name, &failed_models).await;
+                                    if fallback_agent != target_model_name && !failed_models.contains(&fallback_agent) {
                                         let _ = TRAINER_LOGS.send(format!("🛡️ [Gatekeeper Escalation] Fim da linha sintática para ({}). Substituindo dinamicamente pelo Gatekeeper reserva: ({})", target_model_name, fallback_agent));
                                         target_model_name = fallback_agent;
                                         json_fail_count = 0;
+                                    } else {
+                                        // Todos os modelos disponíveis já falharam — abortar loop para não desperdiçar ciclos.
+                                        let _ = TRAINER_LOGS.send("🚨 [Gatekeeper Escalation] TODOS os modelos disponíveis falharam em gerar Tool Calls. Abortando para Synthesis de emergência.".to_string());
+                                        break;
                                     }
                                 }
                                 
@@ -1638,11 +1670,14 @@ pub async fn run_deep_research_handler(
                                     });
                                 }
 
-                                messages.push(msg_obj.clone());
-                                messages.push(serde_json::json!({
-                                    "role": "user",
-                                    "content": format!("[SYSTEM OVERRIDE]: Falha de Invocação de Ferramenta! Você gerou texto puro em vez de invocar a ferramenta no backend. O sistema AINDA não tem os dados necessários.\n\nSua ÚNICA saída aceita agora é FECHAR A BOCA e responder ESTRITAMENTE com o JSON correspondente à Variavel/Função ({}). Não escreva NENHUM outro texto! APENAS O JSON NATIVO.", registry_names.join(", "))
-                                }));
+                                // Não enviar reprimenda se o conteúdo era vazio (não há o que disciplinar)
+                                if !content.trim().is_empty() {
+                                    messages.push(msg_obj.clone());
+                                    messages.push(serde_json::json!({
+                                        "role": "user",
+                                        "content": format!("[SYSTEM OVERRIDE]: Falha de Invocação de Ferramenta! Você gerou texto puro em vez de invocar a ferramenta no backend. O sistema AINDA não tem os dados necessários.\n\nSua ÚNICA saída aceita agora é FECHAR A BOCA e responder ESTRITAMENTE com o JSON correspondente à Variavel/Função ({}). Não escreva NENHUM outro texto! APENAS O JSON NATIVO.", registry_names.join(", "))
+                                    }));
+                                }
                                 continue;
                             }
 
