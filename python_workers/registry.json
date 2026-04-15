@@ -101,7 +101,7 @@
         "type": "function",
         "function": {
             "name": "fetch_financial_ticker",
-            "description": "Acessa a Sovereign Open-Data Matrix (yfinance) para baixar diretamente dados históricos fechados de Ações, Petróleo, Ouro ou Câmbio. USE SEMPRE ESTA FERRAMENTA PARA COMMODITIES, AÇÕES OU PREÇO DO DÓLAR EM VEZ DO SCRAPER WEB.",
+            "description": "Acessa a Sovereign Open-Data Matrix (yfinance) para baixar diretamente dados históricos fechados de Ações, Petróleo, Ouro ou Câmbio. USE SEMPRE ESTA FERRAMENTA PARA COMMODITIES, AÇÕES OU PREÇO DO DÓLAR EM VEZ DO SCRAPER WEB. REGRA OBRIGATÓRIA: se o usuário pedir BRENT, WTI, PETRÓLEO ou qualquer commodity cotada em Dólar (USD), você DEVE SEMPRE incluir 'DOLAR' no array de symbols para obter a taxa de câmbio USD/BRL e permitir comparação. Exemplo: ['BRENT', 'DOLAR']. Se omitir 'DOLAR', o relatório será rejeitado por falta de conversão cambial.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -110,7 +110,7 @@
                         "items": {
                             "type": "string"
                         },
-                        "description": "Array OBRIGATÓRIO de símbolos financeiros. OBRIGATÓRIO enviar múltiplos ativos se a consulta cruzar dados. Exemplo: ['BRENT', 'WTI', 'DOLAR', 'PETROBRAS']."
+                        "description": "Array OBRIGATÓRIO de símbolos financeiros. OBRIGATÓRIO enviar múltiplos ativos se a consulta cruzar dados. SEMPRE inclua 'DOLAR' quando houver ativos cotados em USD (BRENT, WTI, GOLD, etc). Exemplo: ['BRENT', 'DOLAR', 'PETROBRAS']."
                     },
                     "years": {
                         "type": "string",
@@ -128,7 +128,7 @@
         "type": "function",
         "function": {
             "name": "fetch_macroeconomy",
-            "description": "Acessa a Sovereign Open-Data Matrix (Banco Central API) para baixar taxas macroeconômicas oficiais de um país, como Inflação, Selic, IGPM, e Petróleo/ANP. USE SEMPRE ESTA FERRAMENTA PARA DADOS ECONÔMICOS, DE INFLAÇÃO, JUROS, OU OCORRÊNCIAS/PRODUÇÃO ANP (Agência Nacional do Petróleo) EM VEZ DO SCRAPER WEB.",
+            "description": "Acessa a Sovereign Open-Data Matrix (Banco Central API) para baixar taxas macroeconômicas oficiais de um país, como Inflação, Selic, IGPM, Câmbio PTAX e Petróleo/ANP. USE SEMPRE ESTA FERRAMENTA PARA DADOS ECONÔMICOS, DE INFLAÇÃO, JUROS, CÂMBIO PTAX (DÓLAR OFICIAL), OU OCORRÊNCIAS/PRODUÇÃO ANP (Agência Nacional do Petróleo) EM VEZ DO SCRAPER WEB. REGRA OBRIGATÓRIA: se o tema envolver Petróleo, Commodities ou qualquer ativo cotado em USD, SEMPRE inclua 'DOLAR_PTAX' nos indicators para fornecer a taxa de câmbio oficial ao relatório.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -137,7 +137,7 @@
                         "items": {
                             "type": "string"
                         },
-                        "description": "Array OBRIGATÓRIO contendo os indicadores. Envie múltiplos se o usuário pedir vários. (ex: ['IPCA', 'SELIC', 'IGPM', 'INPC', 'ANP_OCORRENCIA'])."
+                        "description": "Array OBRIGATÓRIO contendo os indicadores. Envie múltiplos se o usuário pedir vários. Indicadores suportados: IPCA, SELIC, IGPM, INPC, ANP_OCORRENCIA, DOLAR_PTAX, CAMBIO, USD. SEMPRE inclua 'DOLAR_PTAX' quando o tema envolver commodities em USD. Exemplo: ['IPCA', 'DOLAR_PTAX', 'ANP_OCORRENCIA']."
                     },
                     "country": {
                         "type": "string",
