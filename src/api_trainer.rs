@@ -744,10 +744,13 @@ pub async fn run_deep_research_handler(
         
         let mut synthesized_report = String::new();
         let olla_url = format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat").to_string();
-        // Timeout por stage: 420s (7 min) acomoda cold-start de modelo (~3-5 min para
-        // carregar tensores na VRAM em hosts de 27GB) + inferência (~1-2 min com thinking off).
-        // Valor anterior de 180s matava a Stage 1 antes do Ollama terminar de carregar o modelo.
-        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(420)).build().unwrap_or_else(|_| reqwest::Client::new());
+        // Timeout por stage: 900s (15 min) acomoda:
+        //  - Cold-start inicial do modelo (~3-5 min para carregar tensores na VRAM)
+        //  - Re-carregamento após Sandbox Python evictar o modelo da VRAM
+        //  - Inferência pesada em hosts com 27GB RAM e CPU offloading
+        // NOTA: O Sandbox executa Python com Pandas, forçando o Ollama a descarregar
+        // o modelo. Quando o próximo stage invoca o LLM, é um cold-start COMPLETO.
+        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(900)).build().unwrap_or_else(|_| reqwest::Client::new());
         
         // --- PHASE 41: THE HONEST INQUISITOR (SINGLE AGENT) ---
         // Eliminação da Trindade (Quórum) por sobrecarga de processamento. 
@@ -763,6 +766,8 @@ pub async fn run_deep_research_handler(
         let mut json_fail_count = 0;
         // GAP-11 FIX: Rastrear modelos que já falharam nesta sessão para evitar bounce infinito.
         let mut failed_models: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // Contador de retries de conexão (cobre cold-start E reload pós-Sandbox em qualquer stage).
+        let mut connection_retries: u8 = 0;
         
         // --- THE WORKER GRAPH LOOP (MAX 15 STAGES: GATHER, ANALYZE, SYNTHESIZE) ---
         // Reduzido de 25 para 15: pesquisas reais completam em 8-10 stages.
@@ -1745,14 +1750,17 @@ pub async fn run_deep_research_handler(
                     }
                 }
             } else {
-                // Tolerância de cold-start: se o modelo estava carregando na VRAM,
-                // a primeira request pode dar timeout. Tentar UMA vez mais antes de abortar.
-                if cycle <= 2 {
-                    let _ = TRAINER_LOGS.send(format!("⚠️ [Timeout Recovery] Stage {} falhou (possível cold-start do modelo). Retentando em 5s...", cycle));
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                // Tolerância de VRAM reload: após o Sandbox Python executar,
+                // o Ollama evicta o modelo da VRAM. O próximo stage sofre cold-start
+                // COMPLETO em QUALQUER posição do loop, não só nos cycles 1-2.
+                // Permitimos até 3 retries totais na sessão para acomodar isso.
+                connection_retries += 1;
+                if connection_retries <= 3 {
+                    let _ = TRAINER_LOGS.send(format!("⚠️ [Timeout Recovery] Stage {} falhou (possível reload de modelo após Sandbox). Retry {}/3 em 10s...", cycle, connection_retries));
+                    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
                     continue;
                 }
-                let _ = TRAINER_LOGS.send("❌ Erro de conexão persistente com o Ollama no Loop Agentico. Abortando.".to_string());
+                let _ = TRAINER_LOGS.send("❌ Erro de conexão persistente com o Ollama no Loop Agentico (3 retries esgotados). Abortando.".to_string());
                 break;
             }
         }
