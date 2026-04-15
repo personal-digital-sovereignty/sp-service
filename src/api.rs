@@ -169,6 +169,19 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                         .fetch_optional(pool)
                         .await
                         .unwrap_or(None);
+
+                    // Resolução de Alias: se o Ollama retorna 'model:tag' (ex: mistral-nemo:12b),
+                    // também marcar 'model:latest' como installed caso exista no banco (mesmo digest).
+                    // Isso evita entradas fantasmas OFFLINE para aliases canônicos.
+                    if let Some(prefix) = name.split(':').next() {
+                        let alias_latest = format!("{}:latest", prefix);
+                        if alias_latest != name {
+                            let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 1 WHERE model_name = ?")
+                                .bind(&alias_latest)
+                                .execute(pool)
+                                .await;
+                        }
+                    }
                         
                     if exists.is_none() {
                         let mut supports_tools = false;
