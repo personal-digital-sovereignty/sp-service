@@ -25,9 +25,36 @@ def parse_markdown_blocks(raw_blocks):
     datasets = {}
     
     # regex for getting table headers
-    header_regex = re.compile(r'\[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO.*?([A-Z0-9_\-\.\=\ ]+)\]')
+    header_regex = re.compile(r'\[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO.*?([A-Z0-9_\-\.=\ \(\)]+)\]')
     # regex for generic date string and numbers  "2024-01 | USD 75.3 | BRL 350.2" or "2024-01-10 | 0.5"
     row_regex = re.compile(r'^(\d{4}-\d{2}(?:-\d{2})?)\s*\|\s*(.*)$')
+    
+    # Mapa semântico: normaliza nomes longos de headers para colunas curtas e legíveis
+    SEMANTIC_MAP = {
+        "BZ=F": "BRENT", "BRENT": "BRENT", "PETROLEO": "BRENT", "PETRÓLEO": "BRENT",
+        "BRL=X": "DOLAR", "DOLAR": "DOLAR", "DÓLAR": "DOLAR", "USD": "DOLAR",
+        "GASOLINA": "GASOLINA", "DIESEL": "DIESEL",
+        "IPCA": "IPCA", "SELIC": "SELIC", "DESEMPREGO": "DESEMPREGO",
+        "DOLAR_PTAX": "DOLAR_PTAX", "CAMBIO": "CAMBIO",
+    }
+    
+    def normalize_ds_name(raw_name, block_text):
+        """Normaliza o nome do dataset usando mapa semântico."""
+        upper = raw_name.upper()
+        for key, val in SEMANTIC_MAP.items():
+            if key in upper:
+                return val
+        # Fallback: heurística pelo conteúdo do bloco
+        block_upper = block_text.upper()
+        if "PETROLEO" in block_upper or "BRENT" in block_upper or "BZ=F" in block_upper:
+            return "BRENT"
+        elif "BRL=X" in block_upper:
+            return "DOLAR"
+        elif "IPCA" in block_upper:
+            return "IPCA"
+        elif "GASOLINA" in block_upper:
+            return "GASOLINA"
+        return raw_name.strip()[:20]  # Truncar nomes longos
     
     for block in raw_blocks:
         current_ds_name = "UNKNOWN"
@@ -37,15 +64,15 @@ def parse_markdown_blocks(raw_blocks):
         for line in lines:
             h_match = header_regex.search(line)
             if h_match:
-                current_ds_name = h_match.group(1).strip()
+                raw_header = h_match.group(1).strip()
+                current_ds_name = normalize_ds_name(raw_header, block)
                 break
                 
         # Se for UNKNOWN tenta inferir por heurística simples
         if current_ds_name == "UNKNOWN":
-            if "PETROLEO" in block.upper() or "BRENT" in block.upper(): current_ds_name = "BRENT"
-            elif "IPCA" in block.upper(): current_ds_name = "IPCA"
-            elif "GASOLINA" in block.upper(): current_ds_name = "GASOLINA"
-            else: current_ds_name = f"DATASET_{len(datasets)}"
+            current_ds_name = normalize_ds_name("", block)
+            if current_ds_name == "":
+                current_ds_name = f"DATASET_{len(datasets)}"
 
         if current_ds_name in datasets:
             current_ds_name = f"{current_ds_name}_{len(datasets)}"
@@ -112,6 +139,13 @@ def join_and_extract(raw_data_blocks):
     # Outer join all datasets by Date
     merged_df = reduce(lambda left, right: pd.merge(left, right, on='Date', how='outer'), dfs)
     
+    # Dedup: Se 'DOLAR' e 'Taxa_Cambio' coexistem e são idênticos (ou quase),
+    # manter apenas 'DOLAR_CAMBIO' renomeado para clareza e eliminar a duplicata.
+    if 'DOLAR' in merged_df.columns and 'Taxa_Cambio' in merged_df.columns:
+        # Usar DOLAR como a coluna canônica (fonte oficial BRL=X), renomear
+        merged_df.rename(columns={'DOLAR': 'DOLAR_CAMBIO'}, inplace=True)
+        merged_df.drop(columns=['Taxa_Cambio'], inplace=True)
+    
     # Sort chronological
     merged_df.sort_index(inplace=True)
     
@@ -135,11 +169,14 @@ def join_and_extract(raw_data_blocks):
     # 2. Format the index to YYYY-MM
     merged_df.index = merged_df.index.strftime('%Y-%m')
     
-    # 3. Any remaining NaNs (usually at start) become "N/A - PENDENTE"
-    merged_df.fillna("N/A - PENDENTE", inplace=True)
+    # 3. Any remaining NaNs (usually at start) - round first, then convert to string-safe fill.
+    # Pandas 2.x+ rejects fillna(string) on float64 columns.
+    merged_df = merged_df.round(2)
+    for col in merged_df.columns:
+        merged_df[col] = merged_df[col].astype(object).fillna("—")
     
     # Prepare Markdown Output
-    table_md = merged_df.round(2).to_markdown()
+    table_md = merged_df.to_markdown()
     corr_md = corr_matrix.to_markdown()
     
     alert_box = (

@@ -1566,6 +1566,15 @@ pub async fn run_deep_research_handler(
                                                         let _ = TRAINER_LOGS.send("[Symbiotic Pipeline INLINE] Fusão Matemática Concluída! Injetando tabela Markdown no contexto do LLM.".to_string());
                                                         symbiotic_table_markdown = Some(mkd.to_string());
                                                         
+                                                        // Salvar a tabela em disco para proveniência criptográfica
+                                                        let rand_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
+                                                        let table_file = format!("/tmp/sovereign/sovereign_symbiotic_table_{}.md", rand_id);
+                                                        let _ = std::fs::write(&table_file, mkd);
+                                                        use sha2::{Sha256 as Sha256Sym, Digest as DigestSym};
+                                                        let mut h = Sha256Sym::new();
+                                                        h.update(mkd.as_bytes());
+                                                        all_hashes.push(format!("{:x}", h.finalize()));
+                                                        
                                                         // Injetar a tabela como uma mensagem do assistente no histórico
                                                         // para que o LLM a LEIA diretamente em vez de tentar programar.
                                                         messages.push(serde_json::json!({
@@ -2128,7 +2137,7 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                  > Esta é uma prova **irrefutável** de que os dados abaixo passaram pela pipeline real de coleta — não foram fabricados pelo LLM.\n\n\
                  {}\n",
                 audit_verified,
-                audit_details.join("\n")
+                audit_details.join("\n\n")
             )
         } else {
             let _ = TRAINER_LOGS.send(format!("⚠️ [Epistemic Guard v2] Auditoria Parcial: {}/{} verificados, {} não localizados em disco.", audit_verified, all_hashes.len(), audit_failed));
@@ -2140,7 +2149,7 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                  > Revise criticamente os dados antes de tomar decisões financeiras.\n\n\
                  {}\n",
                 audit_verified, all_hashes.len(), audit_failed,
-                if audit_details.is_empty() { "Nenhum arquivo verificado.".to_string() } else { audit_details.join("\n") }
+                if audit_details.is_empty() { "Nenhum arquivo verificado.".to_string() } else { audit_details.join("\n\n") }
             )
         };
 
