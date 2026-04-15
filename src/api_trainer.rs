@@ -744,7 +744,9 @@ pub async fn run_deep_research_handler(
         
         let mut synthesized_report = String::new();
         let olla_url = format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat").to_string();
-        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(7200)).build().unwrap_or_else(|_| reqwest::Client::new());
+        // Per-stage timeout agressivo: se o LLM não gerar output em 180s, algo travou.
+        // O timeout global de 7200s era um risco mascarando loops patológicos infinitos.
+        let synthesis_client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(180)).build().unwrap_or_else(|_| reqwest::Client::new());
         
         // --- PHASE 41: THE HONEST INQUISITOR (SINGLE AGENT) ---
         // Eliminação da Trindade (Quórum) por sobrecarga de processamento. 
@@ -761,20 +763,21 @@ pub async fn run_deep_research_handler(
         // GAP-11 FIX: Rastrear modelos que já falharam nesta sessão para evitar bounce infinito.
         let mut failed_models: std::collections::HashSet<String> = std::collections::HashSet::new();
         
-        // --- THE WORKER GRAPH LOOP (MAX 25 STAGES: GATHER, ANALYZE, SYNTHESIZE) ---
-        for cycle in 1..=25 {
+        // --- THE WORKER GRAPH LOOP (MAX 15 STAGES: GATHER, ANALYZE, SYNTHESIZE) ---
+        // Reduzido de 25 para 15: pesquisas reais completam em 8-10 stages.
+        // 25 stages × ~10 min/stage = 4h+ no pior caso em hosts de 27GB RAM.
+        for cycle in 1..=15 {
             if wait_or_cancel(200, &token).await { return; }
             
             // --- G.2: DYNAMIC RAG INJECTOR (LOCAL VAULT) ---
             // A Mom não raspa a web ativamente. A web e orquestração ativa ficam exclusivas do Grafo da Mente Mestra.
             // Para injetar dados do DB (memória/vault) estaticamente, este seria o local.
             
-            let _ = TRAINER_LOGS.send(format!("[Worker Graph - Stage {}/25] Invocando Mente Mestra ({})...", cycle, target_model_name));
+            let _ = TRAINER_LOGS.send(format!("[Worker Graph - Stage {}/15] Invocando Mente Mestra ({})...", cycle, target_model_name));
 
-            // GAP-14 FIX: Budget de 768 truncava tool calls em modelos >=7B.
-            // 2048 tokens acomoda multi-tool arrays, prefácios thinking E scripts Pandas completos
-            // que o modelo precisa gerar sem truncamento (causa raiz dos 3 scripts cortados no log).
-            let cycle_num_predict = if cycle < 25 { 2048 } else { 4096 };
+            // Budget de tokens: tool calls são curtos (~512 tokens), scripts Pandas ~2048.
+            // Ciclo 15 (síntese final) recebe 4096 para relatórios completos.
+            let cycle_num_predict = if cycle < 15 { 2048 } else { 4096 };
 
             let mut options_obj = serde_json::json!({
                 "num_ctx": dynamic_num_ctx,
@@ -783,22 +786,12 @@ pub async fn run_deep_research_handler(
                 "num_predict": cycle_num_predict
             });
 
-            // GAP-13 FIX: Modelos thinking-nativos (qwen3, gemma4, deepseek-r1) PRECISAM do CoT
-            // interno para planejar tool calls. Desabilitar thinking neles causa respostas vazias.
-            // Somente desabilitar em modelos não-reasoner para otimizar latência.
-            if cycle < 25 {
-                let mut is_thinker = false;
-                if let Some(pool) = engine_arc.db_pool.as_ref() {
-                    if let Ok(Some(reasoner_flag)) = sqlx::query_scalar::<_, bool>("SELECT is_reasoner FROM model_capabilities WHERE model_name = ?")
-                        .bind(&target_model_name)
-                        .fetch_optional(pool)
-                        .await {
-                        is_thinker = reasoner_flag;
-                    }
-                }
-                if !is_thinker {
-                    options_obj["enable_thinking"] = serde_json::json!(false);
-                }
+            // PERFORMANCE FIX: Thinking DESABILITADO para TODOS os modelos nos ciclos de Tool Calling.
+            // O CoT interno do qwen3/gemma4 gasta 8-17 minutos POR STAGE num host de 27GB RAM
+            // para "planejar" uma tool call que leva ~200 tokens. O thinking só é útil na
+            // síntese final (cycle 15+), onde o modelo precisa raciocinar sobre os dados.
+            if cycle < 15 {
+                options_obj["enable_thinking"] = serde_json::json!(false);
             }
 
             let mut synthesis_payload = serde_json::json!({
