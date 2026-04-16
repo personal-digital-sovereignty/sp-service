@@ -754,10 +754,30 @@ impl DeepResearchEngine {
     }
 
     /// Executa o algoritmo de Vetting Institucional.
-    /// (DESATIVADO): O usuário determinou a abolição das amarras de Tiers.
+    /// Pontua domínios institucionais/governamentais acima de blogs e ads.
     async fn assign_sovereign_trust_score(&self, links: Vec<String>) -> Vec<String> {
-        // Retorna a lista orgânica de pesquisa intocada sem pontuar `.gov.br` ou aplicar penalidades.
-        links
+        let mut scored: Vec<(i32, String)> = links.into_iter().map(|link| {
+            let lower = link.to_lowercase();
+            let score = if lower.contains(".gov.br") || lower.contains("ibge.gov.br") { 100 }
+            else if lower.contains("bcb.gov.br") || lower.contains("anp.gov.br") { 95 }
+            else if lower.contains("petrobras.com.br") || lower.contains("epe.gov.br") { 90 }
+            else if lower.contains("tradingeconomics.com") || lower.contains("investing.com") { 80 }
+            else if lower.contains("reuters.com") || lower.contains("bloomberg.com") { 80 }
+            else if lower.contains("infomoney.com.br") || lower.contains("valorinveste") { 75 }
+            else if lower.contains("dadosdemercado.com.br") || lower.contains("numerando.com.br") { 70 }
+            else if lower.contains("cnnbrasil.com.br") || lower.contains("g1.globo.com") { 65 }
+            else if lower.contains("folha.uol.com.br") || lower.contains("estadao.com.br") { 65 }
+            else if lower.contains("wikipedia.org") { 60 }
+            else if lower.contains("eia.gov") { 85 }
+            // Penalizações
+            else if lower.contains("blog") || lower.contains("medium.com") { 20 }
+            else if lower.contains("bing.com") || lower.contains("msn.com") { 5 }
+            else { 50 }; // Neutro
+            (score, link)
+        }).collect();
+
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.into_iter().map(|(_, link)| link).collect()
     }
 
     /// Rotacionador de Identidade (Sovereign Cloak)
@@ -811,6 +831,9 @@ impl DeepResearchEngine {
             "login.", "signin.", "signup.", "ads.", "pixel.", "tracker.",
             "play.google.com", "apps.apple.com", "itunes.apple.com",
             "facebook.com/sharer", "twitter.com/intent", "linkedin.com/share",
+            // FIX-SCRAPE: Anúncios pagos do Bing, MSN redirects, e domínios de cartão corporativo
+            "bing.com/aclick", "msn.com", "edenredmobilidade.com",
+            "codigosdebarrasbrasil.com", "vexpenses.com",
         ];
 
         let mut links = Vec::new();
@@ -847,7 +870,7 @@ impl DeepResearchEngine {
 
         links.dedup();
         let mut prioritized_links = self.assign_sovereign_trust_score(links).await;
-        prioritized_links.truncate(20); // Retorna estritamente o Top 20 de Confiabilidade
+        prioritized_links.truncate(7); // FIX-SCRAPE: Top 7 de Confiabilidade (era 20, causava scrape storm)
         Ok(prioritized_links)
     }
 
@@ -887,7 +910,7 @@ impl DeepResearchEngine {
                                 }
                             }
                             let mut prioritized_links = self.assign_sovereign_trust_score(links).await;
-                            prioritized_links.truncate(20);
+                            prioritized_links.truncate(7);
                             return Ok(prioritized_links);
                         }
                 }
@@ -938,7 +961,7 @@ impl DeepResearchEngine {
                                     }
                                 }
                                 let mut prioritized_links = self.assign_sovereign_trust_score(links).await;
-                                prioritized_links.truncate(20);
+                                prioritized_links.truncate(7);
                                 return Ok(prioritized_links);
                             }
                     } else {

@@ -307,7 +307,7 @@ async fn execute_sub_analyst(
         }
 
         let mut scrape_handles = Vec::new();
-        for link in res.links.clone().into_iter().take(20) {
+        for link in res.links.clone().into_iter().take(7) {
             let engine_clone = engine_arc.clone();
             scrape_handles.push(tokio::spawn(async move {
                 if let Ok(md) = engine_clone.scrape_url(&link).await {
@@ -787,7 +787,7 @@ pub async fn run_deep_research_handler(
         let fallback_inquisitor = crate::api::discover_cognitive_model_by_tier("junior").await;
         
         // Elege o modelo empiricamente mais honesto via Sycophancy Breaker (Viés cruzado)
-        let auth_inquisitor = crate::api::discover_adversarial_auditor(engine_arc.db_pool.as_ref(), &target_model_name, &fallback_inquisitor).await;
+        let mut auth_inquisitor = crate::api::discover_adversarial_auditor(engine_arc.db_pool.as_ref(), &target_model_name, &fallback_inquisitor).await;
         
         let mut all_sources = Vec::new();
         let mut all_hashes = Vec::new();
@@ -1943,10 +1943,58 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
 
             // FIX-9: Ancoragem de Dados — Colocar tabela Pandas ANTES dos JSONs crus no prompt
             // para explorar o viés de posição (modelos ~8B priorizam o início do prompt).
-            let data_anchor = if let Some(ref table) = symbiotic_table_markdown {
-                format!("\n\n[DADOS MATEMÁTICOS VERIFICADOS PELO MOTOR RUST — ÂNCORA OBRIGATÓRIA]:\n{}\n\n", table)
-            } else { String::new() };
-            let scribe_user = format!("[PROMPT DO USUÁRIO]: {}\n{}[CONTEXTO BRUTO DO PESQUISADOR]:\n{}", prompt, data_anchor, synthesized_report);
+            // FIX-F2: Extrair nomes de colunas da tabela Pandas e injetar como restrição explícita.
+            // Isso impede o Scribe de mencionar variáveis ausentes (ex: Diesel, Etanol).
+            let (data_anchor, column_guard) = if let Some(ref table) = symbiotic_table_markdown {
+                // Extrair headers da primeira linha da tabela Markdown (ex: "| Date | BRENT_USD | BRENT_BRL |")
+                let available_cols: Vec<String> = table.lines()
+                    .find(|l| l.contains('|') && !l.contains("---"))
+                    .map(|header_line| {
+                        header_line.split('|')
+                            .map(|c| c.trim().to_string())
+                            .filter(|c| !c.is_empty() && c != "Date" && c != "Unnamed: 0")
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                let cols_list = if available_cols.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n[COLUNAS DISPONÍVEIS]: {}.\n\
+                    RESTRIÇÃO ABSOLUTA: Você SOMENTE pode mencionar as variáveis listadas acima. \
+                    Qualquer referência a variáveis AUSENTES (ex: Diesel, Etanol, Selic, PIB) será penalizada pelo Auditor como alucinação.\n",
+                        available_cols.join(", "))
+                };
+
+                (
+                    format!("\n\n[DADOS MATEMÁTICOS VERIFICADOS PELO MOTOR RUST — ÂNCORA OBRIGATÓRIA]:\n{}\n\n", table),
+                    cols_list,
+                )
+            } else {
+                (String::new(), String::new())
+            };
+            // FIX-F4: Quando Pandas gerou a tabela, NÃO incluir a prosa qualitativa do Master
+            // no prompt do Scribe. A prosa do Master contém conceitos do web scraping (Diesel, etc.)
+            // que contaminam o contexto. O Scribe deve se basear APENAS na tabela verificada.
+            let scribe_context = if symbiotic_table_markdown.is_some() {
+                // Tabela existe → apenas JSONs crus sem prosa do Master
+                // Extrair apenas linhas que parecem dados brutos (começando com { ou [CONTEXT:)
+                let raw_only: Vec<&str> = synthesized_report.lines()
+                    .filter(|l| {
+                        let trimmed = l.trim();
+                        trimmed.starts_with('{') || trimmed.starts_with("[CONTEXT:") || trimmed.starts_with("## Source:")
+                            || trimmed.is_empty()
+                    })
+                    .collect();
+                if raw_only.is_empty() {
+                    synthesized_report.clone()
+                } else {
+                    raw_only.join("\n")
+                }
+            } else {
+                synthesized_report.clone()
+            };
+            let scribe_user = format!("[PROMPT DO USUÁRIO]: {}\n{}{}\n[CONTEXTO BRUTO DO PESQUISADOR]:\n{}", prompt, data_anchor, column_guard, scribe_context);
 
             let mut scribe_model = crate::api::discover_cognitive_model_by_tier("senior").await;
             
@@ -2045,9 +2093,20 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                     let gemma_fallback = "gemma4:e4b".to_string();
                     // Só escalar se o Scribe atual NÃO é já o gemma4 (evitar loop)
                     if scribe_model != gemma_fallback {
+                        // FIX-F3: Se o auditor é o MESMO modelo que o novo Scribe (gemma4),
+                        // trocamos o auditor para o Scribe original (ex: qwen3:8b) para evitar
+                        // self-audit (gemma4 auditando gemma4 = sem viés cruzado).
+                        let original_scribe = scribe_model.clone();
+                        if auth_inquisitor.to_lowercase().contains("gemma") {
+                            auth_inquisitor = original_scribe.clone();
+                            let _ = TRAINER_LOGS.send(format!(
+                                "🔄 [Sycophancy Breaker] Auditor trocado para '{}' (evitando self-audit com Scribe de resgate).",
+                                auth_inquisitor
+                            ));
+                        }
                         let _ = TRAINER_LOGS.send(format!(
                             "🔄 [Scribe Escalation] '{}' falhou {}× na auditoria. Escalando para '{}' como Scribe de resgate.",
-                            scribe_model, max_retries, gemma_fallback
+                            original_scribe, max_retries, gemma_fallback
                         ));
                         scribe_model = gemma_fallback;
                         // Reset messages para o novo modelo (limpa o histórico de reprimendas do modelo anterior)
@@ -2134,7 +2193,10 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                 }
             }
                     
-            crate::memory_manager::fire_eviction_protocol(&scribe_model).await;
+            // CO-RESIDENCY: NÃO evictar o Scribe aqui. Manter Scribe + Auditor co-residentes
+            // na VRAM durante todo o pipeline de formatação. Em hosts com 27GB+, ambos os modelos
+            // (~4.5GB + ~5GB) cabem simultaneamente, eliminando ~8min de cold-start por swap.
+            // A eviction final acontece no Step 4 (fim do pipeline).
             final_formatted_report
         };
 
@@ -2284,8 +2346,9 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
         
         let _ = TRAINER_LOGS.send("[STEP 4] Deep Research Protocol Complete (Staged for Human Review).".to_string());
         
-        // Final Sweep: Evict Master Orchestrator from Server GPU
+        // Final Sweep: Evict all resident models from VRAM (Co-residency cleanup)
         crate::memory_manager::fire_eviction_protocol(&target_model_name).await;
+        crate::memory_manager::fire_eviction_protocol(&auth_inquisitor).await;
         
         // Clean up Token
         let mut mg = DEEP_RESEARCH_CANCEL_TOKEN.write().unwrap();

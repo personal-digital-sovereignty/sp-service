@@ -42,7 +42,7 @@ pub async fn init_pool() -> SqlitePool {
     let _ = sqlx::query(include_str!("schemas/002_ephemeral_knowledge.sql")).execute(&pool).await;
 
     // PATCH AUTOMIGRATION (MATRIX CAPABILITIES): Injela as novas colunas silenciosamente sem destruir DBs antigos
-    let new_cols = vec!["is_master", "is_scribe", "is_agent", "is_coder", "is_chat", "is_project"];
+    let new_cols = vec!["is_master", "is_scribe", "is_auditor", "is_agent", "is_coder", "is_chat", "is_project"];
     for col in new_cols {
         let qs = format!("ALTER TABLE model_capabilities ADD COLUMN {} BOOLEAN DEFAULT 0", col);
         let _ = sqlx::query(&qs).execute(&pool).await; // Ignora o erro se a coluna já existir

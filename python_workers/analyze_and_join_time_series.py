@@ -176,10 +176,20 @@ def join_and_extract(raw_data_blocks):
     corr_matrix = merged_df.corr(method='pearson').round(3)
     
     # -----------------------------
-    # EPISTEMIC RULES
+    # EPISTEMIC RULES (v1.2.4+)
     # -----------------------------
-    # 1. Forward Fill (ffill) safely allows last known prices/indicators to flow down to missing edges.
-    merged_df.ffill(inplace=True)
+    # Discriminated ffill: Stock variables (prices that "stay" until changed) get ffill(limit=3).
+    # Flow variables (IPCA — unique monthly measurement) are NEVER forward-filled.
+    # This prevents ghost inflation values (e.g. Apr/2026 = copy of Mar/2026).
+    STOCK_COLUMNS = ['GASOLINA', 'DOLAR_SPOT', 'DOLAR_PTAX', 'DOLAR_CAMBIO', 'DIESEL',
+                     'BRENT_USD', 'BRENT_BRL', 'SELIC']
+    FLOW_COLUMNS = ['IPCA']  # Variáveis de fluxo mensal — NaN até dado real chegar
+
+    for col in merged_df.columns:
+        if col in FLOW_COLUMNS:
+            pass  # NUNCA ffill — NaN é semanticamente correto
+        elif col in STOCK_COLUMNS or col not in FLOW_COLUMNS:
+            merged_df[col] = merged_df[col].ffill(limit=3)  # Máximo 3 meses sem dado real
     
     # Pre-calculate Annual Averages before changing index to strings
     try:

@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS model_capabilities (
     is_reasoner BOOLEAN DEFAULT 0,
     is_master BOOLEAN DEFAULT 0,
     is_scribe BOOLEAN DEFAULT 0,
+    is_auditor BOOLEAN DEFAULT 0,
     is_agent BOOLEAN DEFAULT 0,
     is_coder BOOLEAN DEFAULT 0,
     is_chat BOOLEAN DEFAULT 0,

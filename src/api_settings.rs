@@ -475,6 +475,7 @@ pub struct ModelMatrixRow {
     pub is_reasoner: bool,
     pub is_master: bool,
     pub is_scribe: bool,
+    pub is_auditor: bool,
     pub is_agent: bool,
     pub is_coder: bool,
     pub is_chat: bool,
@@ -484,7 +485,7 @@ pub struct ModelMatrixRow {
 
 /// GET /v1/settings/model_capabilities
 pub async fn get_matrix_capabilities_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let q = "SELECT model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project, is_installed FROM model_capabilities ORDER BY parameter_size DESC";
+    let q = "SELECT model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_auditor, is_agent, is_coder, is_chat, is_project, is_installed FROM model_capabilities ORDER BY parameter_size DESC";
     match sqlx::query_as::<_, ModelMatrixRow>(q).fetch_all(&state.db).await {
         Ok(rows) => Json(rows).into_response(),
         Err(_) => Json(Vec::<ModelMatrixRow>::new()).into_response(),
@@ -498,6 +499,7 @@ pub struct UpdateMatrixReq {
     pub is_reasoner: bool,
     pub is_master: bool,
     pub is_scribe: bool,
+    pub is_auditor: bool,
     pub is_agent: bool,
     pub is_coder: bool,
     pub is_chat: bool,
@@ -510,11 +512,12 @@ pub async fn update_matrix_toggles_handler(
     State(state): State<Arc<AppState>>,
     Json(req): Json<UpdateMatrixReq>,
 ) -> impl IntoResponse {
-    let res = sqlx::query("UPDATE model_capabilities SET supports_tools = ?, is_reasoner = ?, is_master = ?, is_scribe = ?, is_agent = ?, is_coder = ?, is_chat = ?, is_project = ?, is_installed = ? WHERE model_name = ?")
+    let res = sqlx::query("UPDATE model_capabilities SET supports_tools = ?, is_reasoner = ?, is_master = ?, is_scribe = ?, is_auditor = ?, is_agent = ?, is_coder = ?, is_chat = ?, is_project = ?, is_installed = ? WHERE model_name = ?")
         .bind(req.supports_tools)
         .bind(req.is_reasoner)
         .bind(req.is_master)
         .bind(req.is_scribe)
+        .bind(req.is_auditor)
         .bind(req.is_agent)
         .bind(req.is_coder)
         .bind(req.is_chat)

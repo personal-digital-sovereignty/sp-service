@@ -346,9 +346,18 @@ pub async fn discover_adversarial_auditor(pool: Option<&sqlx::SqlitePool>, origi
         else { origin_model.split(':').next().unwrap_or(origin_model) };
 
         let exclude_like = format!("%{}%", family);
-        
-        let query = "SELECT model_name FROM model_capabilities WHERE model_name NOT LIKE ? AND parameter_size >= 3.0 AND parameter_size <= 9.0 ORDER BY parameter_size DESC LIMIT 1";
-        if let Ok(Some(row)) = sqlx::query(query).bind(exclude_like).fetch_optional(p).await
+
+        // PRIORITY 1: Explicit is_auditor=1 flagged models (cross-family)
+        let auditor_query = "SELECT model_name FROM model_capabilities WHERE model_name NOT LIKE ? AND is_auditor = 1 AND is_installed = 1 ORDER BY parameter_size ASC LIMIT 1";
+        if let Ok(Some(row)) = sqlx::query(auditor_query).bind(&exclude_like).fetch_optional(p).await
+            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+                tracing::info!("⚖️ [Sycophancy Breaker] Auditor explícito escalado: '{}' (is_auditor=1, cross-family '{}')", name, family);
+                return name;
+        }
+
+        // PRIORITY 2: Fallback heuristic (largest non-family model 3-9B)
+        let heuristic_query = "SELECT model_name FROM model_capabilities WHERE model_name NOT LIKE ? AND parameter_size >= 3.0 AND parameter_size <= 9.0 ORDER BY parameter_size DESC LIMIT 1";
+        if let Ok(Some(row)) = sqlx::query(heuristic_query).bind(exclude_like).fetch_optional(p).await
             && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
                 tracing::info!("⚖️ [Sycophancy Breaker] Auditor Adversarial dinâmico escalado: '{}' (Filtrando viés estatístico da família origem '{}')", name, family);
                 return name;
