@@ -41,6 +41,12 @@ pub async fn init_pool() -> SqlitePool {
     // CARREGAMENTO DO EPHEMERAL RAG SCHEMA (MÓDULO DE NOTÍCIAS)
     let _ = sqlx::query(include_str!("schemas/002_ephemeral_knowledge.sql")).execute(&pool).await;
 
+    // CARREGAMENTO DO SOVEREIGN PROMPT VAULT SCHEMA
+    let _ = sqlx::query(include_str!("schemas/003_sovereign_prompts.sql")).execute(&pool).await;
+
+    // Seed core prompts do TOML (com verificação SHA-256)
+    crate::prompt_vault::seed_core_prompts(&pool).await;
+
     // PATCH AUTOMIGRATION (MATRIX CAPABILITIES): Injela as novas colunas silenciosamente sem destruir DBs antigos
     let new_cols = vec!["is_master", "is_scribe", "is_auditor", "is_agent", "is_coder", "is_chat", "is_project"];
     for col in new_cols {

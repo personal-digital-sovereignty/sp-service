@@ -12,6 +12,9 @@ pub async fn spawn_ephemeral_garbage_collector(pool: SqlitePool) {
             tokio::time::sleep(Duration::from_secs(3600)).await;
             
             info!("🗑️ [Garbage Collector] Identificando tokens mortos na memória temporal...");
+
+            // Temporal coherence maintenance (routine integrity sweep)
+            crate::prompt_vault::temporal_coherence_sweep(&pool).await;
             
             // Delete CASCADE remove as chunks filhas atreladas graças a FOREIGN KEY ON DELETE CASCADE
             match sqlx::query("DELETE FROM ephemeral_knowledge WHERE expires_at < CURRENT_TIMESTAMP")

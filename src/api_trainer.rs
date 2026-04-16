@@ -467,7 +467,10 @@ async fn execute_sub_analyst(
         crate::api::discover_cognitive_model_by_tier("senior").await
     };
     
-    let gate_system = "You are a data sufficiency checker. Your only job is to answer: 'Does the retrieved context contain enough specific numerical data and facts to answer the query?' Output ONLY valid JSON: {\"sufficient\": true, \"fields_found\": [\"<field1>\"]} or {\"sufficient\": false, \"missing\": [\"<field1>\"], \"reason\": \"<specific gap>\"}. Do NOT attempt to answer the original query. Do NOT generate any analysis.";
+    let gate_system = if let Some(pool) = engine_arc.db_pool.as_ref() {
+        crate::prompt_vault::load_prompt_by_slug(pool, "gate_system").await
+    } else { None }
+    .unwrap_or_else(|| "You are a data sufficiency checker. Your only job is to answer: 'Does the retrieved context contain enough specific numerical data and facts to answer the query?' Output ONLY valid JSON: {\"sufficient\": true, \"fields_found\": [\"<field1>\"]} or {\"sufficient\": false, \"missing\": [\"<field1>\"], \"reason\": \"<specific gap>\"}. Do NOT attempt to answer the original query. Do NOT generate any analysis.".to_string());
     
     let gate_prompt = format!("<context>\n{}\n</context>\n\n<query>{}</query>\n\nJSON OUTPUT:", reranked_md, query);
 
@@ -517,7 +520,10 @@ async fn execute_sub_analyst(
     }
 
     // --- PHASE 1.2: LITERAL EXTRACTOR (DYNAMIC SQUAD RUTING) ---
-    let system_prompt = "Você é um Extrator Literal Estrito.\nFORBIDDEN outputs:\n- Any sentence without an attached [- Chunk X] citation\n- Rounded numbers (flag as suspicious)\n- Phrases: 'aproximadamente', 'em torno de', 'cerca de', 'significativamente' -> these are fabrication markers = HALT\n- Any claim about absence of evidence.\n\nSeu ÚNICO TRABALHO é copiar os valores textuais ou numéricos VERBATIM do [CONTEXTO], apensando na frente a citação exata de onde tirou (ex: 'Segundo os dados do [- Chunk 2]...'). NÃO GERE PROSA, não analise, não conclua. Apenas liste os fatos crus.";
+    let system_prompt = if let Some(pool) = engine_arc.db_pool.as_ref() {
+        crate::prompt_vault::load_prompt_by_slug(pool, "literal_extractor").await
+    } else { None }
+    .unwrap_or_else(|| "Você é um Extrator Literal Estrito.\nFORBIDDEN outputs:\n- Any sentence without an attached [- Chunk X] citation\n- Rounded numbers (flag as suspicious)\n- Phrases: 'aproximadamente', 'em torno de', 'cerca de', 'significativamente' -> these are fabrication markers = HALT\n- Any claim about absence of evidence.\n\nSeu ÚNICO TRABALHO é copiar os valores textuais ou numéricos VERBATIM do [CONTEXTO], apensando na frente a citação exata de onde tirou (ex: 'Segundo os dados do [- Chunk 2]...'). NÃO GERE PROSA, não analise, não conclua. Apenas liste os fatos crus.".to_string());
     
     let extractor_prompt = format!("PERGUNTA:\n{}\n\n[CONTEXTO]:\n{}", query, reranked_md);
 
@@ -1930,7 +1936,11 @@ pub async fn run_deep_research_handler(
 
         } else {
             let _ = TRAINER_LOGS.send("[The Scribe] Invocando Agent especialista para iterar e formatar os fatos brutos em Markdown Histórico...".to_string());
-            let scribe_system = format!("Você é 'The Scribe', o Arquiteto Analítico Sênior do Sovereign Pair, redigindo relatórios executivos corporativos de nível C-Level (CIO/CFO/CEO). Hoje é: {current_date}.\n\
+            let scribe_system = if let Some(pool) = engine_arc.db_pool.as_ref() {
+                crate::prompt_vault::load_prompt_by_slug(pool, "scribe_system").await
+                    .map(|p| p.replace("{current_date}", &current_date))
+            } else { None }
+            .unwrap_or_else(|| format!("Você é 'The Scribe', o Arquiteto Analítico Sênior do Sovereign Pair, redigindo relatórios executivos corporativos de nível C-Level (CIO/CFO/CEO). Hoje é: {current_date}.\n\
 [MISSÃO EXECUTIVA]: Sua ÚNICA função é escrever o Dossiê de Análise Fundamentalista em prosa técnica. O próprio motor fará o append da Tabela Crud/Markdown no final do arquivo.\n\n\
 [ESTRUTURA OBRIGATÓRIA - C-LEVEL MARKDOWN]:\n\
 1. SÍNTESE EXECUTIVA (EXECUTIVE SUMMARY): Parágrafo evidenciando os insights da tabela. SE os dados repassados na memória forem apenas JSONs longos crus (sem processamento Pandas prévio), declare a limitação matemática.\n\
@@ -1939,7 +1949,7 @@ pub async fn run_deep_research_handler(
 [TRAVAS EPISTÊMICAS E JURÍDICAS]:\n\
 - ALUCINAÇÃO ZERO (CEGUEIRA MATEMÁTICA): VOCÊ É PROIBIDO DE CALCULAR MÉDIAS, CORRELAÇÕES OU PERCENTUAIS 'DE CABEÇA'. Se cruzar números exatos que não estão visíveis nos [FATOS BRUTOS], nosso Auditor te punirá imediatamente.\n\
 - REGRA DE OURO (CITAÇÃO OBRIGATÓRIA): Cada afirmação sobre correlação DEVE citar o coeficiente Pearson exato (r=X.XX) conforme impresso na Matriz de Correlação Pandas. Cada afirmação sobre preço DEVE citar o valor e o período (ex: 'R$ 594,94 em Jun/2022'). Se o número exato NÃO consta nos dados, escreva 'dado não disponível nos fatos brutos' em vez de inventar.\n\
-Evite saudações. Reporte com excelência corporativa C-Level, focado estritamente na verdade irrefutável entregada.");
+Evite saudações. Reporte com excelência corporativa C-Level, focado estritamente na verdade irrefutável entregada."));
 
             // FIX-9: Ancoragem de Dados — Colocar tabela Pandas ANTES dos JSONs crus no prompt
             // para explorar o viés de posição (modelos ~8B priorizam o início do prompt).

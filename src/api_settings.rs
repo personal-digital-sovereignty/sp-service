@@ -563,3 +563,133 @@ pub async fn delete_matrix_entry_handler(
         }
     }
 }
+
+// =============================================
+// SOVEREIGN PROMPT VAULT — CRUD Handlers
+// =============================================
+
+/// GET /v1/settings/prompts
+pub async fn get_prompts_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let q = "SELECT id, slug, category, title, prompt_text, placeholders, is_core, is_active, version, integrity_hash, created_at, updated_at, created_by FROM sovereign_prompts ORDER BY id ASC";
+    match sqlx::query_as::<_, crate::prompt_vault::PromptRow>(q).fetch_all(&state.db).await {
+        Ok(rows) => Json(rows).into_response(),
+        Err(_) => Json(Vec::<crate::prompt_vault::PromptRow>::new()).into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpsertPromptReq {
+    pub slug: String,
+    pub title: String,
+    pub category: String,
+    pub prompt_text: String,
+    pub placeholders: Option<Vec<String>>,
+}
+
+/// POST /v1/settings/prompts
+pub async fn upsert_prompt_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UpsertPromptReq>,
+) -> impl IntoResponse {
+    // Guard: bloquear IDs no namespace reservado SP-9xxx
+    if req.slug.starts_with("SP-9") || req.slug.starts_with("sp-9") {
+        return (axum::http::StatusCode::FORBIDDEN, Json(serde_json::json!({
+            "error": "Namespace reservado SP-9xxx. Prompts core são gerenciados pelo sistema."
+        }))).into_response();
+    }
+
+    // Guard: não permitir overwrite de prompts is_core=1
+    if let Ok(Some(is_core)) = sqlx::query_scalar::<_, bool>(
+        "SELECT is_core FROM sovereign_prompts WHERE slug = ?"
+    ).bind(&req.slug).fetch_optional(&state.db).await {
+        if is_core {
+            return (axum::http::StatusCode::FORBIDDEN, Json(serde_json::json!({
+                "error": "Este prompt é protegido pelo Cognitive Firewall e não pode ser alterado."
+            }))).into_response();
+        }
+    }
+
+    // LLM Validation: verificar se o novo prompt conflita com regras core
+    match crate::prompt_vault::validate_prompt_with_llm(&state.db, &req.prompt_text).await {
+        Err(reason) => {
+            return (axum::http::StatusCode::CONFLICT, Json(serde_json::json!({
+                "error": "Prompt rejeitado pelo Cognitive Firewall",
+                "reason": reason
+            }))).into_response();
+        }
+        Ok(_) => {}
+    }
+
+    let placeholders_json = serde_json::to_string(&req.placeholders.unwrap_or_default()).unwrap_or("[]".to_string());
+    let id = uuid::Uuid::new_v4().to_string();
+    let hash = {
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        hasher.update(req.prompt_text.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    let res = sqlx::query(
+        "INSERT INTO sovereign_prompts (id, slug, category, title, prompt_text, placeholders, is_core, is_active, version, integrity_hash, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, 0, 1, 1, ?, 'user')
+         ON CONFLICT(slug) DO UPDATE SET
+            title = excluded.title,
+            category = excluded.category,
+            prompt_text = excluded.prompt_text,
+            placeholders = excluded.placeholders,
+            integrity_hash = excluded.integrity_hash,
+            version = sovereign_prompts.version + 1,
+            updated_at = CURRENT_TIMESTAMP"
+    )
+    .bind(&id)
+    .bind(&req.slug)
+    .bind(&req.category)
+    .bind(&req.title)
+    .bind(&req.prompt_text)
+    .bind(&placeholders_json)
+    .bind(&hash)
+    .execute(&state.db)
+    .await;
+
+    match res {
+        Ok(_) => Json(serde_json::json!({"status": "success", "slug": req.slug})).into_response(),
+        Err(e) => {
+            tracing::error!("Prompt Vault Upsert Error: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true}))).into_response()
+        }
+    }
+}
+
+/// DELETE /v1/settings/prompts/:slug (soft-delete)
+pub async fn delete_prompt_handler(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    // Guard: não permitir delete de prompts core
+    if let Ok(Some(is_core)) = sqlx::query_scalar::<_, bool>(
+        "SELECT is_core FROM sovereign_prompts WHERE slug = ?"
+    ).bind(&slug).fetch_optional(&state.db).await {
+        if is_core {
+            return (axum::http::StatusCode::FORBIDDEN, Json(serde_json::json!({
+                "error": "Prompts core não podem ser desativados."
+            }))).into_response();
+        }
+    }
+
+    // Soft-delete: apenas desativa
+    let res = sqlx::query("UPDATE sovereign_prompts SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE slug = ?")
+        .bind(&slug)
+        .execute(&state.db)
+        .await;
+
+    match res {
+        Ok(r) if r.rows_affected() > 0 => {
+            Json(serde_json::json!({"status": "deactivated", "slug": slug})).into_response()
+        },
+        Ok(_) => (axum::http::StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Prompt not found"}))).into_response(),
+        Err(e) => {
+            tracing::error!("Prompt Vault Delete Error: {}", e);
+            (axum::http::StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": true}))).into_response()
+        }
+    }
+}

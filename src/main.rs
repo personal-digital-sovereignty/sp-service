@@ -35,6 +35,7 @@ pub mod office_parser;
 pub mod sandbox;
 pub mod memory_manager;
 pub mod garbage_collector; // <-- Adicionado
+pub mod prompt_vault;
 
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;
@@ -403,6 +404,9 @@ async fn main() {
         .route("/v1/settings/model_capabilities", axum::routing::get(api_settings::get_matrix_capabilities_handler))
         .route("/v1/settings/model_capabilities/toggles", axum::routing::post(api_settings::update_matrix_toggles_handler))
         .route("/v1/settings/model_capabilities/:model_name", axum::routing::delete(api_settings::delete_matrix_entry_handler))
+        .route("/v1/settings/prompts", axum::routing::get(api_settings::get_prompts_handler)
+            .post(api_settings::upsert_prompt_handler))
+        .route("/v1/settings/prompts/:slug", axum::routing::delete(api_settings::delete_prompt_handler))
         // ------------------ RAG Engine Command Center ----------
         .route("/v1/engineer/rag/rules", axum::routing::get(api_rag::get_routing_rules_handler)
             .post(api_rag::create_routing_rule_handler))
