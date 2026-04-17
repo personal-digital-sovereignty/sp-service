@@ -2026,11 +2026,60 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                  Valores monetários em BRL devem ser citados como 'R$ XXX,XX em MM/AAAA'.\n".to_string()
             } else { String::new() };
 
-            let scribe_user = if scribe_context.is_empty() {
-                // FIX-14: Tabela Pandas é a única fonte de dados (sem lixo de JSONs crus)
-                format!("[PROMPT DO USUÁRIO]: {}\n{}{}{}", prompt, data_format_hint, data_anchor, column_guard)
+            // FIX-21: Glossário Semântico de Colunas — ensina ao Scribe (e Auditor) o que cada
+            // coluna significa e sua ordem de magnitude. Sem isso, o LLM confunde BRENT_BRL
+            // (~R$ 400/barril) com GASOLINA (~R$ 6/litro), gerando erros factuais no Abstract.
+            let column_glossary = if let Some(ref table) = symbiotic_table_markdown {
+                let cols: Vec<String> = table.lines()
+                    .find(|l| l.contains('|') && !l.contains("---"))
+                    .map(|h| h.split('|').map(|c| c.trim().to_string())
+                         .filter(|c| !c.is_empty() && c != "Date" && c != "Unnamed: 0").collect())
+                    .unwrap_or_default();
+                if cols.is_empty() { String::new() } else {
+                    let mut g = String::from("\n[GLOSSÁRIO DE COLUNAS — LEITURA OBRIGATÓRIA ANTES DE ESCREVER]:\n");
+                    for col in &cols {
+                        let desc = match col.as_str() {
+                            "BRENT_USD" => "Preço do BARRIL de petróleo Brent em Dólares (~$60-120). UNIDADE: USD/barril.",
+                            "BRENT_BRL" => "Preço do BARRIL de petróleo Brent em Reais (~R$ 300-600). UNIDADE: BRL/barril. NÃO É gasolina.",
+                            "DOLAR_SPOT" => "Taxa de câmbio USD→BRL spot interbancária (~R$ 4.70-6.10). UNIDADE: BRL por 1 USD.",
+                            "DOLAR_PTAX" => "Taxa de câmbio oficial PTAX do BCB (~R$ 4.70-6.10). UNIDADE: BRL por 1 USD.",
+                            "GASOLINA" => "Preço médio nacional do LITRO de gasolina (~R$ 4.50-7.30). UNIDADE: BRL/litro.",
+                            "IPCA" => "Variação MENSAL do IPCA (inflação oficial). Valor típico: ~0.3-0.8%. UNIDADE: percentual mensal.",
+                            "SELIC" => "Taxa Selic (juros básicos). UNIDADE: percentual anual.",
+                            "DIESEL" => "Preço médio do litro de diesel. UNIDADE: BRL/litro.",
+                            _ => "Variável macroeconômica (consulte a unidade no contexto).",
+                        };
+                        g.push_str(&format!("- **{}**: {}\n", col, desc));
+                    }
+                    g.push_str("⚠️ ATENÇÃO ABSOLUTA: BRENT_BRL (~R$ 400) = preço por BARRIL. GASOLINA (~R$ 6) = preço por LITRO. NÃO CONFUNDA.\n");
+                    g
+                }
+            } else { String::new() };
+
+            // FIX-19: VERDADE QUALITATIVA — extraída dinamicamente do autobahn_rules.yml.
+            let verdade_qualitativa = rules.get("directives_heavy_duty")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|d| d.as_str())
+                        .find(|d| d.contains("DADO QUALITATIVO") || d.contains("CARTEL") || d.contains("IMPOSTOS EM COMBUSTÍVEIS"))
+                        .map(|d| format!("\n[VERDADE QUALITATIVA — CONHECIMENTO ECONÔMICO PRÉ-EMBUTIDO]:\n{}\n", d))
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            // FIX-20: O Auditor DEVE receber EXATAMENTE os mesmos dados que o Scribe recebeu.
+            let auditor_context = if symbiotic_table_markdown.is_some() {
+                format!("{}{}{}{}{}", data_format_hint, column_glossary, verdade_qualitativa, data_anchor, column_guard)
             } else {
-                format!("[PROMPT DO USUÁRIO]: {}\n{}{}\n[CONTEXTO BRUTO DO PESQUISADOR]:\n{}", prompt, data_anchor, column_guard, scribe_context)
+                synthesized_report.clone()
+            };
+
+            let scribe_user = if scribe_context.is_empty() {
+                // FIX-14+19+21: Tabela Pandas + Glossário + Verdade Qualitativa (sem JSONs crus)
+                format!("[PROMPT DO USUÁRIO]: {}\n{}{}{}{}{}", prompt, data_format_hint, column_glossary, verdade_qualitativa, data_anchor, column_guard)
+            } else {
+                format!("[PROMPT DO USUÁRIO]: {}\n{}{}{}{}[CONTEXTO BRUTO DO PESQUISADOR]:\n{}", prompt, column_glossary, verdade_qualitativa, data_anchor, column_guard, scribe_context)
             };
 
             let mut scribe_model = crate::api::discover_cognitive_model_by_tier("senior").await;
@@ -2082,8 +2131,20 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                             current_format = cleaned;
                         }
 
-                // The Sycophancy Breaker (Adversarial Auditor) Loop
-                let auditor_prompt = format!("Você é o Mestre de Auditoria. Avalie implacavelmente se o [Relatório] do seu subordinado inventou números, taxas matemáticas, ou falsificou fatos ausentes nos [Fatos Brutos]. Reposte APENAS 'OK' (nada mais) caso o relatório baseie-se estritamente na verdade extraída.\n\nSe ele inventou matemática, DEVOLVA A BRONCA DESTRUTIVA MENCIONANDO O ERRO.\n\n[FATOS BRUTOS]:\n{}\n\n[RELATÓRIO GERADO]:\n{}", synthesized_report, current_format);
+                // FIX-20+22: Sycophancy Breaker com contexto SIMÉTRICO ao Scribe + auditoria estruturada.
+                // O Auditor agora recebe os MESMOS dados que o Scribe (tabela Pandas quando existe),
+                // e tem instruções específicas para detectar confusão de colunas e granularidade.
+                let auditor_prompt = format!(
+                    "Você é o Auditor de Integridade Factual do Sovereign Pair. Verifique CADA número citado no [RELATÓRIO] contra os [DADOS FONTE].\n\n\
+                     INSTRUÇÕES DE AUDITORIA OBRIGATÓRIAS:\n\
+                     1. Para CADA valor monetário citado, verifique se existe EXATAMENTE na tabela/dados fonte.\n\
+                     2. BRENT_BRL (~R$ 300-600) = preço do BARRIL. GASOLINA (~R$ 4-8) = preço do LITRO. Se o relatório atribuir R$ 500+ à gasolina, é ERRO DE COLUNA.\n\
+                     3. Valores MENSAIS (ex: Jun/2022) NÃO podem ser confundidos com MÉDIAS ANUAIS (ex: média 2022). São tabelas diferentes.\n\
+                     4. Correlações devem citar o coeficiente r exato da Matriz de Pearson visível nos dados.\n\n\
+                     RESPONDA:\n\
+                     - 'OK' se tudo está correto.\n\
+                     - Se encontrou erro, cite: QUAL valor, ONDE no relatório, e QUAL é o valor correto nos dados fonte.\n\n\
+                     [DADOS FONTE]:\n{}\n\n[RELATÓRIO GERADO]:\n{}", auditor_context, current_format);
                 // FIX-17: keep_alive 60m no Auditor para co-residência com Scribe
                 let auditor_payload = serde_json::json!({
                     "model": auth_inquisitor,
@@ -2180,8 +2241,13 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                                         rescue_format = cleaned;
                                     }
 
-                            // Re-auditar com o Sycophancy Breaker
-                            let rescue_audit_prompt = format!("Você é o Mestre de Auditoria. Avalie implacavelmente se o [Relatório] do seu subordinado inventou números, taxas matemáticas, ou falsificou fatos ausentes nos [Fatos Brutos]. Reposte APENAS 'OK' (nada mais) caso o relatório baseie-se estritamente na verdade extraída.\n\nSe ele inventou matemática, DEVOLVA A BRONCA DESTRUTIVA MENCIONANDO O ERRO.\n\n[FATOS BRUTOS]:\n{}\n\n[RELATÓRIO GERADO]:\n{}", synthesized_report, rescue_format);
+                            // FIX-20+22: Rescue Auditor com contexto SIMÉTRICO ao Scribe
+                            let rescue_audit_prompt = format!(
+                                "Você é o Auditor de Integridade Factual. Verifique CADA número do [RELATÓRIO] contra os [DADOS FONTE].\n\n\
+                                 REGRAS: (1) BRENT_BRL (~R$ 300-600) = BARRIL, GASOLINA (~R$ 4-8) = LITRO — confusão = ERRO. \
+                                 (2) Valores mensais ≠ médias anuais. (3) Correlações devem citar r exato da Pearson.\n\n\
+                                 RESPONDA 'OK' se correto, ou cite o ERRO específico com o valor correto.\n\n\
+                                 [DADOS FONTE]:\n{}\n\n[RELATÓRIO GERADO]:\n{}", auditor_context, rescue_format);
                             let rescue_audit_payload = serde_json::json!({
                                 "model": auth_inquisitor,
                                 "messages": [ {"role": "user", "content": rescue_audit_prompt} ],
