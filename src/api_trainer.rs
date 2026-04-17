@@ -2107,16 +2107,20 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
             let max_retries = 2;
             for attempt in 1..=max_retries {
                 // FIX-17: keep_alive 60m no Scribe para manter modelo na RAM durante retries
+                // FIX-23: Reasoners (qwen3, gemma4) gastam ~1500 tokens em <think> antes de
+                // escrever conteúdo útil. enable_thinking:false desabilita o CoT interno,
+                // forçando o modelo a escrever diretamente o Markdown.
                 let scribe_payload = serde_json::json!({
                     "model": scribe_model,
                     "messages": scribe_messages,
                     "stream": false,
                     "keep_alive": "60m",
+                    "enable_thinking": false,
                     "options": {
                         "num_ctx": 16384,
                         "temperature": 0.1,
                         "repeat_penalty": 1.03,
-                        "num_predict": 2048
+                        "num_predict": 3072
                     }
                 });
                 
@@ -2125,6 +2129,19 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                     && let Ok(json) = res.json::<serde_json::Value>().await
                         && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                             let mut cleaned = content.trim().to_string();
+                            // FIX-23: Strip <think>...</think> tags que reasoners podem emitir
+                            // mesmo com enable_thinking:false (defense-in-depth).
+                            while let Some(start) = cleaned.find("<think>") {
+                                if let Some(end) = cleaned.find("</think>") {
+                                    let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
+                                    cleaned.replace_range(start..end + shift, "");
+                                } else {
+                                    // <think> sem fechamento = truncamento. Remove tudo do <think> em diante.
+                                    cleaned = cleaned[..start].to_string();
+                                    break;
+                                }
+                            }
+                            cleaned = cleaned.trim().to_string();
                             if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
                             else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
                             if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
@@ -2223,11 +2240,12 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                                 "messages": scribe_messages,
                                 "stream": false,
                                 "keep_alive": "60m",
+                                "enable_thinking": false,
                                 "options": {
                                     "num_ctx": 16384,
                                     "temperature": 0.1,
                                     "repeat_penalty": 1.03,
-                                    "num_predict": 2048
+                                    "num_predict": 3072
                                 }
                             });
                             let mut rescue_format = String::new();
@@ -2235,6 +2253,17 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                                 && let Ok(json) = res.json::<serde_json::Value>().await
                                     && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                                         let mut cleaned = content.trim().to_string();
+                                        // FIX-23: Strip <think> tags no rescue Scribe
+                                        while let Some(start) = cleaned.find("<think>") {
+                                            if let Some(end) = cleaned.find("</think>") {
+                                                let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
+                                                cleaned.replace_range(start..end + shift, "");
+                                            } else {
+                                                cleaned = cleaned[..start].to_string();
+                                                break;
+                                            }
+                                        }
+                                        cleaned = cleaned.trim().to_string();
                                         if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); }
                                         else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
                                         if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
