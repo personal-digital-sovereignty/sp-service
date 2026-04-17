@@ -2099,6 +2099,12 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
             if scribe_model != target_model_name {
                 let _ = TRAINER_LOGS.send(format!("[Scribe Orchestrator] Auto-elevação Ativa: Escalonando para '{}' visando formatar a resposta.", scribe_model));
             }
+            // FIX-24: Log confirmando modelo e tamanho do contexto para diagnóstico
+            let _ = TRAINER_LOGS.send(format!(
+                "🔬 [Scribe Setup] model='{}', system_len={}, user_len={}, think=false",
+                scribe_model, scribe_system.len(), scribe_user.len()
+            ));
+            tracing::info!("[Scribe Setup] model='{}', system_len={}, user_len={}", scribe_model, scribe_system.len(), scribe_user.len());
 
             let mut scribe_messages = vec![
                 serde_json::json!({"role": "system", "content": scribe_system}),
@@ -2128,28 +2134,66 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                 });
                 
                 let mut current_format = String::new();
-                if let Ok(res) = synthesis_client.post(&olla_url).json(&scribe_payload).send().await
-                    && let Ok(json) = res.json::<serde_json::Value>().await
-                        && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                            let mut cleaned = content.trim().to_string();
-                            // FIX-23: Strip <think>...</think> tags que reasoners podem emitir
-                            // mesmo com enable_thinking:false (defense-in-depth).
-                            while let Some(start) = cleaned.find("<think>") {
-                                if let Some(end) = cleaned.find("</think>") {
-                                    let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
-                                    cleaned.replace_range(start..end + shift, "");
+                // FIX-24: Diagnostic logging — a cadeia if-let anterior engolia TODOS os erros silenciosamente.
+                // Agora cada falha é logada com contexto para diagnóstico de Scribe failures.
+                match synthesis_client.post(&olla_url).json(&scribe_payload).send().await {
+                    Ok(res) => {
+                        let status = res.status();
+                        match res.json::<serde_json::Value>().await {
+                            Ok(json) => {
+                                if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                                    let raw_len = content.len();
+                                    let mut cleaned = content.trim().to_string();
+                                    // FIX-23: Strip <think>...</think> tags que reasoners podem emitir
+                                    // mesmo com think:false (defense-in-depth).
+                                    let had_think = cleaned.contains("<think>");
+                                    while let Some(start) = cleaned.find("<think>") {
+                                        if let Some(end) = cleaned.find("</think>") {
+                                            let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
+                                            cleaned.replace_range(start..end + shift, "");
+                                        } else {
+                                            // <think> sem fechamento = truncamento. Remove tudo do <think> em diante.
+                                            cleaned = cleaned[..start].to_string();
+                                            break;
+                                        }
+                                    }
+                                    cleaned = cleaned.trim().to_string();
+                                    if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
+                                    else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
+                                    if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
+                                    
+                                    if cleaned.is_empty() {
+                                        let _ = TRAINER_LOGS.send(format!(
+                                            "🔬 [Scribe Diagnostic] Output VAZIO após limpeza. raw_len={}, had_think={}, model={}, preview='{}'",
+                                            raw_len, had_think, scribe_model, content.chars().take(200).collect::<String>()
+                                        ));
+                                        tracing::warn!("[Scribe Diagnostic] Empty after cleaning. raw_len={}, had_think={}, model={}", raw_len, had_think, scribe_model);
+                                    } else {
+                                        let _ = TRAINER_LOGS.send(format!(
+                                            "📝 [Scribe Output] {} chars produzidos pelo '{}' (raw={}, think_stripped={})",
+                                            cleaned.len(), scribe_model, raw_len, had_think
+                                        ));
+                                    }
+                                    current_format = cleaned;
+                                } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                                    let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] Ollama retornou erro: {}", err));
+                                    tracing::error!("[Scribe] Ollama error: {}", err);
                                 } else {
-                                    // <think> sem fechamento = truncamento. Remove tudo do <think> em diante.
-                                    cleaned = cleaned[..start].to_string();
-                                    break;
+                                    let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] JSON sem 'message.content'. Keys: {:?}", json.as_object().map(|o| o.keys().collect::<Vec<_>>())));
+                                    tracing::error!("[Scribe] Missing message.content in response");
                                 }
+                            },
+                            Err(e) => {
+                                let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] Falha ao parsear JSON da resposta (HTTP {}): {}", status, e));
+                                tracing::error!("[Scribe] JSON parse failed (HTTP {}): {}", status, e);
                             }
-                            cleaned = cleaned.trim().to_string();
-                            if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
-                            else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
-                            if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
-                            current_format = cleaned;
                         }
+                    },
+                    Err(e) => {
+                        let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] HTTP request falhou: {}", e));
+                        tracing::error!("[Scribe] HTTP request failed: {}", e);
+                    }
+                }
 
                 // FIX-20+22: Sycophancy Breaker com contexto SIMÉTRICO ao Scribe + auditoria estruturada.
                 // O Auditor agora recebe os MESMOS dados que o Scribe (tabela Pandas quando existe),
