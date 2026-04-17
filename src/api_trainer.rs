@@ -2134,64 +2134,69 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
                 });
                 
                 let mut current_format = String::new();
-                // FIX-24: Diagnostic logging — a cadeia if-let anterior engolia TODOS os erros silenciosamente.
-                // Agora cada falha é logada com contexto para diagnóstico de Scribe failures.
-                match synthesis_client.post(&olla_url).json(&scribe_payload).send().await {
-                    Ok(res) => {
-                        let status = res.status();
-                        match res.json::<serde_json::Value>().await {
-                            Ok(json) => {
-                                if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                                    let raw_len = content.len();
-                                    let mut cleaned = content.trim().to_string();
-                                    // FIX-23: Strip <think>...</think> tags que reasoners podem emitir
-                                    // mesmo com think:false (defense-in-depth).
-                                    let had_think = cleaned.contains("<think>");
-                                    while let Some(start) = cleaned.find("<think>") {
-                                        if let Some(end) = cleaned.find("</think>") {
-                                            let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
-                                            cleaned.replace_range(start..end + shift, "");
-                                        } else {
-                                            // <think> sem fechamento = truncamento. Remove tudo do <think> em diante.
-                                            cleaned = cleaned[..start].to_string();
-                                            break;
+                // FIX-25: Retry loop com backoff — o Ollama pode estar recarregando o modelo
+                // após o agentic loop (keep_alive troca de num_ctx). Sem retry, um único
+                // "error sending request" mata o Scribe silenciosamente.
+                let scribe_max_http_retries = 3u32;
+                for http_attempt in 1..=scribe_max_http_retries {
+                    match synthesis_client.post(&olla_url).json(&scribe_payload).send().await {
+                        Ok(res) => {
+                            let status = res.status();
+                            match res.json::<serde_json::Value>().await {
+                                Ok(json) => {
+                                    if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                                        let raw_len = content.len();
+                                        let mut cleaned = content.trim().to_string();
+                                        // FIX-23: Strip <think>...</think> tags (defense-in-depth).
+                                        let had_think = cleaned.contains("<think>");
+                                        while let Some(start) = cleaned.find("<think>") {
+                                            if let Some(end) = cleaned.find("</think>") {
+                                                let shift = if cleaned[end..].starts_with("</think>\n") { 9 } else { 8 };
+                                                cleaned.replace_range(start..end + shift, "");
+                                            } else {
+                                                cleaned = cleaned[..start].to_string();
+                                                break;
+                                            }
                                         }
-                                    }
-                                    cleaned = cleaned.trim().to_string();
-                                    if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
-                                    else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
-                                    if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
-                                    
-                                    if cleaned.is_empty() {
-                                        let _ = TRAINER_LOGS.send(format!(
-                                            "🔬 [Scribe Diagnostic] Output VAZIO após limpeza. raw_len={}, had_think={}, model={}, preview='{}'",
-                                            raw_len, had_think, scribe_model, content.chars().take(200).collect::<String>()
-                                        ));
-                                        tracing::warn!("[Scribe Diagnostic] Empty after cleaning. raw_len={}, had_think={}, model={}", raw_len, had_think, scribe_model);
+                                        cleaned = cleaned.trim().to_string();
+                                        if cleaned.starts_with("```markdown") { cleaned = cleaned.trim_start_matches("```markdown").trim_start().to_string(); } 
+                                        else if cleaned.starts_with("```") { cleaned = cleaned.trim_start_matches("```").trim_start().to_string(); }
+                                        if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
+                                        
+                                        if cleaned.is_empty() {
+                                            let _ = TRAINER_LOGS.send(format!(
+                                                "🔬 [Scribe Diagnostic] Output VAZIO após limpeza. raw_len={}, had_think={}, model={}, preview='{}'",
+                                                raw_len, had_think, scribe_model, content.chars().take(200).collect::<String>()
+                                            ));
+                                        } else {
+                                            let _ = TRAINER_LOGS.send(format!(
+                                                "📝 [Scribe Output] {} chars produzidos pelo '{}' (raw={}, think_stripped={})",
+                                                cleaned.len(), scribe_model, raw_len, had_think
+                                            ));
+                                        }
+                                        current_format = cleaned;
+                                    } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
+                                        let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] Ollama retornou erro: {}", err));
                                     } else {
-                                        let _ = TRAINER_LOGS.send(format!(
-                                            "📝 [Scribe Output] {} chars produzidos pelo '{}' (raw={}, think_stripped={})",
-                                            cleaned.len(), scribe_model, raw_len, had_think
-                                        ));
+                                        let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] JSON sem 'message.content'. Keys: {:?}", json.as_object().map(|o| o.keys().collect::<Vec<_>>())));
                                     }
-                                    current_format = cleaned;
-                                } else if let Some(err) = json.get("error").and_then(|e| e.as_str()) {
-                                    let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] Ollama retornou erro: {}", err));
-                                    tracing::error!("[Scribe] Ollama error: {}", err);
-                                } else {
-                                    let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] JSON sem 'message.content'. Keys: {:?}", json.as_object().map(|o| o.keys().collect::<Vec<_>>())));
-                                    tracing::error!("[Scribe] Missing message.content in response");
+                                },
+                                Err(e) => {
+                                    let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] JSON parse falhou (HTTP {}): {}", status, e));
                                 }
-                            },
-                            Err(e) => {
-                                let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] Falha ao parsear JSON da resposta (HTTP {}): {}", status, e));
-                                tracing::error!("[Scribe] JSON parse failed (HTTP {}): {}", status, e);
+                            }
+                            break; // HTTP OK — sair do retry loop (mesmo se content estiver vazio)
+                        },
+                        Err(e) => {
+                            let _ = TRAINER_LOGS.send(format!(
+                                "🔄 [Scribe Retry] HTTP falhou (tentativa {}/{}): {}. Aguardando 5s para Ollama estabilizar...",
+                                http_attempt, scribe_max_http_retries, e
+                            ));
+                            tracing::warn!("[Scribe] HTTP attempt {}/{} failed: {}", http_attempt, scribe_max_http_retries, e);
+                            if http_attempt < scribe_max_http_retries {
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                             }
                         }
-                    },
-                    Err(e) => {
-                        let _ = TRAINER_LOGS.send(format!("🚨 [Scribe Error] HTTP request falhou: {}", e));
-                        tracing::error!("[Scribe] HTTP request failed: {}", e);
                     }
                 }
 
