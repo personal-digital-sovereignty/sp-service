@@ -265,6 +265,12 @@ pub async fn import_config_handler(
     State(state): State<Arc<AppState>>,
     body: String
 ) -> impl IntoResponse {
+    // P3-03: Body size guard — max 5 MB para prevenir DoS por payload gigante
+    const MAX_IMPORT_BYTES: usize = 5 * 1024 * 1024;
+    if body.len() > MAX_IMPORT_BYTES {
+        return (axum::http::StatusCode::PAYLOAD_TOO_LARGE, "Arquivo Cíbrido excede o limite de 5 MB").into_response();
+    }
+
     use base64::{Engine as _, engine::general_purpose};
     let decoded = match general_purpose::STANDARD.decode(&body) {
         Ok(b) => b,

@@ -477,6 +477,8 @@ async fn main() {
         .fallback(spa_static_handler)
         .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn(network::lan_auth_guard))
+        // P3-05: Body limit global — previne DoS por upload sem limite (50 MB)
+        .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .with_state(state);
 
     // Parsing CLI arguments to allow dynamic Host binding or Headless Installation

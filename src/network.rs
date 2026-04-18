@@ -104,11 +104,15 @@ pub async fn lan_auth_guard(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "));
         
-    let identity = NETWORK_IDENTITY.get().expect("Sovereign Identity not initialized on boot");
+    let Some(identity) = NETWORK_IDENTITY.get() else {
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    };
     
     if let Some(token) = auth_header {
-        let mut validation = Validation::default();
+        // P3-02: Algoritmo explícito HS256 — previne JWT algorithm confusion attack (none/RS256)
+        let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.validate_exp = true;
+        validation.validate_nbf = false;
         
         if decode::<Claims>(token, &DecodingKey::from_secret(identity.jwt_secret.as_bytes()), &validation).is_ok() {
             return Ok(next.run(req).await);
@@ -119,12 +123,25 @@ pub async fn lan_auth_guard(
     Err(StatusCode::UNAUTHORIZED)
 }
 
-pub async fn get_pairing_info_handler() -> impl axum::response::IntoResponse {
+/// P3-01: Retorna token apenas para loopback (127.0.0.1 / ::1).
+/// Dispositivos na LAN recebem apenas o alias — o pareamento exige acesso físico à máquina.
+pub async fn get_pairing_info_handler(
+    ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+) -> impl axum::response::IntoResponse {
     if let Some(identity) = NETWORK_IDENTITY.get() {
-        axum::Json(serde_json::json!({
-            "alias": format!("{}.local", identity.alias),
-            "token": identity.current_token
-        }))
+        if addr.ip().is_loopback() {
+            // Loopback: retorna token completo para o app local
+            axum::Json(serde_json::json!({
+                "alias": format!("{}.local", identity.alias),
+                "token": identity.current_token
+            }))
+        } else {
+            // LAN: retorna apenas alias — token não exposto
+            axum::Json(serde_json::json!({
+                "alias": format!("{}.local", identity.alias),
+                "info": "Token de pareamento disponível apenas via localhost"
+            }))
+        }
     } else {
         axum::Json(serde_json::json!({
             "error": "Identity not initialized"

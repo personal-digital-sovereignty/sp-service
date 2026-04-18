@@ -9,7 +9,7 @@ build = "build.rs"
 # Web Framework & Async Runtime (O novo FastAPI / Uvicorn)
 axum = { version = "0.7.5", features = ["multipart"] }
 tokio = { version = "1.37.0", features = ["full"] }
-tower-http = { version = "0.6.1", features = ["cors"] }
+tower-http = { version = "0.6.1", features = ["cors", "limit"] }
 
 # Serialization & Deserialization (O novo Pydantic)
 serde = { version = "1.0.198", features = ["derive"] }
