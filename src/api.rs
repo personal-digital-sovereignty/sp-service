@@ -530,7 +530,7 @@ let mut resolved_model = requested_model.clone();
 // If OpenCode (or the IDE) injects commercial models blindly, we forcefully hijack 
 // them down to the Sovereign Private Mesh locally, ensuring NO 404 Ollama Panics on Factory Installs.
 if requested_model.to_lowercase().contains("gpt") || requested_model.to_lowercase().contains("claude") {
-    let hierarchy = vec!["qwen2.5:14b", "gemma2:9b", "gemma2", "llama3.1:8b", "llama3.1", "qwen2.5:7b", "qwen2.5", "llama3.2"];
+    let hierarchy = vec!["qwen3:8b", "gemma4:e4b", "qwen2.5:14b", "phi4:14b", "gemma2:9b", "llama3.1:8b", "qwen2.5:7b", "llama3.2"];
     resolved_model = discover_best_model(hierarchy, "llama3.2:latest").await;
     tracing::info!("🔄 Proxy OpenCode/IDE enviou modelo comercial [{}]. Hijacking dinâmico para Endpoint Soberano: [{}]", requested_model, resolved_model);
 }
@@ -565,6 +565,20 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
             if !model_str.is_empty() { 
                 resolved_model = model_str.to_string(); 
                 tracing::info!("🔄 [Sovereign Router] Usando Motor Estático da Base de Dados: {}", resolved_model);
+            }
+        }
+
+        // FIX-MacOS: Se após todo o roteamento ainda temos um modelo comercial (gpt/claude),
+        // significa que nem doctor_model, nem llm_model existiam no DB. Último recurso:
+        // consultar a Model Capabilities Matrix por qualquer modelo instalado com is_chat=1.
+        if resolved_model.to_lowercase().contains("gpt") || resolved_model.to_lowercase().contains("claude") {
+            if let Ok(Some(row)) = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_chat = 1 AND is_installed = 1 ORDER BY parameter_size DESC LIMIT 1")
+                .fetch_optional(&state.db).await
+            {
+                if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+                    tracing::info!("🧠 [Matrix Fallback] Modelo comercial '{}' não pode ser resolvido via Settings. Usando Matrix (is_chat=1): '{}'", resolved_model, name);
+                    resolved_model = name;
+                }
             }
         }
         

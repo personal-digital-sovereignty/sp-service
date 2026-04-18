@@ -24,6 +24,24 @@ lazy_static! {
     };
 }
 
+/// FIX-MacOS: Resolve o caminho do Python para executar workers.
+/// Tenta o venv do sandbox primeiro; se não existir (ex: MacOS sem setup), faz fallback para python3 do sistema.
+fn resolve_venv_python() -> std::path::PathBuf {
+    let venv_path = dirs::data_local_dir()
+        .unwrap_or_default()
+        .join("sovereign-pair")
+        .join("sandbox")
+        .join("venv")
+        .join("bin")
+        .join("python3");
+    if venv_path.exists() {
+        venv_path
+    } else {
+        tracing::warn!("⚠️ [Sandbox] Venv não encontrado em {:?}. Fallback para python3 do sistema.", venv_path);
+        std::path::PathBuf::from("python3")
+    }
+}
+
 /// Extrai blocos raw de dados temporais de `all_sources`.
 /// O `all_sources` contém strings como:
 ///   `### Sovereign Open-Data Output:\n{"status":"success","data_compressed":"[CONTEXT: ...]\n2020-01 | 63.65"}`
@@ -1102,7 +1120,7 @@ pub async fn run_deep_research_handler(
                                                     let sym_clone = symbol.clone();
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
-                                                        let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                        let venv_python = resolve_venv_python();
                                                         let cur_dir = std::env::current_dir().unwrap_or_default();
                                                         let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
                                                         
@@ -1150,7 +1168,7 @@ pub async fn run_deep_research_handler(
                                                     let sym_clone = commodity.clone();
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
-                                                        let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                        let venv_python = resolve_venv_python();
                                                         let cur_dir = std::env::current_dir().unwrap_or_default();
                                                         let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
                                                         
@@ -1202,7 +1220,7 @@ pub async fn run_deep_research_handler(
                                                     let c_clone = country.clone();
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
-                                                        let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                        let venv_python = resolve_venv_python();
                                                         let cur_dir = std::env::current_dir().unwrap_or_default();
                                                         let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
                                                         
@@ -1257,7 +1275,7 @@ pub async fn run_deep_research_handler(
                                                 let _ = TRAINER_LOGS.send(format!("[Academic Bridge] Consultando artigos para '{}' ({})...", q_clone, disc));
                                                 
                                                 join_handles.push(tokio::spawn(async move {
-                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let venv_python = resolve_venv_python();
                                                     let cur_dir = std::env::current_dir().unwrap_or_default();
                                                     let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("academic_matrix.py") } else { cur_dir.join("core").join("python_workers").join("academic_matrix.py") };
                                                     
@@ -1309,7 +1327,7 @@ pub async fn run_deep_research_handler(
                                                 let _ = TRAINER_LOGS.send(format!("[Engineering Pipeline] Buscando documentação DevOps para '{}' ({})...", t_clone, src));
                                                 
                                                 join_handles.push(tokio::spawn(async move {
-                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let venv_python = resolve_venv_python();
                                                     let cur_dir = std::env::current_dir().unwrap_or_default();
                                                     let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("engineering_matrix.py") } else { cur_dir.join("core").join("python_workers").join("engineering_matrix.py") };
                                                     
@@ -1359,7 +1377,7 @@ pub async fn run_deep_research_handler(
                                                 let _ = TRAINER_LOGS.send(format!("[Encyclopedia Engine] Acessando Wiki sobre '{}' ({})...", q_clone, l_clone));
                                                 
                                                 join_handles.push(tokio::spawn(async move {
-                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let venv_python = resolve_venv_python();
                                                     let cur_dir = std::env::current_dir().unwrap_or_default();
                                                     let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("wiki_matrix.py") } else { cur_dir.join("core").join("python_workers").join("wiki_matrix.py") };
                                                     
@@ -1411,7 +1429,7 @@ pub async fn run_deep_research_handler(
                                                 let _ = TRAINER_LOGS.send(format!("[Cultural Bridge] Recuperando arte '{}' ({})...", q_clone, src));
                                                 
                                                 join_handles.push(tokio::spawn(async move {
-                                                    let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                                    let venv_python = resolve_venv_python();
                                                     let cur_dir = std::env::current_dir().unwrap_or_default();
                                                     let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("culture_matrix.py") } else { cur_dir.join("core").join("python_workers").join("culture_matrix.py") };
                                                     
@@ -1442,7 +1460,7 @@ pub async fn run_deep_research_handler(
                                             }
 
                                             // UNIVERSAL REFLEXIVE DISPATCHER
-                                            let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                            let venv_python = resolve_venv_python();
                                             let cur_dir = std::env::current_dir().unwrap_or_default();
                                             let script_path = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join(format!("{}.py", fname)) } else { cur_dir.join("core").join("python_workers").join(format!("{}.py", fname)) };
 
@@ -1636,7 +1654,7 @@ pub async fn run_deep_research_handler(
                                         
                                         if !symbol.is_empty() {
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON de Finanças ({}) vazado no plain-text...", symbol));
-                                            let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                            let venv_python = resolve_venv_python();
                                             let cur_dir = std::env::current_dir().unwrap_or_default();
                                             let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
                                             if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("finance").arg(&symbol).arg("5y").output().await {
@@ -1653,7 +1671,7 @@ pub async fn run_deep_research_handler(
                                         
                                         if !ind.is_empty() {
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON Macroeconômico ({}) vazado no plain-text...", ind));
-                                            let venv_python = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
+                                            let venv_python = resolve_venv_python();
                                             let cur_dir = std::env::current_dir().unwrap_or_default();
                                             let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
                                             if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("macro").arg(&ind).arg("BR").arg("5").output().await {
