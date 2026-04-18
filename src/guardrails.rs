@@ -125,8 +125,16 @@ pub fn is_safe_url(url_str: &str) -> bool {
         None => return false,
     };
     
-    // Domain blacklists
-    if host == "localhost" || host.ends_with(".localhost") || host == "host.docker.internal" || host == "127.0.0.1" {
+    // Domain blacklists — LIN-09: expandido com 0.0.0.0, IPv6 loopback e cloud metadata
+    if host == "localhost"
+        || host.ends_with(".localhost")
+        || host == "host.docker.internal"
+        || host == "127.0.0.1"
+        || host == "0.0.0.0"          // Linux bind-all — SSRF via http://0.0.0.0:38001
+        || host == "::1"              // IPv6 loopback
+        || host == "[::1]"
+        || host == "metadata.google.internal"  // GCP metadata
+        || host == "metadata.goog" {
         return false;
     }
     

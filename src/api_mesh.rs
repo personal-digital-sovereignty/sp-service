@@ -32,19 +32,30 @@ pub async fn mesh_handshake_handler() -> Json<HardwareProfile> {
     // Permite que o operador humano tranque o nó para evitar lags em processamentos massivos
     let accepts_jobs = std::env::var("SOVEREIGN_REJECT_MESH_ROUTING").unwrap_or_default() != "true";
 
-    // 4. Memory Probe (Linux Native `/proc/meminfo`)
-    let mut ram_mb = 0;
+    // 4. Memory Probe — cross-platform
+    // Linux: lê /proc/meminfo diretamente (mais barato que sysinfo para este caso)
+    // MacOS/Windows: fallback via sysinfo (já instanciado pelo telemetry.rs)
+    let mut ram_mb = 0u64;
+    #[cfg(target_os = "linux")]
     if let Ok(meminfo) = std::fs::read_to_string("/proc/meminfo") {
         for line in meminfo.lines() {
             if line.starts_with("MemTotal:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2
-                    && let Ok(kb) = parts[1].parse::<u64>() {
+                if parts.len() >= 2 {
+                    if let Ok(kb) = parts[1].parse::<u64>() {
                         ram_mb = kb / 1024;
                         break;
                     }
+                }
             }
         }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        use sysinfo::System;
+        let mut sys = System::new();
+        sys.refresh_memory();
+        ram_mb = sys.total_memory() / (1024 * 1024);
     }
 
     Json(HardwareProfile {

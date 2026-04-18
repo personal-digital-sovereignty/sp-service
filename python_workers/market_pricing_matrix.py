@@ -49,14 +49,44 @@ def calculate_average_1k_cost(pricing_data: Dict[str, Any]) -> float:
     cost_per_1k = avg_cost_per_token * 1000.0
     return round(cost_per_1k, 5)
 
-def update_database(cost_per_1k: float):
-    # Locate DB based on standard path resolving for Linux
+def get_sovereign_db_path() -> str:
+    """Resolve o caminho do banco Sovereign de forma cross-platform e XDG-compliant.
+    Ordem de prioridade:
+    1. DATABASE_URL env var (produção / containers)
+    2. XDG_DATA_HOME (Linux custom, ex: NixOS, Arch)
+    3. ~/Library/Application Support (MacOS)
+    4. LOCALAPPDATA (Windows)
+    5. ~/.local/share (Linux padrão)
+    """
+    # 1. Env var explícita (containers, produção)
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url:
+        return db_url.replace("sqlite:", "").split("?")[0]
+
+    # 2. XDG_DATA_HOME (Linux/MacOS custom)
+    xdg_data = os.getenv("XDG_DATA_HOME", "")
+    if xdg_data:
+        return os.path.join(xdg_data, "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 3. MacOS: ~/Library/Application Support
+    if os.sys.platform == "darwin":
+        home = os.path.expanduser("~")
+        return os.path.join(home, "Library", "Application Support", "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 4. Windows: %LOCALAPPDATA%
+    local_app_data = os.getenv("LOCALAPPDATA", "")
+    if local_app_data:
+        return os.path.join(local_app_data, "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 5. Linux padrão: ~/.local/share
     home = os.path.expanduser("~")
-    db_path = os.path.join(home, ".local", "share", "sovereign-pair", "data", "sovereign_memory.db")
-    
-    # Se estivemos sendo executados de dentro do ambiente root e o path alternativo existir
+    return os.path.join(home, ".local", "share", "sovereign-pair", "data", "sovereign_memory.db")
+
+def update_database(cost_per_1k: float):
+    db_path = get_sovereign_db_path()
     if not os.path.exists(db_path):
-        db_path = os.getenv("DATABASE_URL", db_path).replace("sqlite:", "").split("?")[0]
+        logging.warning(f"Sovereign DB não encontrado em: {db_path}. Pulando gravação.")
+        return
         
     try:
         conn = sqlite3.connect(db_path)

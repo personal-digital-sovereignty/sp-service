@@ -37,15 +37,22 @@ impl SyncEngine {
             
             let (watcher_tx, mut watcher_rx) = tokio::sync::mpsc::channel(100);
 
-            // Closure síncrona do Notify
-            let mut watcher: RecommendedWatcher = Watcher::new(
+            // LIN-08: .expect() substituído por match graceful — evita PANIC em NFS/FUSE/containers
+            let watcher_result: Result<RecommendedWatcher, _> = Watcher::new(
                 move |res| {
                     if let Ok(event) = res {
                         let _ = watcher_tx.blocking_send(event);
                     }
                 },
                 Config::default(),
-            ).expect("Sovereign falhou ao criar FSEvent Watcher");
+            );
+            let mut watcher = match watcher_result {
+                Ok(w) => w,
+                Err(e) => {
+                    warn!("⚠️ [Sensus Sync] Não foi possível iniciar o File Watcher (inotify/kqueue insuficiente?): {}. Sync reativo desativado — indexação inicial prosseguirá.", e);
+                    return; // Graceful: o servidor não crasha, apenas sem sync reativo
+                }
+            };
             // 0. Sovereign Garbage Collector (Remove Orphaned Files)
             #[derive(sqlx::FromRow)]
             struct DocRow { id: String, file_path: String }

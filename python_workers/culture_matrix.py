@@ -8,9 +8,33 @@ import urllib.parse
 import urllib.error
 
 def get_db_path():
-    # Caminho do banco na host O.S (Linux/Ubuntu)
+    """Resolve o DB Sovereign de forma cross-platform e XDG-compliant.
+    LIN-02 FIX: Nome do banco corrigido (era SovereignHub_OS_System.db → sovereign_memory.db)
+    """
+    # 1. Env var explícita (containers, produção)
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url:
+        return db_url.replace("sqlite:", "").split("?")[0]
+
+    # 2. XDG_DATA_HOME (NixOS, Arch, Fedora custom)
+    xdg_data = os.getenv("XDG_DATA_HOME", "")
+    if xdg_data:
+        return os.path.join(xdg_data, "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 3. MacOS: ~/Library/Application Support
+    if sys.platform == "darwin":
+        home_dir = os.path.expanduser("~")
+        return os.path.join(home_dir, "Library", "Application Support", "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 4. Windows: %LOCALAPPDATA%
+    local_app_data = os.getenv("LOCALAPPDATA", "")
+    if local_app_data:
+        return os.path.join(local_app_data, "sovereign-pair", "data", "sovereign_memory.db")
+
+    # 5. Linux padrão: ~/.local/share (XDG Base Dir spec)
     home_dir = os.path.expanduser("~")
-    return os.path.join(home_dir, ".local", "share", "sovereign-pair", "SovereignHub_OS_System.db")
+    return os.path.join(home_dir, ".local", "share", "sovereign-pair", "data", "sovereign_memory.db")
+
 
 def check_tenant_key(provider_name):
     # Conectividade direta de leitura com o Sovereign SecOps Vault
