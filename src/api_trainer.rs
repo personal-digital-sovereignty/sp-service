@@ -42,6 +42,41 @@ fn resolve_venv_python() -> std::path::PathBuf {
     }
 }
 
+/// Helper para varrer os diretórios e achar 'python_workers' no MacOS / Linux
+fn resolve_python_workers_dir() -> std::path::PathBuf {
+    let cur_dir = std::env::current_dir().unwrap_or_default();
+    
+    // Tentativa 1: Dev environment (Cargo workspace root)
+    if cur_dir.join("core").join("python_workers").exists() {
+        return cur_dir.join("core").join("python_workers");
+    }
+    // Tentativa 2: Single crate cargo run
+    if cur_dir.join("python_workers").exists() {
+        return cur_dir.join("python_workers");
+    }
+    
+    // Tentativa 3: Ambiente produtivo (App Bundle do MacOS / Release Executable)
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            // Em MacOS App Bundle, Contents/MacOS/exe -> Contents/Resources/python_workers
+            if parent.join("../Resources/python_workers").exists() {
+                return parent.join("../Resources/python_workers").canonicalize()
+                    .unwrap_or_else(|_| parent.join("../Resources/python_workers"));
+            }
+            if parent.join("python_workers").exists() {
+                return parent.join("python_workers");
+            }
+        }
+    }
+    
+    // Tentativa 4: Fallback original que sempre quebrava no Mac
+    if cur_dir.ends_with("core") {
+        cur_dir.join("python_workers")
+    } else {
+        cur_dir.join("core").join("python_workers")
+    }
+}
+
 /// Extrai blocos raw de dados temporais de `all_sources`.
 /// O `all_sources` contém strings como:
 ///   `### Sovereign Open-Data Output:\n{"status":"success","data_compressed":"[CONTEXT: ...]\n2020-01 | 63.65"}`
@@ -1121,8 +1156,7 @@ pub async fn run_deep_research_handler(
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
                                                         let venv_python = resolve_venv_python();
-                                                        let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                        let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                                        let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
                                                         
                                                         let output = tokio::process::Command::new(venv_python)
                                                             .arg(matrix_script.to_string_lossy().as_ref())
@@ -1169,8 +1203,7 @@ pub async fn run_deep_research_handler(
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
                                                         let venv_python = resolve_venv_python();
-                                                        let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                        let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                                        let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
                                                         
                                                         let output = tokio::process::Command::new(venv_python)
                                                             .arg(matrix_script.to_string_lossy().as_ref())
@@ -1221,8 +1254,7 @@ pub async fn run_deep_research_handler(
                                                     let y_clone = years.clone();
                                                     join_handles.push(tokio::spawn(async move {
                                                         let venv_python = resolve_venv_python();
-                                                        let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                        let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                                        let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
                                                         
                                                         let output = tokio::process::Command::new(venv_python)
                                                             .arg(matrix_script.to_string_lossy().as_ref())
@@ -1276,8 +1308,7 @@ pub async fn run_deep_research_handler(
                                                 
                                                 join_handles.push(tokio::spawn(async move {
                                                     let venv_python = resolve_venv_python();
-                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("academic_matrix.py") } else { cur_dir.join("core").join("python_workers").join("academic_matrix.py") };
+                                                    let matrix_script = resolve_python_workers_dir().join("academic_matrix.py");
                                                     
                                                     let output = tokio::process::Command::new(venv_python)
                                                         .arg(matrix_script.to_string_lossy().as_ref())
@@ -1328,8 +1359,7 @@ pub async fn run_deep_research_handler(
                                                 
                                                 join_handles.push(tokio::spawn(async move {
                                                     let venv_python = resolve_venv_python();
-                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("engineering_matrix.py") } else { cur_dir.join("core").join("python_workers").join("engineering_matrix.py") };
+                                                    let matrix_script = resolve_python_workers_dir().join("engineering_matrix.py");
                                                     
                                                     let output = tokio::process::Command::new(venv_python)
                                                         .arg(matrix_script.to_string_lossy().as_ref())
@@ -1378,8 +1408,7 @@ pub async fn run_deep_research_handler(
                                                 
                                                 join_handles.push(tokio::spawn(async move {
                                                     let venv_python = resolve_venv_python();
-                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("wiki_matrix.py") } else { cur_dir.join("core").join("python_workers").join("wiki_matrix.py") };
+                                                    let matrix_script = resolve_python_workers_dir().join("wiki_matrix.py");
                                                     
                                                     let output = tokio::process::Command::new(venv_python)
                                                         .arg(matrix_script.to_string_lossy().as_ref())
@@ -1430,8 +1459,7 @@ pub async fn run_deep_research_handler(
                                                 
                                                 join_handles.push(tokio::spawn(async move {
                                                     let venv_python = resolve_venv_python();
-                                                    let cur_dir = std::env::current_dir().unwrap_or_default();
-                                                    let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("culture_matrix.py") } else { cur_dir.join("core").join("python_workers").join("culture_matrix.py") };
+                                                    let matrix_script = resolve_python_workers_dir().join("culture_matrix.py");
                                                     
                                                     let output = tokio::process::Command::new(venv_python)
                                                         .arg(matrix_script.to_string_lossy().as_ref())
@@ -1461,8 +1489,7 @@ pub async fn run_deep_research_handler(
 
                                             // UNIVERSAL REFLEXIVE DISPATCHER
                                             let venv_python = resolve_venv_python();
-                                            let cur_dir = std::env::current_dir().unwrap_or_default();
-                                            let script_path = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join(format!("{}.py", fname)) } else { cur_dir.join("core").join("python_workers").join(format!("{}.py", fname)) };
+                                            let script_path = resolve_python_workers_dir().join(format!("{}.py", fname));
 
                                             if script_path.exists() {
                                                 let args_str = match func.get("arguments") {
@@ -1655,8 +1682,7 @@ pub async fn run_deep_research_handler(
                                         if !symbol.is_empty() {
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON de Finanças ({}) vazado no plain-text...", symbol));
                                             let venv_python = resolve_venv_python();
-                                            let cur_dir = std::env::current_dir().unwrap_or_default();
-                                            let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                            let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
                                             if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("finance").arg(&symbol).arg("5y").output().await {
                                                 final_result = String::from_utf8_lossy(&out.stdout).to_string();
                                             }
@@ -1672,8 +1698,7 @@ pub async fn run_deep_research_handler(
                                         if !ind.is_empty() {
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON Macroeconômico ({}) vazado no plain-text...", ind));
                                             let venv_python = resolve_venv_python();
-                                            let cur_dir = std::env::current_dir().unwrap_or_default();
-                                            let matrix_script = if cur_dir.ends_with("core") { cur_dir.join("python_workers").join("sovereign_matrix.py") } else { cur_dir.join("core").join("python_workers").join("sovereign_matrix.py") };
+                                            let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
                                             if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("macro").arg(&ind).arg("BR").arg("5").output().await {
                                                 final_result = String::from_utf8_lossy(&out.stdout).to_string();
                                             }
