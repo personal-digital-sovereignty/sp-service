@@ -46,6 +46,9 @@ pub mod memory_manager;
 pub mod garbage_collector; // <-- Adicionado
 pub mod prompt_vault;
 
+#[cfg(test)]
+pub mod tests;
+
 use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
 use reqwest::Client;
 
