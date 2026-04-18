@@ -24,21 +24,27 @@ lazy_static! {
     };
 }
 
-/// FIX-MacOS: Resolve o caminho do Python para executar workers.
-/// Tenta o venv do sandbox primeiro; se não existir (ex: MacOS sem setup), faz fallback para python3 do sistema.
+/// FIX-MacOS/Windows: Resolve o caminho do Python para executar workers.
+/// Windows: venv\Scripts\python.exe  → fallback: python.exe
+/// Unix:    venv/bin/python3          → fallback: python3
 fn resolve_venv_python() -> std::path::PathBuf {
-    let venv_path = dirs::data_local_dir()
-        .unwrap_or_default()
-        .join("sovereign-pair")
-        .join("sandbox")
-        .join("venv")
-        .join("bin")
-        .join("python3");
-    if venv_path.exists() {
-        venv_path
+    let venv_bin = if cfg!(target_os = "windows") {
+        dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("sovereign-pair").join("sandbox").join("venv")
+            .join("Scripts").join("python.exe")
     } else {
-        tracing::warn!("⚠️ [Sandbox] Venv não encontrado em {:?}. Fallback para python3 do sistema.", venv_path);
-        std::path::PathBuf::from("python3")
+        dirs::data_local_dir()
+            .unwrap_or_default()
+            .join("sovereign-pair").join("sandbox").join("venv")
+            .join("bin").join("python3")
+    };
+    if venv_bin.exists() {
+        venv_bin
+    } else {
+        let fallback = if cfg!(target_os = "windows") { "python" } else { "python3" };
+        tracing::warn!("⚠️ [Sandbox] Venv não encontrado em {:?}. Fallback para {} do sistema.", venv_bin, fallback);
+        std::path::PathBuf::from(fallback)
     }
 }
 
@@ -1586,9 +1592,11 @@ pub async fn run_deep_research_handler(
                                         // SOBREVIVÊNCIA DE CONTEXTO OOM & PREVENÇÃO DE LOST IN THE MIDDLE (Blind Orchestration - VRAM to Disk Pipeline)
                                         let safe_sq: String = sq.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').take(50).collect();
                                         let rand_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
-                                        let tmp_file_path = format!("/tmp/sovereign/sovereign_data_{}_{}.json", safe_sq.to_lowercase(), rand_id);
-                                        
-                                        let _ = std::fs::create_dir_all("/tmp/sovereign");
+                                        // WIN-04: Cross-platform temp dir (Windows: %TEMP%\sovereign, Unix: /tmp/sovereign)
+                                        let sovereign_tmp = std::env::temp_dir().join("sovereign");
+                                        let tmp_file_path = sovereign_tmp.join(format!("sovereign_data_{}_{}.json", safe_sq.to_lowercase(), rand_id));
+                                        let tmp_file_path = tmp_file_path.to_string_lossy().to_string();
+                                        let _ = std::fs::create_dir_all(&sovereign_tmp);
 
                                         // FIX-2: Não gravar arquivo nem gerar hash para resultados de scraping vazio.
                                         // Quando o dispatch_sub_researcher falha (WAF block, 0 bytes úteis), ele retorna
@@ -1944,10 +1952,12 @@ pub async fn run_deep_research_handler(
                 let joiner_path = resolve_python_workers_dir().join("analyze_and_join_time_series.py");
                 
                 if joiner_path.exists() {
-                    // GAP-5 FIX: Usar o mesmo venv isolado dos outros workers, não o python3 do sistema.
-                    // Sem isso, pandas/tabulate/scipy podem não estar instalados e a tabela falha silenciosamente.
-                    let venv_py = dirs::data_local_dir().unwrap_or_default().join("sovereign-pair").join("sandbox").join("venv").join("bin").join("python3");
-                    let python_exe = if venv_py.exists() { venv_py.to_string_lossy().to_string() } else { "python3".to_string() };
+                    // GAP-5 FIX / WIN-03: Usar venv isolado com path correto por OS
+                    // Windows: Scripts\python.exe | Unix: bin/python3
+                    let venv_py = crate::sandbox::get_hermetic_python_bin();
+                    let python_exe = if venv_py.exists() { venv_py.to_string_lossy().to_string() } else {
+                        if cfg!(target_os = "windows") { "python".to_string() } else { "python3".to_string() }
+                    };
                     let mut cmd = std::process::Command::new(&python_exe);
                     cmd.arg(&joiner_path);
                     
@@ -1973,8 +1983,11 @@ pub async fn run_deep_research_handler(
 
                                         // Salvar a tabela em disco para proveniência criptográfica
                                         let rand_id: String = uuid::Uuid::new_v4().to_string().chars().take(8).collect();
-                                        let table_file = format!("/tmp/sovereign/sovereign_symbiotic_table_{}.md", rand_id);
-                                        let _ = std::fs::create_dir_all("/tmp/sovereign");
+                                        // WIN-04: Cross-platform temp dir
+                                        let sovereign_tmp = std::env::temp_dir().join("sovereign");
+                                        let table_file = sovereign_tmp.join(format!("sovereign_symbiotic_table_{}.md", rand_id));
+                                        let table_file = table_file.to_string_lossy().to_string();
+                                        let _ = std::fs::create_dir_all(&sovereign_tmp);
                                         let _ = std::fs::write(&table_file, mkd);
                                         {
                                             use sha2::{Sha256 as Sha256Post, Digest as DigestPost};
@@ -2486,7 +2499,9 @@ Evite saudações. Reporte com excelência corporativa C-Level, focado estritame
         let mut total_files_on_disk = 0usize;
         if !all_hashes.is_empty() {
             use sha2::{Sha256, Digest};
-            let sovereign_dir = std::path::Path::new("/tmp/sovereign");
+            // WIN-04: Cross-platform sovereign temp dir
+            let sovereign_dir = std::env::temp_dir().join("sovereign");
+            let sovereign_dir = sovereign_dir.as_path();
             if sovereign_dir.exists() {
                 // Fase 1: Ler todos os arquivos e agrupar por hash
                 let mut hash_to_files: std::collections::HashMap<String, Vec<String>> =

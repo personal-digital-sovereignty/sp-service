@@ -130,11 +130,14 @@ fn spawn_vision_daemon() {
         .unwrap_or_else(|_| dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default());
     let vision_path = std::path::PathBuf::from(&home).join("Sovereign_LLM/Vision");
     
+    // WIN-06: Extensão de binário condicional por OS
+    let bin_ext = if cfg!(target_os = "windows") { ".exe" } else { "" };
+    
     // Determina o caminho exato independente do script de compilação
-    let bin1 = vision_path.join("sd_bin/sd-server");
-    let bin2 = vision_path.join("stable-diffusion.cpp/build/bin/sd-server");
-    let bin3 = vision_path.join("sd_bin/sd"); // Retro-compatibilidade com versões pré-2024
-    let bin4 = vision_path.join("stable-diffusion.cpp/build/bin/sd");
+    let bin1 = vision_path.join(format!("sd_bin/sd-server{}", bin_ext));
+    let bin2 = vision_path.join(format!("stable-diffusion.cpp/build/bin/sd-server{}", bin_ext));
+    let bin3 = vision_path.join(format!("sd_bin/sd{}", bin_ext)); // Retro-compatibilidade com versões pré-2024
+    let bin4 = vision_path.join(format!("stable-diffusion.cpp/build/bin/sd{}", bin_ext));
     
     let target_bin = if bin1.exists() {
         Some(bin1)

@@ -6,14 +6,25 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 /// Retorna o caminho base do ecossistema Sovereign
+/// Windows: %LOCALAPPDATA%\sovereign-pair\sandbox
+/// Linux:   ~/.local/share/sovereign-pair/sandbox
+/// MacOS:   ~/Library/Application Support/sovereign-pair/sandbox
 fn get_base_path() -> PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| {
-        env::var("USERPROFILE").unwrap_or_else(|_| ".".to_string())
-    });
-    PathBuf::from(home).join(".local/share/sovereign-pair/sandbox")
+    dirs::data_local_dir()
+        .unwrap_or_else(|| {
+            // Fallback robusto: tenta HOME/USERPROFILE, depois diretório atual
+            let home = env::var("HOME")
+                .or_else(|_| env::var("USERPROFILE"))
+                .unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home)
+        })
+        .join("sovereign-pair")
+        .join("sandbox")
 }
 
 /// Retorna o caminho do executável Python dentro da bolha (Venv)
+/// Windows: venv\Scripts\python.exe
+/// Unix:    venv/bin/python3
 pub fn get_hermetic_python_bin() -> PathBuf {
     let base = get_base_path().join("venv");
     if cfg!(target_os = "windows") {
