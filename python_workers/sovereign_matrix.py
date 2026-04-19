@@ -56,99 +56,181 @@ def fetch_finance(ticker, years):
         
     period = f"{clean_years}y"
     
-    # === SOVEREIGN TICKER RESOLVER (Fase 1: Mapeamento Semântico Expandido) ===
-    # Cobre os ativos mais comuns do mercado BR + commodities internacionais.
-    # Se o LLM enviar o nome popular (ex: "NUBANK"), resolve para o ticker Yahoo correto.
-    TICKER_MAP = {
-        # Commodities internacionais
-        'BRENT':         ('BZ=F',      'Barril de Petróleo (BRENT Crude)'),
-        'WTI':           ('CL=F',      'Barril de Petróleo (WTI Crude Spot)'),
-        'GOLD':          ('GC=F',      'Ouro (Gold Spot)'),
-        'SILVER':        ('SI=F',      'Prata (Silver Spot)'),
-        # Câmbio
-        'DOLAR':         ('BRL=X',     'Taxa de Câmbio (Dólar / BRL)'),
-        'USD':           ('BRL=X',     'Taxa de Câmbio (Dólar / BRL)'),
-        'EURO':          ('EURBRL=X',  'Taxa de Câmbio (Euro / BRL)'),
-        # Ações BR — Top 20+ por relevância
-        'PETROBRAS':     ('PETR4.SA',  'Ações Petrobras (PETR4)'),
-        'PETR4':         ('PETR4.SA',  'Ações Petrobras (PETR4)'),
-        'PETR3':         ('PETR3.SA',  'Ações Petrobras ON (PETR3)'),
-        'NUBANK':        ('NU',        'Ações NuBank (NU — NYSE)'),
-        'NU':            ('NU',        'Ações NuBank (NU — NYSE)'),
-        'ROXO34':        ('ROXO34.SA', 'BDR NuBank (ROXO34)'),
-        'VALE':          ('VALE3.SA',  'Ações Vale (VALE3)'),
-        'VALE3':         ('VALE3.SA',  'Ações Vale (VALE3)'),
-        'ITAU':          ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'ITAÚ':          ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'ITUB4':         ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'BRADESCO':      ('BBDC4.SA',  'Ações Bradesco PN (BBDC4)'),
-        'BBDC4':         ('BBDC4.SA',  'Ações Bradesco PN (BBDC4)'),
-        'BBDC3':         ('BBDC3.SA',  'Ações Bradesco ON (BBDC3)'),
-        'BRADESCO_SEGUROS': ('BBSE3.SA', 'Ações BB Seguridade / Bradesco Seguros (BBSE3)'),
-        'BBSE3':         ('BBSE3.SA',  'Ações BB Seguridade (BBSE3)'),
-        'BANCO_DO_BRASIL': ('BBAS3.SA', 'Ações Banco do Brasil (BBAS3)'),
-        'BB':            ('BBAS3.SA',  'Ações Banco do Brasil (BBAS3)'),
-        'BBAS3':         ('BBAS3.SA',  'Ações Banco do Brasil (BBAS3)'),
-        'AMBEV':         ('ABEV3.SA',  'Ações Ambev (ABEV3)'),
-        'ABEV3':         ('ABEV3.SA',  'Ações Ambev (ABEV3)'),
-        'MAGAZINE':      ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'MAGALU':        ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'MGLU3':         ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'WEG':           ('WEGE3.SA',  'Ações WEG (WEGE3)'),
-        'WEGE3':         ('WEGE3.SA',  'Ações WEG (WEGE3)'),
-        'SUZANO':        ('SUZB3.SA',  'Ações Suzano (SUZB3)'),
-        'SUZB3':         ('SUZB3.SA',  'Ações Suzano (SUZB3)'),
-        'JBS':           ('JBSS3.SA',  'Ações JBS (JBSS3)'),
-        'JBSS3':         ('JBSS3.SA',  'Ações JBS (JBSS3)'),
-        'ELETROBRAS':    ('ELET3.SA',  'Ações Eletrobras (ELET3)'),
-        'ELET3':         ('ELET3.SA',  'Ações Eletrobras (ELET3)'),
-        'RENT3':         ('RENT3.SA',  'Ações Localiza (RENT3)'),
-        'LOCALIZA':      ('RENT3.SA',  'Ações Localiza (RENT3)'),
-        'B3':            ('B3SA3.SA',  'Ações B3 (B3SA3)'),
-        'B3SA3':         ('B3SA3.SA',  'Ações B3 (B3SA3)'),
-        'HAPVIDA':       ('HAPV3.SA',  'Ações Hapvida (HAPV3)'),
-        'HAPV3':         ('HAPV3.SA',  'Ações Hapvida (HAPV3)'),
-        'SANTANDER':     ('SANB11.SA', 'Ações Santander Brasil (SANB11)'),
-        'SANB11':        ('SANB11.SA', 'Ações Santander Brasil (SANB11)'),
-        # Futuros
-        'BRENT_FUTURE':  ('BZ=F',     'Contrato Futuro Brent (Especulativo)'),
-        'WTI_FUTURE':    ('CL=F',     'Contrato Futuro WTI (Especulativo)'),
-        'GOLD_FUTURE':   ('GC=F',     'Contrato Futuro Ouro (Especulativo)'),
-        'DI_FUTURE':     ('DI1F27.SA','Contrato DI Futuro (Especulativo)'),
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SOVEREIGN TICKER RESOLVER — 4-Pass SQLite + Auto-Learning
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Fluxo de resolução (sem hardcode):
+    #   [1] Exact match  : WHERE search_key = normalizado          → O(log n)
+    #   [2] Prefix match : WHERE search_key LIKE 'MAGAZINE%'       → O(log n)
+    #   [3] Fuzzy match  : WHERE search_key LIKE '%LUIZA%'          → O(n)
+    #   [4] yfinance live: testa ".SA" e ticker puro              → rede
+    #       → HIT: INSERT INTO ticker_registry (auto-aprendizado)
+    #       → MISS: erro descritivo ao LLM
+    #
+    # TICKER_MAP_FALLBACK abaixo é usado APENAS quando o banco não é encontrado
+    # (ex: primeiro boot antes da migration). Mantido como emergência offline.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    import sqlite3 as _sqlite3
+    import unicodedata as _uni
+
+    def _normalize_key(name: str) -> str:
+        nfkd = _uni.normalize("NFKD", name)
+        ascii_ = "".join(c for c in nfkd if not _uni.combining(c))
+        return ascii_.upper().replace(" ", "_").replace("-", "_").replace(".", "_")
+
+    def _find_db() -> str | None:
+        """Localiza sovereign_sensus.db subindo a árvore de diretórios."""
+        import os as _os
+        cur = _os.path.dirname(_os.path.abspath(__file__))
+        for _ in range(6):
+            candidate = _os.path.join(cur, "sovereign_sensus.db")
+            if _os.path.exists(candidate):
+                return candidate
+            parent = _os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        return None
+
+    def _resolve_from_db(db_path: str, norm_key: str, raw_ticker: str):
+        """Retorna (yf_symbol, full_name) ou None."""
+        try:
+            conn = _sqlite3.connect(db_path, timeout=3)
+            conn.row_factory = _sqlite3.Row
+            c = conn.cursor()
+            # Passe 1 — Exact match
+            c.execute(
+                "SELECT yf_symbol, full_name FROM ticker_registry "
+                "WHERE search_key = ? AND is_active = 1 LIMIT 1",
+                (norm_key,),
+            )
+            row = c.fetchone()
+            if row:
+                conn.close()
+                return row["yf_symbol"], row["full_name"]
+            # Passe 2 — Prefix match
+            c.execute(
+                "SELECT yf_symbol, full_name FROM ticker_registry "
+                "WHERE search_key LIKE ? AND is_active = 1 ORDER BY length(search_key) LIMIT 1",
+                (f"{norm_key}%",),
+            )
+            row = c.fetchone()
+            if row:
+                conn.close()
+                return row["yf_symbol"], row["full_name"]
+            # Passe 3 — Fuzzy match (parte do nome)
+            parts = norm_key.split("_")
+            for part in parts:
+                if len(part) < 3:
+                    continue
+                c.execute(
+                    "SELECT yf_symbol, full_name FROM ticker_registry "
+                    "WHERE search_key LIKE ? AND is_active = 1 "
+                    "ORDER BY length(search_key) LIMIT 1",
+                    (f"%{part}%",),
+                )
+                row = c.fetchone()
+                if row:
+                    conn.close()
+                    return row["yf_symbol"], row["full_name"]
+            conn.close()
+            return None
+        except Exception:
+            return None
+
+    def _auto_learn(db_path: str, norm_key: str, yf_sym: str, full_name: str) -> None:
+        """Persiste ticker descoberto dinamicamente (auto-aprendizado)."""
+        try:
+            conn = _sqlite3.connect(db_path, timeout=3)
+            conn.execute(
+                """INSERT OR IGNORE INTO ticker_registry
+                   (search_key, yf_symbol, full_name, market, query_type_hint, is_active, source)
+                   VALUES (?, ?, ?, 'OTHER', 'price', 1, 'yfinance_dynamic')""",
+                (norm_key, yf_sym, full_name),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+    # ── TICKER_MAP_FALLBACK (emergência offline — banco não encontrado) ───────
+    TICKER_MAP_FALLBACK = {
+        'BRENT': ('BZ=F', 'Petróleo Brent'), 'WTI': ('CL=F', 'Petróleo WTI'),
+        'GOLD': ('GC=F', 'Ouro'), 'SILVER': ('SI=F', 'Prata'),
+        'DOLAR': ('BRL=X', 'Dólar/BRL'), 'USD': ('BRL=X', 'Dólar/BRL'),
+        'EURO': ('EURBRL=X', 'Euro/BRL'),
+        'PETROBRAS': ('PETR4.SA', 'Petrobras'), 'PETR4': ('PETR4.SA', 'Petrobras'),
+        'NUBANK': ('NU', 'NuBank'), 'NU': ('NU', 'NuBank'),
+        'VALE': ('VALE3.SA', 'Vale'), 'VALE3': ('VALE3.SA', 'Vale'),
+        'ITAU': ('ITUB4.SA', 'Itaú'), 'BRADESCO': ('BBDC4.SA', 'Bradesco'),
+        'BANCO_DO_BRASIL': ('BBAS3.SA', 'Banco do Brasil'), 'BB': ('BBAS3.SA', 'BB'),
+        'AMBEV': ('ABEV3.SA', 'Ambev'),
+        'MAGAZINE': ('MGLU3.SA', 'Magazine Luiza'), 'MAGALU': ('MGLU3.SA', 'Magazine Luiza'),
+        'MGLU3': ('MGLU3.SA', 'Magazine Luiza'), 'MGLU': ('MGLU3.SA', 'Magazine Luiza'),
+        'MAGAZINE_LUIZA': ('MGLU3.SA', 'Magazine Luiza'),
+        'WEG': ('WEGE3.SA', 'WEG'), 'SUZANO': ('SUZB3.SA', 'Suzano'),
+        'JBS': ('JBSS3.SA', 'JBS'), 'ELETROBRAS': ('ELET3.SA', 'Eletrobras'),
+        'LOCALIZA': ('RENT3.SA', 'Localiza'), 'HAPVIDA': ('HAPV3.SA', 'Hapvida'),
+        'SANTANDER': ('SANB11.SA', 'Santander BR'),
+        'NVIDIA': ('NVDA', 'NVIDIA'), 'NVDA': ('NVDA', 'NVIDIA'),
+        'APPLE': ('AAPL', 'Apple'), 'MICROSOFT': ('MSFT', 'Microsoft'),
+        'TESLA': ('TSLA', 'Tesla'), 'NIKE': ('NKE', 'Nike'),
+        'NOVO_NORDISK': ('NVO', 'Novo Nordisk'), 'OZEMPIC': ('NVO', 'Ozempic→NVO'),
+        'ELI_LILLY': ('LLY', 'Eli Lilly'), 'MOUNJARO': ('LLY', 'Mounjaro→LLY'),
     }
-    
+
+    # ── Resolução principal ──────────────────────────────────────────────────
     semantic_name = ticker
-    upper_ticker = ticker.upper().replace(' ', '_')
-    
-    if upper_ticker in TICKER_MAP:
-        ticker, semantic_name = TICKER_MAP[upper_ticker]
-    else:
-        # === Fase 2: Fallback Dinâmico (tenta .SA para B3, depois ticker puro para NYSE/NASDAQ) ===
-        # Se o LLM enviar um ticker que não está no mapa, testa se funciona diretamente no yfinance.
+    norm_key = _normalize_key(ticker)
+    resolved = False
+
+    db_path = _find_db()
+    if db_path:
+        result = _resolve_from_db(db_path, norm_key, ticker)
+        if result:
+            ticker, semantic_name = result
+            resolved = True
+
+    if not resolved and norm_key in TICKER_MAP_FALLBACK:
+        ticker, semantic_name = TICKER_MAP_FALLBACK[norm_key]
+        resolved = True
+
+    # Passe 4: yfinance live + auto-aprendizado
+    if not resolved:
         import sys as _sys
         _candidates = []
         if not ticker.endswith('.SA'):
-            _candidates.append(f"{ticker.upper()}.SA")  # Tenta B3 primeiro para ativos BR
-        _candidates.append(ticker.upper())               # Tenta ticker puro (NYSE/NASDAQ)
-        
-        _resolved = False
+            _candidates.append(f"{ticker.upper()}.SA")
+        _candidates.append(ticker.upper())
+
         for _cand in _candidates:
             try:
                 _t = yf.Ticker(_cand)
                 _test = _t.history(period="5d")
                 if not _test.empty:
-                    semantic_name = f"Ativo Financeiro ({_cand})"
+                    info = _t.info or {}
+                    _full = info.get("longName") or info.get("shortName") or f"Ativo ({_cand})"
+                    semantic_name = _full
                     ticker = _cand
-                    _resolved = True
+                    resolved = True
+                    if db_path:
+                        _auto_learn(db_path, norm_key, _cand, _full)
                     break
             except Exception:
                 continue
-        
-        if not _resolved:
-            print(json.dumps({"error": f"Ticker '{ticker}' não reconhecido pelo Sovereign Matrix e não resolvido via yfinance. Tickers testados: {_candidates}. Verifique o símbolo exato do ativo (ex: PETR4, NU, VALE3, BRENT, ITUB4)."}))
-            _sys.exit(1)
-        
 
+        if not resolved:
+            print(json.dumps({
+                "error": (
+                    f"Ticker '{ticker}' não reconhecido pelo Sovereign Ticker Registry "
+                    f"(4 passes: exact/prefix/fuzzy/yfinance). "
+                    f"Tickers testados: {_candidates}. "
+                    f"Verifique o símbolo exato (ex: PETR4, NU, VALE3, MGLU3, BRENT, ITUB4) "
+                    f"ou use o nome da empresa — o resolvedor encontrará automaticamente."
+                )
+            }))
+            _sys.exit(1)
 
     start_date = (datetime.datetime.now() - datetime.timedelta(days=int(clean_years)*365)).strftime('%Y-%m-%d')
     end_date = datetime.datetime.now().strftime('%Y-%m-%d')
