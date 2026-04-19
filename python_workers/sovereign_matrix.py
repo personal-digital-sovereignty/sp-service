@@ -398,47 +398,55 @@ def fetch_macro(indicator, country, years):
     end_str = end_date.strftime('%d/%m/%Y')
     
     last_error = None
+    import time
     for ind_code, label in chain:
         url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{ind_code}/dados?formato=json&dataInicial={start_str}&dataFinal={end_str}"
         
-        try:
-            req = urllib.request.Request(url, headers={'User-Agent': 'Sovereign-Pair/1.2'})
-            with urllib.request.urlopen(req, timeout=30) as response:  # nosemgrep
-                resp_data = json.loads(response.read().decode())
-                
-                # Verificar se é erro estruturado do BCB
-                if isinstance(resp_data, dict) and "erro" in resp_data:
-                    last_error = f"SGS {ind_code} ({label}): {resp_data['erro'].get('detail', 'Unknown')}"
-                    continue  # Tentar próximo fallback
-                
-                data_lines = []
-                for item in resp_data:
-                    date_str = normalize_date(item.get('data', ''))
-                    data_lines.append(f"{date_str} | {item.get('valor', '')}")
-                
-                ctx_header = f"[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO INDICADOR {indicator.upper()}]\n"
-                data_compressed = ctx_header + "\n".join(data_lines)
-                
-                source_label = f"Banco Central do Brasil (SGS {ind_code} — {label})"
-                if len(chain) > 1 and ind_code != chain[0][0]:
-                    source_label += " [FALLBACK — série primária indisponível]"
-                
-                print(json.dumps({
-                    "status": "success",
-                    "source": source_label,
-                    "indicator": indicator, 
-                    "country": country, 
-                    "period": f"{years}y",
-                    "data_compressed": data_compressed
-                }))
-                sys.exit(0)
-                
-        except urllib.error.HTTPError as e:
-            last_error = f"SGS {ind_code} ({label}): HTTP {e.code} — {e.reason}"
-            continue  # Tentar próximo fallback
-        except Exception as e:
-            last_error = f"SGS {ind_code} ({label}): {str(e)}"
-            continue  # Tentar próximo fallback
+        max_retries = 3
+        base_delay = 2
+        for attempt in range(max_retries):
+            try:
+                req = urllib.request.Request(url, headers={'User-Agent': 'Sovereign-Pair/1.3'})
+                with urllib.request.urlopen(req, timeout=30) as response:  # nosemgrep
+                    resp_data = json.loads(response.read().decode())
+                    
+                    # Verificar se é erro estruturado do BCB
+                    if isinstance(resp_data, dict) and "erro" in resp_data:
+                        last_error = f"SGS {ind_code} ({label}): {resp_data['erro'].get('detail', 'Unknown')}"
+                        break  # Tentar próximo fallback se BCB enviar erro válido
+                    
+                    data_lines = []
+                    for item in resp_data:
+                        date_str = normalize_date(item.get('data', ''))
+                        data_lines.append(f"{date_str} | {item.get('valor', '')}")
+                    
+                    ctx_header = f"[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO INDICADOR {indicator.upper()}]\n"
+                    data_compressed = ctx_header + "\n".join(data_lines)
+                    
+                    source_label = f"Banco Central do Brasil (SGS {ind_code} — {label})"
+                    if len(chain) > 1 and ind_code != chain[0][0]:
+                        source_label += " [FALLBACK — série primária indisponível]"
+                    
+                    print(json.dumps({
+                        "status": "success",
+                        "source": source_label,
+                        "indicator": indicator, 
+                        "country": country, 
+                        "period": f"{years}y",
+                        "data_compressed": data_compressed
+                    }))
+                    sys.exit(0)
+                    
+            except urllib.error.HTTPError as e:
+                last_error = f"SGS {ind_code} ({label}): HTTP {e.code} — {e.reason}"
+                if attempt < max_retries - 1:
+                    time.sleep(base_delay)
+                    base_delay *= 2
+            except Exception as e:
+                last_error = f"SGS {ind_code} ({label}): {str(e)}"
+                if attempt < max_retries - 1:
+                    time.sleep(base_delay)
+                    base_delay *= 2
     
     # Todos os fallbacks falharam
     print(json.dumps({"error": f"Macro API Error: All {len(chain)} fallback(s) failed for '{indicator}'. Last: {last_error}"}))
