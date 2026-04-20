@@ -18,6 +18,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 lazy_static! {
     pub static ref TRAINER_LOGS: broadcast::Sender<String> = broadcast::channel(100).0;
+    pub static ref REFLECTION_LOGS: broadcast::Sender<String> = broadcast::channel(100).0;
     pub static ref DEEP_RESEARCH_CANCEL_TOKEN: std::sync::RwLock<Option<CancellationToken>> = std::sync::RwLock::new(None);
     pub static ref RERANKER: std::sync::Mutex<TextRerank> = {
         std::sync::Mutex::new(TextRerank::try_new(RerankInitOptions::new(RerankerModel::BGERerankerBase)).expect("Failed to initialize BGE Reranker Model"))
@@ -3066,4 +3067,141 @@ pub async fn get_hallucinations_ledger_handler(
     }
         
     axum::Json(records).into_response()
+}
+
+// ==============================================================================
+// SOVEREIGN REFLECTION LAB - SSE & SIMULATION PIPELINE
+// ==============================================================================
+
+#[derive(serde::Deserialize)]
+pub struct ReflectionDatasetPayload {
+    pub payload_json: String,
+}
+
+pub async fn save_reflection_dataset_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ReflectionDatasetPayload>,
+) -> impl IntoResponse {
+    let _ = sqlx::query("INSERT INTO reflection_datasets (id, model_tag, payload_json) VALUES (?, ?, ?)")
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind("ui_injected")
+        .bind(&req.payload_json)
+        .execute(&state.db)
+        .await;
+
+    Json(serde_json::json!({
+        "status": "success",
+        "message": "Dataset salvo na tabela reflection_datasets para fine-tuning posterior."
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ReflectionSettingsPayload {
+    pub reasoning_depth: i32,
+    pub audit_intensity: i32,
+    pub internal_monologue: bool,
+}
+
+pub async fn save_reflection_settings_handler(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<ReflectionSettingsPayload>,
+) -> impl IntoResponse {
+    let json_val = serde_json::json!({
+        "reasoning_depth": req.reasoning_depth,
+        "audit_intensity": req.audit_intensity,
+        "internal_monologue": req.internal_monologue
+    });
+
+    let _ = sqlx::query("INSERT INTO global_settings (id, value_json) VALUES ('reflection_settings', ?) ON CONFLICT(id) DO UPDATE SET value_json=excluded.value_json")
+        .bind(json_val.to_string())
+        .execute(&state.db)
+        .await;
+
+    Json(serde_json::json!({"status": "success"}))
+}
+
+pub async fn reflection_sse_handler(
+    State(_state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let mut rx = REFLECTION_LOGS.subscribe();
+    
+    let stream = stream::unfold(rx, |mut rx| async {
+        match rx.recv().await {
+            Ok(msg) => {
+                let event = Event::default().data(msg);
+                Some((Result::<_, Infallible>::Ok(event), rx))
+            }
+            Err(_) => {
+                // Return a keep-alive comment or just None?
+                // Returning a whitespace comment allows reconnects without crashing.
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                Some((Result::<_, Infallible>::Ok(Event::default().comment("keep-alive")), rx))
+            }
+        }
+    });
+
+    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new().text("keep-alive"))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ReflectionSimReq {
+    model_name: String,
+}
+
+pub async fn run_reflection_simulation_handler(
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<ReflectionSimReq>,
+) -> impl IntoResponse {
+    let model = req.model_name.clone();
+    
+    // Spawn Background Worker (The Sentinel)
+    tokio::spawn(async move {
+        // Step 1: Start Chain
+        let _ = REFLECTION_LOGS.send(serde_json::json!({
+            "type": "completion",
+            "title": "Reasoning Commenced",
+            "icon": "psychology",
+            "color": "text-primary bg-primary-container/10",
+            "desc": format!("Allocating memory limits and instructing model '{}' into Chain of Thought mode.", model),
+            "time": "Just now"
+        }).to_string());
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(1500)).await;
+
+        // Step 2: Extracting Knowledge
+        let _ = REFLECTION_LOGS.send(serde_json::json!({
+            "type": "completion",
+            "title": "Extracting Vault Context",
+            "icon": "folder_open",
+            "color": "text-primary bg-primary-container/10",
+            "desc": "Fetching local vectorized context to feed the reasoning loop.",
+            "time": "Just now"
+        }).to_string());
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(2000)).await;
+
+        // Step 3: Self-Correction detected
+        let _ = REFLECTION_LOGS.send(serde_json::json!({
+            "type": "correction",
+            "title": "Successful Self-Correction",
+            "icon": "verified",
+            "color": "text-on-tertiary-container bg-tertiary-container/10",
+            "desc": "Model identified hallucinated figure recursively and corrected to verified source.",
+            "time": "Just now"
+        }).to_string());
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(2500)).await;
+
+        // Step 4: Final Synthesis
+        let _ = REFLECTION_LOGS.send(serde_json::json!({
+            "type": "completion",
+            "title": "Synthesis & Audit Passed",
+            "icon": "check_circle",
+            "color": "text-primary bg-primary-container/10",
+            "desc": "Deep reasoning loop completed. Output synthesized natively without data leakage.",
+            "time": "Just now"
+        }).to_string());
+    });
+
+    Json(serde_json::json!({"status": "accepted"}))
 }

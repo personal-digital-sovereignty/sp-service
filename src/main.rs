@@ -456,6 +456,11 @@ async fn main() {
         .route("/v1/research/staging", axum::routing::get(api_trainer::get_staged_research_handler))
         .route("/v1/research/staging/:id", axum::routing::delete(api_trainer::discard_staged_research_handler))
         .route("/v1/research/staging/:id/commit", axum::routing::post(api_trainer::commit_staged_research_handler))
+        // ------------------ Reflection Lab ----------------------
+        .route("/v1/engineer/reflection/apply", axum::routing::post(api_trainer::save_reflection_dataset_handler))
+        .route("/v1/engineer/reflection/settings", axum::routing::post(api_trainer::save_reflection_settings_handler))
+        .route("/v1/engineer/reflection/stream", axum::routing::get(api_trainer::reflection_sse_handler))
+        .route("/v1/engineer/reflection/simulate", axum::routing::post(api_trainer::run_reflection_simulation_handler))
         // ------------------ Multimodal Endpoints ------------------
         .route("/v1/images/generations", post(api_multimodal::generate_image_handler))
         // ------------------ Chat Endpoints ------------------

@@ -162,6 +162,13 @@ CREATE TABLE IF NOT EXISTS model_metrics (
     last_used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS reflection_datasets (
+    id TEXT PRIMARY KEY,
+    model_tag TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ---------------------------------------------------------
 -- 6. SEGURANÇA E AUTO-BLINDAGEM
 -- ---------------------------------------------------------
