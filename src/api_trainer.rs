@@ -1240,13 +1240,13 @@ pub async fn run_deep_research_handler(
                                                 if let Some(arr) = args.get("symbols").and_then(|s| s.as_array()) {
                                                     for item in arr { if let Some(s) = item.as_str() { symbols.push(s.to_string()); } }
                                                 } else if let Some(s) = args.get("symbol").and_then(|x| x.as_str()) { symbols.push(s.to_string()); } // Backwards compatibility
-                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                if let Some(y) = args.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX: string OR integer
                                             } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(arr) = parsed.get("symbols").and_then(|s| s.as_array()) {
                                                         for item in arr { if let Some(s) = item.as_str() { symbols.push(s.to_string()); } }
                                                     } else if let Some(s) = parsed.get("symbol").and_then(|x| x.as_str()) { symbols.push(s.to_string()); } // Backwards compatibility
-                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                    if let Some(y) = parsed.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX: string OR integer
                                                 }
                                             }
 
@@ -1287,13 +1287,13 @@ pub async fn run_deep_research_handler(
                                                 if let Some(arr) = args.get("commodities").and_then(|s| s.as_array()) {
                                                     for item in arr { if let Some(s) = item.as_str() { commodities.push(s.to_string()); } }
                                                 } else if let Some(s) = args.get("commodity").and_then(|x| x.as_str()) { commodities.push(s.to_string()); }
-                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                if let Some(y) = args.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX
                                             } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(arr) = parsed.get("commodities").and_then(|s| s.as_array()) {
                                                         for item in arr { if let Some(s) = item.as_str() { commodities.push(s.to_string()); } }
                                                     } else if let Some(s) = parsed.get("commodity").and_then(|x| x.as_str()) { commodities.push(s.to_string()); }
-                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                    if let Some(y) = parsed.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX
                                                 }
                                             }
 
@@ -1336,14 +1336,14 @@ pub async fn run_deep_research_handler(
                                                     for item in arr { if let Some(i) = item.as_str() { indicators.push(i.to_string()); } }
                                                 } else if let Some(i) = args.get("indicator").and_then(|x| x.as_str()) { indicators.push(i.to_string()); } // Backwards comp
                                                 if let Some(c) = args.get("country").and_then(|x| x.as_str()) { country = c.to_string(); }
-                                                if let Some(y) = args.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                if let Some(y) = args.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX
                                             } else if let Some(args_str) = func.get("arguments").and_then(|a| a.as_str()) {
                                                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(args_str) {
                                                     if let Some(arr) = parsed.get("indicators").and_then(|s| s.as_array()) {
                                                         for item in arr { if let Some(i) = item.as_str() { indicators.push(i.to_string()); } }
                                                     } else if let Some(i) = parsed.get("indicator").and_then(|x| x.as_str()) { indicators.push(i.to_string()); } // Backwards comp
                                                     if let Some(c) = parsed.get("country").and_then(|x| x.as_str()) { country = c.to_string(); }
-                                                    if let Some(y) = parsed.get("years").and_then(|x| x.as_str()) { years = y.to_string(); }
+                                                    if let Some(y) = parsed.get("years") { years = y.as_str().map(|s| s.to_string()).or_else(|| y.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()); } // DC2 FIX
                                                 }
                                             }
                                             
@@ -1698,27 +1698,39 @@ pub async fn run_deep_research_handler(
                                             hasher.update(final_result.as_bytes());
                                             let hash_result = format!("{:x}", hasher.finalize());
                                             all_hashes.push(hash_result.clone());
+
+                                            // Nós guardamos o 'final_result' completo no 'all_sources' para The Scribe. Mas escondemos do Mestre guiando-o via disco.
+                                            let limited_result = format!(
+                                                "[SUCCESS DE EXTRAÇÃO] Dados massivos obtidos para '{}' e gravados com integridade verificada pelo Motor Rust.\n\
+                                                 O conteúdo foi transferido fisicamente para o arquivo de disco local: '{}'.\n\
+                                                 AVISO CRÍTICO: NÃO ADIVINHE OS DADOS NEM CRIE ARRAYS FALSOS (PLACEHOLDERS). \
+                                                 Você deve agora acionar a ferramenta de Python Sandbox desenvolvendo as linhas de código \
+                                                 (ex: `pd.read_json('{}')` ou `open('{}').read()`) para processar diretamente o arquivo de disco.",
+                                                sq, tmp_file_path, tmp_file_path, tmp_file_path
+                                            );
+
+                                            // Devolve a resposta do Tool Oculta para a memória do Mestre
+                                            messages.push(serde_json::json!({
+                                                "role": "tool",
+                                                "content": limited_result
+                                            }));
                                         } else {
                                             let _ = TRAINER_LOGS.send(format!(
                                                 "⚠️ [Proveniência] Extração vazia para '{}'. Arquivo/hash NÃO gravado (placeholder descartado).", sq
                                             ));
+
+                                            // FIX: Impedir Cognitive Gaslighting. Avisa explicitamente o LLM que a extração falhou.
+                                            let failure_msg = format!(
+                                                "[FALHA DE EXTRAÇÃO] O Crawler não encontrou dados estruturados para '{}' (possível bloqueio anti-bot ou indisponibilidade).\n\
+                                                 O QUE FAZER AGORA: NÃO tente extração orgânica novamente para este termo. Se era um ticker financeiro, use 'fetch_financial_ticker'. Caso contrário, mude de estratégia ou encerre a busca declarando que este dado está inacessível.",
+                                                sq
+                                            );
+
+                                            messages.push(serde_json::json!({
+                                                "role": "tool",
+                                                "content": failure_msg
+                                            }));
                                         }
-
-                                        // Nós guardamos o 'final_result' completo no 'all_sources' para The Scribe. Mas escondemos do Mestre guiando-o via disco.
-                                        let limited_result = format!(
-                                            "[SUCCESS DE EXTRAÇÃO] Dados massivos obtidos para '{}' e gravados com integridade verificada pelo Motor Rust.\n\
-                                             O conteúdo foi transferido fisicamente para o arquivo de disco local: '{}'.\n\
-                                             AVISO CRÍTICO: NÃO ADIVINHE OS DADOS NEM CRIE ARRAYS FALSOS (PLACEHOLDERS). \
-                                             Você deve agora acionar a ferramenta de Python Sandbox desenvolvendo as linhas de código \
-                                             (ex: `pd.read_json('{}')` ou `open('{}').read()`) para processar diretamente o arquivo de disco.",
-                                            sq, tmp_file_path, tmp_file_path, tmp_file_path
-                                        );
-
-                                        // Devolve a resposta do Tool Oculta para a memória do Mestre
-                                        messages.push(serde_json::json!({
-                                            "role": "tool",
-                                            "content": limited_result
-                                        }));
                                     }
                                 }
                             }
@@ -1786,7 +1798,13 @@ pub async fn run_deep_research_handler(
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON de Finanças ({}) vazado no plain-text...", symbol));
                                             let venv_python = resolve_venv_python();
                                             let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
-                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("finance").arg(&symbol).arg("5y").output().await {
+                                            // C3 FIX: respeitar years do pseudo_json (default 1 ano, não 5)
+                                            // DC2 FIX: aceitar years como string ("5") ou integer (5)
+                                            let years_nanny = pseudo_json.get("years")
+                                                .or_else(|| pseudo_json.get("arguments").and_then(|a| a.get("years")))
+                                                .map(|v| v.as_str().map(|s| s.to_string()).or_else(|| v.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "1".to_string()))
+                                                .unwrap_or_else(|| "1".to_string());
+                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("finance").arg(&symbol).arg(&years_nanny).output().await {
                                                 final_result = String::from_utf8_lossy(&out.stdout).to_string();
                                             }
                                         }
@@ -1802,7 +1820,13 @@ pub async fn run_deep_research_handler(
                                             let _ = TRAINER_LOGS.send(format!("⚠️ [Thought Nanny] Resgatando JSON Macroeconômico ({}) vazado no plain-text...", ind));
                                             let venv_python = resolve_venv_python();
                                             let matrix_script = resolve_python_workers_dir().join("sovereign_matrix.py");
-                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("macro").arg(&ind).arg("BR").arg("5").output().await {
+                                            // C3 FIX: respeitar years do pseudo_json (default 2 anos, não 5)
+                                            // DC2 FIX: aceitar years como string ("5") ou integer (5)
+                                            let years_nanny = pseudo_json.get("years")
+                                                .or_else(|| pseudo_json.get("arguments").and_then(|a| a.get("years")))
+                                                .map(|v| v.as_str().map(|s| s.to_string()).or_else(|| v.as_i64().map(|n| n.to_string())).unwrap_or_else(|| "2".to_string()))
+                                                .unwrap_or_else(|| "2".to_string());
+                                            if let Ok(out) = tokio::process::Command::new(venv_python).arg(matrix_script).arg("macro").arg(&ind).arg("BR").arg(&years_nanny).output().await {
                                                 final_result = String::from_utf8_lossy(&out.stdout).to_string();
                                             }
                                         }

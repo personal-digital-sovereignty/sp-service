@@ -39,13 +39,17 @@ pub async fn init_pool() -> SqlitePool {
         .await;
 
     // CARREGAMENTO NATIVO DO SCHEMA MESTRE CIBRIDO (EPIC 4)
-    let _ = sqlx::query(include_str!("schemas/001_sensus_init.sql")).execute(&pool).await;
+    // DC1 FIX: raw_sql suporta multi-statement explicitamente (CREATE TABLE + CREATE INDEX)
+    let _ = sqlx::raw_sql(include_str!("schemas/001_sensus_init.sql")).execute(&pool).await;
 
     // CARREGAMENTO DO EPHEMERAL RAG SCHEMA (MÓDULO DE NOTÍCIAS)
-    let _ = sqlx::query(include_str!("schemas/002_ephemeral_knowledge.sql")).execute(&pool).await;
+    let _ = sqlx::raw_sql(include_str!("schemas/002_ephemeral_knowledge.sql")).execute(&pool).await;
 
     // CARREGAMENTO DO SOVEREIGN PROMPT VAULT SCHEMA
-    let _ = sqlx::query(include_str!("schemas/003_sovereign_prompts.sql")).execute(&pool).await;
+    let _ = sqlx::raw_sql(include_str!("schemas/003_sovereign_prompts.sql")).execute(&pool).await;
+
+    // CARREGAMENTO DO SOVEREIGN TICKER REGISTRY (MIGRATION 004)
+    let _ = sqlx::raw_sql(include_str!("schemas/004_ticker_registry.sql")).execute(&pool).await;
 
     // Seed core prompts do TOML (com verificação SHA-256)
     crate::prompt_vault::seed_core_prompts(&pool).await;

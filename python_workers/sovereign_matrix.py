@@ -56,99 +56,216 @@ def fetch_finance(ticker, years):
         
     period = f"{clean_years}y"
     
-    # === SOVEREIGN TICKER RESOLVER (Fase 1: Mapeamento Semântico Expandido) ===
-    # Cobre os ativos mais comuns do mercado BR + commodities internacionais.
-    # Se o LLM enviar o nome popular (ex: "NUBANK"), resolve para o ticker Yahoo correto.
-    TICKER_MAP = {
-        # Commodities internacionais
-        'BRENT':         ('BZ=F',      'Barril de Petróleo (BRENT Crude)'),
-        'WTI':           ('CL=F',      'Barril de Petróleo (WTI Crude Spot)'),
-        'GOLD':          ('GC=F',      'Ouro (Gold Spot)'),
-        'SILVER':        ('SI=F',      'Prata (Silver Spot)'),
-        # Câmbio
-        'DOLAR':         ('BRL=X',     'Taxa de Câmbio (Dólar / BRL)'),
-        'USD':           ('BRL=X',     'Taxa de Câmbio (Dólar / BRL)'),
-        'EURO':          ('EURBRL=X',  'Taxa de Câmbio (Euro / BRL)'),
-        # Ações BR — Top 20+ por relevância
-        'PETROBRAS':     ('PETR4.SA',  'Ações Petrobras (PETR4)'),
-        'PETR4':         ('PETR4.SA',  'Ações Petrobras (PETR4)'),
-        'PETR3':         ('PETR3.SA',  'Ações Petrobras ON (PETR3)'),
-        'NUBANK':        ('NU',        'Ações NuBank (NU — NYSE)'),
-        'NU':            ('NU',        'Ações NuBank (NU — NYSE)'),
-        'ROXO34':        ('ROXO34.SA', 'BDR NuBank (ROXO34)'),
-        'VALE':          ('VALE3.SA',  'Ações Vale (VALE3)'),
-        'VALE3':         ('VALE3.SA',  'Ações Vale (VALE3)'),
-        'ITAU':          ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'ITAÚ':          ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'ITUB4':         ('ITUB4.SA',  'Ações Itaú Unibanco (ITUB4)'),
-        'BRADESCO':      ('BBDC4.SA',  'Ações Bradesco PN (BBDC4)'),
-        'BBDC4':         ('BBDC4.SA',  'Ações Bradesco PN (BBDC4)'),
-        'BBDC3':         ('BBDC3.SA',  'Ações Bradesco ON (BBDC3)'),
-        'BRADESCO_SEGUROS': ('BBSE3.SA', 'Ações BB Seguridade / Bradesco Seguros (BBSE3)'),
-        'BBSE3':         ('BBSE3.SA',  'Ações BB Seguridade (BBSE3)'),
-        'BANCO_DO_BRASIL': ('BBAS3.SA', 'Ações Banco do Brasil (BBAS3)'),
-        'BB':            ('BBAS3.SA',  'Ações Banco do Brasil (BBAS3)'),
-        'BBAS3':         ('BBAS3.SA',  'Ações Banco do Brasil (BBAS3)'),
-        'AMBEV':         ('ABEV3.SA',  'Ações Ambev (ABEV3)'),
-        'ABEV3':         ('ABEV3.SA',  'Ações Ambev (ABEV3)'),
-        'MAGAZINE':      ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'MAGALU':        ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'MGLU3':         ('MGLU3.SA',  'Ações Magazine Luiza (MGLU3)'),
-        'WEG':           ('WEGE3.SA',  'Ações WEG (WEGE3)'),
-        'WEGE3':         ('WEGE3.SA',  'Ações WEG (WEGE3)'),
-        'SUZANO':        ('SUZB3.SA',  'Ações Suzano (SUZB3)'),
-        'SUZB3':         ('SUZB3.SA',  'Ações Suzano (SUZB3)'),
-        'JBS':           ('JBSS3.SA',  'Ações JBS (JBSS3)'),
-        'JBSS3':         ('JBSS3.SA',  'Ações JBS (JBSS3)'),
-        'ELETROBRAS':    ('ELET3.SA',  'Ações Eletrobras (ELET3)'),
-        'ELET3':         ('ELET3.SA',  'Ações Eletrobras (ELET3)'),
-        'RENT3':         ('RENT3.SA',  'Ações Localiza (RENT3)'),
-        'LOCALIZA':      ('RENT3.SA',  'Ações Localiza (RENT3)'),
-        'B3':            ('B3SA3.SA',  'Ações B3 (B3SA3)'),
-        'B3SA3':         ('B3SA3.SA',  'Ações B3 (B3SA3)'),
-        'HAPVIDA':       ('HAPV3.SA',  'Ações Hapvida (HAPV3)'),
-        'HAPV3':         ('HAPV3.SA',  'Ações Hapvida (HAPV3)'),
-        'SANTANDER':     ('SANB11.SA', 'Ações Santander Brasil (SANB11)'),
-        'SANB11':        ('SANB11.SA', 'Ações Santander Brasil (SANB11)'),
-        # Futuros
-        'BRENT_FUTURE':  ('BZ=F',     'Contrato Futuro Brent (Especulativo)'),
-        'WTI_FUTURE':    ('CL=F',     'Contrato Futuro WTI (Especulativo)'),
-        'GOLD_FUTURE':   ('GC=F',     'Contrato Futuro Ouro (Especulativo)'),
-        'DI_FUTURE':     ('DI1F27.SA','Contrato DI Futuro (Especulativo)'),
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SOVEREIGN TICKER RESOLVER — 4-Pass SQLite + Auto-Learning
+    # ═══════════════════════════════════════════════════════════════════════════
+    # Fluxo de resolução (sem hardcode):
+    #   [1] Exact match  : WHERE search_key = normalizado          → O(log n)
+    #   [2] Prefix match : WHERE search_key LIKE 'MAGAZINE%'       → O(log n)
+    #   [3] Fuzzy match  : WHERE search_key LIKE '%LUIZA%'          → O(n)
+    #   [4] yfinance live: testa ".SA" e ticker puro              → rede
+    #       → HIT: INSERT INTO ticker_registry (auto-aprendizado)
+    #       → MISS: erro descritivo ao LLM
+    #
+    # TICKER_MAP_FALLBACK abaixo é usado APENAS quando o banco não é encontrado
+    # (ex: primeiro boot antes da migration). Mantido como emergência offline.
+    # ═══════════════════════════════════════════════════════════════════════════
+
+    import sqlite3 as _sqlite3
+    import unicodedata as _uni
+
+    def _normalize_key(name: str) -> str:
+        nfkd = _uni.normalize("NFKD", name)
+        ascii_ = "".join(c for c in nfkd if not _uni.combining(c))
+        return ascii_.upper().replace(" ", "_").replace("-", "_").replace(".", "_")
+
+    def _find_db() -> str | None:
+        """Localiza sovereign_memory.db: env var > XDG > macOS > Windows > Linux > busca ascendente."""
+        import os as _os
+        # 1. DATABASE_URL env var (prod / containers)
+        db_url = _os.getenv("DATABASE_URL", "")
+        if db_url:
+            candidate = db_url.replace("sqlite:", "").split("?")[0]
+            if _os.path.exists(candidate):
+                return candidate
+        # 2. XDG_DATA_HOME (Linux custom)
+        xdg = _os.getenv("XDG_DATA_HOME", "")
+        if xdg:
+            candidate = _os.path.join(xdg, "sovereign-pair", "data", "sovereign_memory.db")
+            if _os.path.exists(candidate):
+                return candidate
+        # 3. macOS ~/Library/Application Support
+        import sys as _sys
+        if _sys.platform == "darwin":
+            candidate = _os.path.join(_os.path.expanduser("~"), "Library", "Application Support",
+                                      "sovereign-pair", "data", "sovereign_memory.db")
+            if _os.path.exists(candidate):
+                return candidate
+        # 4. Windows %LOCALAPPDATA%
+        local_app_data = _os.getenv("LOCALAPPDATA", "")
+        if local_app_data:
+            candidate = _os.path.join(local_app_data, "sovereign-pair", "data", "sovereign_memory.db")
+            if _os.path.exists(candidate):
+                return candidate
+        # 5. Linux ~/.local/share (XDG default)
+        candidate = _os.path.join(_os.path.expanduser("~"), ".local", "share",
+                                  "sovereign-pair", "data", "sovereign_memory.db")
+        if _os.path.exists(candidate):
+            return candidate
+        # 6. Busca ascendente a partir do script (desenvolvimento local)
+        cur = _os.path.dirname(_os.path.abspath(__file__))
+        for _ in range(6):
+            candidate = _os.path.join(cur, "sovereign_memory.db")
+            if _os.path.exists(candidate):
+                return candidate
+            candidate2 = _os.path.join(cur, "data", "sovereign_memory.db")
+            if _os.path.exists(candidate2):
+                return candidate2
+            parent = _os.path.dirname(cur)
+            if parent == cur:
+                break
+            cur = parent
+        return None
+
+    def _resolve_from_db(db_path: str, norm_key: str, raw_ticker: str):
+        """Retorna (yf_symbol, full_name) ou None. DM5 FIX: try/finally garante conn.close()."""
+        try:
+            conn = _sqlite3.connect(db_path, timeout=3)
+            try:
+                conn.row_factory = _sqlite3.Row
+                c = conn.cursor()
+                # Passe 1 — Exact match
+                c.execute(
+                    "SELECT yf_symbol, full_name FROM ticker_registry "
+                    "WHERE search_key = ? AND is_active = 1 LIMIT 1",
+                    (norm_key,),
+                )
+                row = c.fetchone()
+                if row:
+                    return row["yf_symbol"], row["full_name"]
+                # Passe 2 — Prefix match
+                c.execute(
+                    "SELECT yf_symbol, full_name FROM ticker_registry "
+                    "WHERE search_key LIKE ? AND is_active = 1 ORDER BY length(search_key) LIMIT 1",
+                    (f"{norm_key}%",),
+                )
+                row = c.fetchone()
+                if row:
+                    return row["yf_symbol"], row["full_name"]
+                # Passe 3 — Fuzzy match (parte do nome)
+                parts = norm_key.split("_")
+                for part in parts:
+                    if len(part) < 3:
+                        continue
+                    c.execute(
+                        "SELECT yf_symbol, full_name FROM ticker_registry "
+                        "WHERE search_key LIKE ? AND is_active = 1 "
+                        "ORDER BY length(search_key) LIMIT 1",
+                        (f"%{part}%",),
+                    )
+                    row = c.fetchone()
+                    if row:
+                        return row["yf_symbol"], row["full_name"]
+                return None
+            finally:
+                conn.close()
+        except Exception:
+            return None
+
+    def _auto_learn(db_path: str, norm_key: str, yf_sym: str, full_name: str) -> None:
+        """Persiste ticker descoberto dinamicamente (auto-aprendizado). DM2 FIX: popula last_verified_at."""
+        try:
+            conn = _sqlite3.connect(db_path, timeout=3)
+            try:
+                conn.execute(
+                    """INSERT OR IGNORE INTO ticker_registry
+                       (search_key, yf_symbol, full_name, market, query_type_hint, is_active, source, last_verified_at)
+                       VALUES (?, ?, ?, 'OTHER', 'price', 1, 'yfinance_dynamic', datetime('now'))""",
+                    (norm_key, yf_sym, full_name),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+    # ── TICKER_MAP_FALLBACK (emergência offline — banco não encontrado) ───────
+    TICKER_MAP_FALLBACK = {
+        'BRENT': ('BZ=F', 'Petróleo Brent'), 'WTI': ('CL=F', 'Petróleo WTI'),
+        'GOLD': ('GC=F', 'Ouro'), 'SILVER': ('SI=F', 'Prata'),
+        'DOLAR': ('BRL=X', 'Dólar/BRL'), 'USD': ('BRL=X', 'Dólar/BRL'),
+        'EURO': ('EURBRL=X', 'Euro/BRL'),
+        'PETROBRAS': ('PETR4.SA', 'Petrobras'), 'PETR4': ('PETR4.SA', 'Petrobras'),
+        'NUBANK': ('NU', 'NuBank'), 'NU': ('NU', 'NuBank'),
+        'VALE': ('VALE3.SA', 'Vale'), 'VALE3': ('VALE3.SA', 'Vale'),
+        'ITAU': ('ITUB4.SA', 'Itaú'), 'BRADESCO': ('BBDC4.SA', 'Bradesco'),
+        'BANCO_DO_BRASIL': ('BBAS3.SA', 'Banco do Brasil'), 'BB': ('BBAS3.SA', 'BB'),
+        'AMBEV': ('ABEV3.SA', 'Ambev'),
+        'MAGAZINE': ('MGLU3.SA', 'Magazine Luiza'), 'MAGALU': ('MGLU3.SA', 'Magazine Luiza'),
+        'MGLU3': ('MGLU3.SA', 'Magazine Luiza'), 'MGLU': ('MGLU3.SA', 'Magazine Luiza'),
+        'MAGAZINE_LUIZA': ('MGLU3.SA', 'Magazine Luiza'),
+        'WEG': ('WEGE3.SA', 'WEG'), 'SUZANO': ('SUZB3.SA', 'Suzano'),
+        'JBS': ('JBSS3.SA', 'JBS'), 'ELETROBRAS': ('ELET3.SA', 'Eletrobras'),
+        'LOCALIZA': ('RENT3.SA', 'Localiza'), 'HAPVIDA': ('HAPV3.SA', 'Hapvida'),
+        'SANTANDER': ('SANB11.SA', 'Santander BR'),
+        'NVIDIA': ('NVDA', 'NVIDIA'), 'NVDA': ('NVDA', 'NVIDIA'),
+        'APPLE': ('AAPL', 'Apple'), 'MICROSOFT': ('MSFT', 'Microsoft'),
+        'TESLA': ('TSLA', 'Tesla'), 'NIKE': ('NKE', 'Nike'),
+        'NOVO_NORDISK': ('NVO', 'Novo Nordisk'), 'OZEMPIC': ('NVO', 'Ozempic→NVO'),
+        'ELI_LILLY': ('LLY', 'Eli Lilly'), 'MOUNJARO': ('LLY', 'Mounjaro→LLY'),
     }
-    
+
+    # ── Resolução principal ──────────────────────────────────────────────────
     semantic_name = ticker
-    upper_ticker = ticker.upper().replace(' ', '_')
-    
-    if upper_ticker in TICKER_MAP:
-        ticker, semantic_name = TICKER_MAP[upper_ticker]
-    else:
-        # === Fase 2: Fallback Dinâmico (tenta .SA para B3, depois ticker puro para NYSE/NASDAQ) ===
-        # Se o LLM enviar um ticker que não está no mapa, testa se funciona diretamente no yfinance.
+    norm_key = _normalize_key(ticker)
+    resolved = False
+
+    db_path = _find_db()
+    if db_path:
+        result = _resolve_from_db(db_path, norm_key, ticker)
+        if result:
+            ticker, semantic_name = result
+            resolved = True
+
+    if not resolved and norm_key in TICKER_MAP_FALLBACK:
+        ticker, semantic_name = TICKER_MAP_FALLBACK[norm_key]
+        resolved = True
+
+    # Passe 4: yfinance live + auto-aprendizado
+    if not resolved:
         import sys as _sys
         _candidates = []
         if not ticker.endswith('.SA'):
-            _candidates.append(f"{ticker.upper()}.SA")  # Tenta B3 primeiro para ativos BR
-        _candidates.append(ticker.upper())               # Tenta ticker puro (NYSE/NASDAQ)
-        
-        _resolved = False
+            _candidates.append(f"{ticker.upper()}.SA")
+        _candidates.append(ticker.upper())
+
         for _cand in _candidates:
             try:
                 _t = yf.Ticker(_cand)
                 _test = _t.history(period="5d")
                 if not _test.empty:
-                    semantic_name = f"Ativo Financeiro ({_cand})"
+                    info = _t.info or {}
+                    _full = info.get("longName") or info.get("shortName") or f"Ativo ({_cand})"
+                    semantic_name = _full
                     ticker = _cand
-                    _resolved = True
+                    resolved = True
+                    if db_path:
+                        _auto_learn(db_path, norm_key, _cand, _full)
                     break
             except Exception:
                 continue
-        
-        if not _resolved:
-            print(json.dumps({"error": f"Ticker '{ticker}' não reconhecido pelo Sovereign Matrix e não resolvido via yfinance. Tickers testados: {_candidates}. Verifique o símbolo exato do ativo (ex: PETR4, NU, VALE3, BRENT, ITUB4)."}))
-            _sys.exit(1)
-        
 
+        if not resolved:
+            print(json.dumps({
+                "error": (
+                    f"Ticker '{ticker}' não reconhecido pelo Sovereign Ticker Registry "
+                    f"(4 passes: exact/prefix/fuzzy/yfinance). "
+                    f"Tickers testados: {_candidates}. "
+                    f"Verifique o símbolo exato (ex: PETR4, NU, VALE3, MGLU3, BRENT, ITUB4) "
+                    f"ou use o nome da empresa — o resolvedor encontrará automaticamente."
+                )
+            }))
+            _sys.exit(1)
 
     start_date = (datetime.datetime.now() - datetime.timedelta(days=int(clean_years)*365)).strftime('%Y-%m-%d')
     end_date = datetime.datetime.now().strftime('%Y-%m-%d')
@@ -215,8 +332,56 @@ def fetch_finance(ticker, years):
         print(json.dumps({"error": f"No financial data found for {ticker} across all 4 Multi-Node layers! Last error: {last_error}"}))
         sys.exit(1)
         
+    # ══════════════════════════════════════════════════════════════════════════
+    # DC3 FIX: Circuit Breaker roda ANTES de qualquer agrupamento/conversão,
+    # sobre dados brutos diários — detecta spikes corrompidos sem suavização.
+    # ══════════════════════════════════════════════════════════════════════════
+    SANITY_BOUNDS: dict = {
+        'BZ=F': (5.0, 250.0), 'CL=F': (5.0, 250.0),  # Petróleo (USD/barril)
+        'GC=F': (500.0, 5000.0), 'SI=F': (5.0, 200.0),  # Ouro/Prata
+        'PL=F': (200.0, 3000.0), 'PA=F': (100.0, 4000.0),
+        'HG=F': (1.0, 20.0),   # Cobre (USD/lb)
+        'NG=F': (0.5, 25.0),   # Gás Natural (USD/MMBtu)
+        'ZS=F': (4.0, 30.0),   # Soja (USD/bushel)
+        'ZC=F': (2.0, 10.0),   # Milho
+        'ZW=F': (2.0, 15.0),   # Trigo
+        'KC=F': (0.5, 6.0),    # Café Arábica (USD/lb)
+        'SB=F': (0.05, 1.0),   # Açúcar (USD/lb)
+        'CT=F': (0.3, 3.0),    # Algodão (USD/lb)
+    }
+    bounds = SANITY_BOUNDS.get(ticker)
+    if bounds and not df.empty and 'Close' in df.columns:
+        max_v = float(df['Close'].max())
+        min_v = float(df['Close'].min())
+        if not (bounds[0] <= min_v and max_v <= bounds[1]):
+            print(json.dumps({"error": f"CRÍTICO (Circuit Breaker): Anomalia em {ticker}. "
+                              f"Valores USD (Max: {round(max_v, 2)}, Min: {round(min_v, 2)}) "
+                              f"fora dos limites físicos {bounds}. Abortando para prevenir "
+                              f"alucinação estatística."}))
+            sys.exit(1)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # DC4 FIX: Conversão BRL para TODOS os períodos (não apenas years>1).
+    # Agrupa sempre por mês para alinhamento do join USD→BRL.
+    # DC4b FIX: left join preserva meses sem câmbio (exibidos só em USD).
+    # DL2 FIX: log explícito quando conversão BRL falha.
+    # ══════════════════════════════════════════════════════════════════════════
+    CONVERT_TO_BRL = {
+        'BZ=F', 'CL=F',           # Petróleo Brent e WTI
+        'GC=F', 'SI=F',           # Ouro e Prata
+        'PL=F', 'PA=F',           # Platina e Paládio
+        'HG=F',                   # Cobre
+        'NG=F',                   # Gás Natural
+        'ZS=F', 'ZC=F', 'ZW=F',  # Soja, Milho, Trigo (CBOT)
+        'ZM=F', 'ZL=F',           # Farelo e Óleo de Soja
+        'KC=F', 'RC=F',           # Café Arábica e Robusta
+        'SB=F', 'CT=F',           # Açúcar e Algodão
+        'CC=F', 'OJ=F',           # Cacau e Suco de Laranja
+        'LE=F', 'HE=F',           # Boi Gordo e Suíno
+        'LB=F',                   # Madeira Serrada
+    }
     converted_to_brl = False
-    if ticker in ['BZ=F', 'CL=F']:
+    if ticker in CONVERT_TO_BRL:
         # Fetch BRL=X to do Currency Conversion
         df_usd = pd.DataFrame()
         try:
@@ -243,37 +408,35 @@ def fetch_finance(ticker, years):
                 
         if not df_usd.empty:
             try:
-                if int(clean_years) > 1:
-                    df['YearMonth'] = df.index.strftime('%Y-%m')
-                    df = df.groupby('YearMonth').mean()
-                    
-                    df_usd['YearMonth'] = df_usd.index.strftime('%Y-%m')
-                    df_usd = df_usd.groupby('YearMonth').mean()
-                    
-                    df = df.join(df_usd['Close'], rsuffix='_usd', how='inner')
-                    df['Close_brl'] = df['Close'] * df['Close_usd']
-                    converted_to_brl = True
-                    source_used += " | (+ Converted to BRL)"
+                # Agrupa por mês para alinhamento (necessário para todos os períodos)
+                df['YearMonth'] = df.index.strftime('%Y-%m')
+                df = df.groupby('YearMonth').mean()
+                
+                df_usd['YearMonth'] = df_usd.index.strftime('%Y-%m')
+                df_usd = df_usd.groupby('YearMonth').mean()
+                
+                # DC4b FIX: left join preserva meses do ativo sem câmbio disponível
+                df = df.join(df_usd['Close'], rsuffix='_usd', how='left')
+                df['Close_brl'] = df['Close'] * df['Close_usd']
+                converted_to_brl = True
+                source_used += " | (+ Converted to BRL)"
             except Exception:
-                pass
+                # DL2 FIX: log explícito de falha na conversão
+                source_used += " | (⚠️ BRL conversion JOIN FAILED — showing USD only)"
+        else:
+            # DL2 FIX: BRL=X indisponível (rate limit ou API down)
+            source_used += " | (⚠️ BRL=X unavailable — showing USD only)"
                 
     if not converted_to_brl:
-        # Normal grouping if not already grouped by currency conversion
+        # Agrupamento mensal para períodos longos (sem conversão BRL)
         try:
             if int(clean_years) > 1:
                 df['YearMonth'] = df.index.strftime('%Y-%m')
                 df = df.groupby('YearMonth').mean()
         except Exception:
             pass
-            
-    # === ANALYST B: CIRCUIT BREAKER (DATA QUALITY ASSERTION) ===
-    if ticker in ['BZ=F', 'CL=F'] and not df.empty and 'Close' in df.columns:
-        max_usd = float(df['Close'].max())
-        min_usd = float(df['Close'].min())
-        if max_usd > 200.0 or min_usd < 5.0:
-            print(json.dumps({"error": f"CRÍTICO (Circuit Breaker): Anomalia estrutural no Ticker {ticker}. Valor histórico em USD (Max: {round(max_usd, 2)}, Min: {round(min_usd, 2)}) rompeu barreira de viabilidade física do mercado de petróleo bruto. Abortando injeção para prevenir alucinação estatística (Dissonância Cognitiva) na Mente Mestra."}))
-            sys.exit(1)
-            
+
+
     data_lines = []
     for index, row in df.iterrows():
         date_str = index if isinstance(index, str) else index.strftime('%Y-%m')
