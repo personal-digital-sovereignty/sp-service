@@ -784,18 +784,25 @@ fn is_ssrf_target(raw: &str) -> bool {
         .trim_start_matches("http://")
         .split('/')
         .next()
-        .unwrap_or(raw)
-        .split(':')
-        .next()
-        .unwrap_or(raw)
-        .trim_matches('[') // remove colchetes de IPv6 [::1]
-        .trim_matches(']');
+        .unwrap_or(raw);
+
+    // Extrai o host isolado (lida corretamente com portas e IPv6)
+    // [::1]:8080 -> ::1 | 127.0.0.1:8080 -> 127.0.0.1
+    let extracted = if host.starts_with('[') {
+        if let Some(end) = host.find(']') {
+            &host[1..end]
+        } else {
+            host
+        }
+    } else {
+        host.split(':').next().unwrap_or(host)
+    };
 
     // Bloqueia hosts literais conhecidos
-    if host.eq_ignore_ascii_case("localhost") { return true; }
+    if extracted.eq_ignore_ascii_case("localhost") { return true; }
 
     // Tenta parsear como IP
-    if let Ok(ip) = host.parse::<IpAddr>() {
+    if let Ok(ip) = extracted.parse::<IpAddr>() {
         if ip.is_loopback() || ip.is_unspecified() { return true; }
         match ip {
             IpAddr::V4(v4) => {
