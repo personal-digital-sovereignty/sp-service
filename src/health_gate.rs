@@ -98,7 +98,7 @@ pub async fn run_health_check() -> Result<Vec<ApiHealthEntry>, String> {
         .map_err(|e| format!("Failed to parse health check JSON: {} — raw: {}", e, &stdout[..stdout.len().min(200)]))
 }
 
-/// Persist health check results to SQLite
+/// Persist health check results to SQLite and enforce 7-day retention
 pub async fn persist_health_results(db: &SqlitePool, entries: &[ApiHealthEntry]) {
     for entry in entries {
         let result = sqlx::query(
@@ -117,6 +117,11 @@ pub async fn persist_health_results(db: &SqlitePool, entries: &[ApiHealthEntry])
             error!("🛡️ [Resilience Shield] Failed to persist health entry '{}': {}", entry.name, e);
         }
     }
+
+    // GAP-RS-05: Enforce 7-day retention to prevent unbounded growth
+    let _ = sqlx::query("DELETE FROM api_health_log WHERE checked_at < datetime('now', '-7 days')")
+        .execute(db)
+        .await;
 }
 
 /// Build a summary from health check entries
@@ -179,6 +184,12 @@ pub async fn spawn_periodic_watchdog(db: SqlitePool, health_state: HealthState) 
                 }
                 Err(e) => {
                     error!("🛡️ [Resilience Shield] Periodic health check failed: {}", e);
+                    // GAP-RS-03: Update timestamp even on failure so frontend never shows stale data
+                    let mut state = health_state.write().await;
+                    state.last_checked = format!("{} (check failed: {})",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
+                        &e[..e.len().min(60)]
+                    );
                 }
             }
         }
