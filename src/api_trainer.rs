@@ -2950,7 +2950,7 @@ pub async fn trainer_stats_handler(
 
     let ts_metrics = TrainerStatsResponse {
         knowledge_gap_percentage: gap_percentage.clamp(0.0, 100.0),
-        sources_scanned: sources_scanned, 
+        sources_scanned, 
         sources_scanned_delta: if sources_scanned > 0 { 1 } else { 0 },
         recently_acquired,
         unsloth: serde_json::json!({

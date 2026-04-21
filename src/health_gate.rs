@@ -1,10 +1,10 @@
-/// ============================================================
-/// Sovereign Pair — Resilience Shield: API Health Gate
-/// 
-/// Runs health_check_apis.py --json at startup and periodically,
-/// persisting results in api_health_log and exposing them via SSE
-/// for frontend degradation badges.
-/// ============================================================
+// ============================================================
+// Sovereign Pair — Resilience Shield: API Health Gate
+//
+// Runs health_check_apis.py --json at startup and periodically,
+// persisting results in api_health_log and exposing them via SSE
+// for frontend degradation badges.
+// ============================================================
 
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;

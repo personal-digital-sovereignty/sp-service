@@ -1,15 +1,15 @@
-/// ============================================================
-/// Sovereign Pair — Oracle Cloud Worker
-///
-/// Executa Python workers na instância Oracle via SSH exec.
-/// Estratégia: SSH exec direto — sem portas expostas, sem HTTP.
-///
-/// Fluxo:
-///   1. Ler config oracle_node de global_settings
-///   2. ssh ubuntu@ORACLE "~/sovereign-venv/bin/python ~/sovereign-workers/<script> <args>"
-///   3. Capturar stdout como resultado
-///   4. Fallback automático para execução local se disabled/falha
-/// ============================================================
+// ============================================================
+// Sovereign Pair — Oracle Cloud Worker
+//
+// Executa Python workers na instância Oracle via SSH exec.
+// Estratégia: SSH exec direto — sem portas expostas, sem HTTP.
+//
+// Fluxo:
+//   1. Ler config oracle_node de global_settings
+//   2. ssh ubuntu@ORACLE "~/sovereign-venv/bin/python ~/sovereign-workers/<script> <args>"
+//   3. Capturar stdout como resultado
+//   4. Fallback automático para execução local se disabled/falha
+// ============================================================
 
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
@@ -143,8 +143,8 @@ pub async fn ssh_exec_worker(
         .arg("-o").arg("StrictHostKeyChecking=accept-new")
         .arg("-o").arg("ConnectTimeout=15")
         .arg("-o").arg("BatchMode=yes")
-        .arg(&config.ssh_target())
-        .arg(&remote_cmd)
+        .arg(config.ssh_target())
+        .arg(remote_cmd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
@@ -231,7 +231,7 @@ pub async fn ping_oracle_node(config: &OracleNodeConfig) -> OracleStatus {
         .arg("-o").arg("StrictHostKeyChecking=accept-new")
         .arg("-o").arg("ConnectTimeout=8")
         .arg("-o").arg("BatchMode=yes")
-        .arg(&config.ssh_target())
+        .arg(config.ssh_target())
         // Testa SSH e lista modelos Ollama em um único RTT
         .arg("ollama list 2>/dev/null && echo '---ALIVE---'")
         .stdout(Stdio::piped())
@@ -338,7 +338,7 @@ pub async fn provision_oracle_workers(config: &OracleNodeConfig) -> Result<(), S
         .arg("-o").arg("StrictHostKeyChecking=accept-new")
         .arg("-o").arg("BatchMode=yes")
         .arg(config.ssh_target())
-        .arg(&remote_cmd)
+        .arg(remote_cmd)
         .output()
         .await
         .map_err(|e| format!("SSH Hash Probe error: {}", e))?;
@@ -370,9 +370,9 @@ pub async fn provision_oracle_workers(config: &OracleNodeConfig) -> Result<(), S
     let rsync_cmd = tokio::process::Command::new("rsync")
         .arg("-avz")
         .arg("--exclude").arg("__pycache__")
-        .arg("-e").arg(&rsync_ssh_arg)
-        .arg(&src_dir)
-        .arg(&rsync_target)
+        .arg("-e").arg(rsync_ssh_arg)
+        .arg(src_dir)
+        .arg(rsync_target)
         .output()
         .await
         .map_err(|e| format!("Rsync command failed: {}", e))?;
