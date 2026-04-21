@@ -63,13 +63,17 @@ pub fn calculate_safe_context_window(telemetry: &HardwareTelemetry) -> u64 {
     };
 
     if governing_memory < 8.0 {
-        4096 
-    } else if governing_memory < 16.0 {
         8192 
-    } else if governing_memory < 24.0 {
-        12288 
-    } else {
+    } else if governing_memory < 12.0 {
         16384 
+    } else if governing_memory < 16.0 {
+        32768 
+    } else if governing_memory < 24.0 {
+        65536 
+    } else if governing_memory < 48.0 {
+        98304 
+    } else {
+        131072
     }
 }
 

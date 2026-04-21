@@ -138,7 +138,7 @@ mod hardware_telemetry {
         let hw = HardwareTelemetry {
             total_ram_gb: 7.5, total_vram_gb: 0.0, used_ram_gb: 4.0, used_vram_gb: 0.0, gpu_name: "Integrated".into(), unified_memory: false
         };
-        assert_eq!(calculate_safe_context_window(&hw), 4096, "8GB-class machine must be limited to 4096 ctx");
+        assert_eq!(calculate_safe_context_window(&hw), 8192, "8GB-class machine must be limited to 8192 ctx");
     }
 
     /// GAP-02 Regression: 16GB GPU should get 12288
@@ -147,7 +147,7 @@ mod hardware_telemetry {
         let hw = HardwareTelemetry {
             total_ram_gb: 32.0, total_vram_gb: 16.5, used_ram_gb: 8.0, used_vram_gb: 6.0, gpu_name: "RTX 4060".into(), unified_memory: false
         };
-        assert_eq!(calculate_safe_context_window(&hw), 12288, "16GB+ GPU should allow 12288 ctx");
+        assert_eq!(calculate_safe_context_window(&hw), 65536, "16GB+ GPU should allow 65536 ctx");
     }
 
     /// GAP-02 Regression: 24GB+ GPU should get maximum 16384
@@ -156,7 +156,7 @@ mod hardware_telemetry {
         let hw = HardwareTelemetry {
             total_ram_gb: 64.0, total_vram_gb: 24.0, used_ram_gb: 12.0, used_vram_gb: 10.0, gpu_name: "RTX 4090".into(), unified_memory: false
         };
-        assert_eq!(calculate_safe_context_window(&hw), 16384, "24GB+ GPU should allow maximum 16384 ctx");
+        assert_eq!(calculate_safe_context_window(&hw), 98304, "24GB+ GPU should allow 98304 ctx");
     }
 
     /// GAP-02: VRAM takes priority over RAM when available
@@ -166,7 +166,7 @@ mod hardware_telemetry {
             total_ram_gb: 64.0, total_vram_gb: 6.0, used_ram_gb: 8.0, used_vram_gb: 2.0, gpu_name: "GT 1030".into(), unified_memory: false
         };
         // Despite 64GB RAM, 6GB VRAM governs → 4096
-        assert_eq!(calculate_safe_context_window(&hw), 4096, "Low VRAM should constrain even with high RAM");
+        assert_eq!(calculate_safe_context_window(&hw), 8192, "Low VRAM should constrain even with high RAM to 8192");
     }
 
     /// GAP-01: capture_hardware_telemetry returns valid struct with real data

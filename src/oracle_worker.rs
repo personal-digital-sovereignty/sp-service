@@ -107,6 +107,11 @@ impl std::fmt::Display for WorkerSite {
     }
 }
 
+/// Escapa strings para uso seguro no Shell Bash remoto (Previne CWE-78)
+pub fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace("'", "'\\''"))
+}
+
 /// Executa um script Python no Oracle via SSH exec.
 /// Retorna o stdout completo ou um erro descritivo.
 pub async fn ssh_exec_worker(
@@ -115,12 +120,17 @@ pub async fn ssh_exec_worker(
     args: &[&str],
 ) -> Result<String, String> {
     let key_path = config.resolve_key_path();
+    let safe_args = args.iter().map(|a| shell_escape(a)).collect::<Vec<_>>().join(" ");
+    let safe_script = shell_escape(script_name);
+    
+    // config.venv_path e workers_dir são validados no momento do salvamento (no Axum Handler)
+    // para garantir que não contêm metas de injeção.
     let remote_cmd = format!(
         "{} {}/{} {}",
         config.venv_path,
         config.workers_dir,
-        script_name,
-        args.join(" ")
+        safe_script,
+        safe_args
     );
 
     info!(
@@ -407,6 +417,28 @@ pub async fn set_oracle_node_handler(
             return axum::response::Json(serde_json::json!({
                 "status": "error", 
                 "message": "SECURITY ALERT: You must provide a FILE PATH to the SSH key (e.g. ~/.ssh/id_ed25519), NOT the raw key payload. The system prevented saving your private key to the database."
+            }));
+        }
+    }
+
+    // 2. Validate Command Injection paths
+    // Prevent ; & | < > $ ` \ ' " space
+    let invalid_chars = [';', '&', '|', '<', '>', '$', '`', '\\', '\'', '"', ' ', '\n', '\r', '\t'];
+    
+    if let Some(workers_dir) = payload.get("workers_dir").and_then(|v| v.as_str()) {
+        if workers_dir.contains(&invalid_chars[..]) {
+            return axum::response::Json(serde_json::json!({
+                "status": "error", 
+                "message": "SECURITY ALERT: workers_dir contains invalid shell characters. Only alphanumeric, dashes, dots, slashes and ~ are allowed."
+            }));
+        }
+    }
+
+    if let Some(venv_path) = payload.get("venv_path").and_then(|v| v.as_str()) {
+        if venv_path.contains(&invalid_chars[..]) {
+            return axum::response::Json(serde_json::json!({
+                "status": "error", 
+                "message": "SECURITY ALERT: venv_path contains invalid shell characters. Only alphanumeric, dashes, dots, slashes and ~ are allowed."
             }));
         }
     }
