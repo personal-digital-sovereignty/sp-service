@@ -146,7 +146,7 @@ pub fn dequantize_single(packed: &[u8], norm: f32, dim: usize, state: &TurboStat
     let x_hat = y_hat_arr.dot(&state.rotation);
     
     // Reverse Normalization
-    x_hat.into_raw_vec().into_iter().map(|v| v * norm).collect()
+    x_hat.into_raw_vec_and_offset().0.into_iter().map(|v| v * norm).collect()
 }
 
 // Utilitários de Bit-Packing
