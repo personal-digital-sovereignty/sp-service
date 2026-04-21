@@ -1,7 +1,6 @@
 use ash::{vk, Entry};
 use sysinfo::System;
 use std::ffi::CStr;
-use std::sync::OnceLock;
 use tracing::{warn, info};
 
 #[derive(Clone, Debug)]

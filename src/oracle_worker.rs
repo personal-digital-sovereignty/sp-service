@@ -13,7 +13,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::process::Stdio;
-use std::time::Duration;
 use tracing::{info, warn, error};
 
 /// Configuração do nó Oracle lida do global_settings
