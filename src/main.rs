@@ -48,6 +48,7 @@ pub mod memory_manager;
 pub mod garbage_collector; // <-- Adicionado
 pub mod prompt_vault;
 pub mod health_gate;
+pub mod oracle_worker;
 
 #[cfg(test)]
 pub mod tests;
@@ -348,6 +349,9 @@ async fn main() {
     });
     health_gate::spawn_periodic_watchdog(db_pool.clone(), health_state).await;
 
+    // ☁️ Oracle Cloud: Auto-connect SSH tunnel for Ollama offload (non-blocking)
+    ssh_mesh_connector::auto_connect_oracle_node(db_pool.clone()).await;
+
     // Boot the Auto-Evaluator (LLM-as-a-Judge Mesh Loop)
     auto_evaluator::start_evaluator_loop(state.clone()).await;
 
@@ -435,6 +439,10 @@ async fn main() {
         .route("/v1/settings/tenant_keys", axum::routing::get(api_settings::get_tenant_keys_handler)
             .post(api_settings::create_tenant_key_handler))
         .route("/v1/settings/tenant_keys/:id", axum::routing::delete(api_settings::delete_tenant_key_handler))
+        // ☁️ Oracle Cloud Node
+        .route("/v1/settings/oracle_node", axum::routing::get(oracle_worker::get_oracle_node_handler)
+            .post(oracle_worker::set_oracle_node_handler))
+        .route("/v1/mesh/oracle_status", axum::routing::get(oracle_worker::oracle_status_handler))
         .route("/v1/system/export_config", axum::routing::get(api_settings::export_config_handler))
         .route("/v1/system/import_config", axum::routing::post(api_settings::import_config_handler))
         .route("/v1/system/available_models", axum::routing::get(api_settings::get_available_models_handler))

@@ -1,6 +1,6 @@
 use std::process::Stdio;
 use tokio::process::Command;
-use tracing::{info, error};
+use tracing::{info, warn, error};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
@@ -70,4 +70,56 @@ impl MeshConnector {
             }
         }
     }
+}
+
+/// Auto-connect Oracle Node: lê config do DB e estabelece SSH tunnel
+/// para Ollama offload (localhost:41434 → oracle:11434) com reconnect loop.
+///
+/// Apenas ativa se oracle_node.enabled == true e IP configurado.
+pub async fn auto_connect_oracle_node(db: sqlx::SqlitePool) {
+    let config = crate::oracle_worker::load_oracle_config(&db).await;
+
+    if !config.is_ready() {
+        info!("☁️ [Oracle Mesh] Oracle node disabled or not configured — skipping tunnel");
+        return;
+    }
+
+    let key_path = config.resolve_key_path();
+    let tunnel_port = config.ollama_tunnel_port;
+    let ssh_target = config.ssh_target();
+
+    info!(
+        "☁️ [Oracle Mesh] Connection activated → {} (Ollama tunnel: localhost:{} → 11434)",
+        ssh_target, tunnel_port
+    );
+
+    // Spawn reconnect loop: tenta estabelecer, aguarda queda, re-tenta a cada 30s
+    tokio::spawn(async move {
+        loop {
+            match MeshConnector::establish_mesh_tunnel(
+                config.ip.clone(),
+                config.user.clone(),
+                key_path.clone(),
+                tunnel_port,
+                11434,
+            ).await {
+                Ok(_) => {
+                    info!("☁️ [Oracle Mesh] Ollama tunnel UP on localhost:{}", tunnel_port);
+                    // Aguarda até que o tunnel seja removido do mapa (= colapsou)
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                        let tunnels = ACTIVE_MESH_TUNNELS.lock().await;
+                        if !tunnels.contains_key(&tunnel_port) {
+                            warn!("☁️ [Oracle Mesh] Tunnel on port {} dropped — reconnecting in 30s", tunnel_port);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("☁️ [Oracle Mesh] Failed to establish tunnel: {} — retry in 30s", e);
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        }
+    });
 }

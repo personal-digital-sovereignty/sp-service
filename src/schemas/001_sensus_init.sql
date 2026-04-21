@@ -288,3 +288,21 @@ CREATE TABLE IF NOT EXISTS tenant_api_keys (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ---------------------------------------------------------
+-- 10. SOVEREIGN ORACLE CLOUD NODE (Fase 3)
+-- ---------------------------------------------------------
+-- Default seed: disabled. User activates via Settings > Oracle Node
+INSERT OR IGNORE INTO global_settings (id, value_json) VALUES (
+    'oracle_node',
+    '{
+        "ip": "",
+        "user": "ubuntu",
+        "key_path": "~/.ssh/id_ed25519",
+        "ollama_tunnel_port": 41434,
+        "enabled": false,
+        "cold_storage_enabled": false,
+        "workers_dir": "~/sovereign-workers",
+        "venv_path": "~/sovereign-venv/bin/python"
+    }'
+);
