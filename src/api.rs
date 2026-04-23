@@ -710,10 +710,13 @@ tokio::spawn(async move {
         let _ = tx_sse_clone.send(axum::response::sse::Event::default().data(serde_json::to_string(&chunk).unwrap()));
     };
 
-    let is_web = human_prompt.to_lowercase().starts_with("/web");
-    let is_sys = human_prompt.to_lowercase().starts_with("/sys");
+    let hp_lower = human_prompt.trim().to_lowercase();
+    let is_greeting = hp_lower.is_empty() || hp_lower == "oi" || hp_lower == "olá" || hp_lower == "bom dia" || hp_lower == "boa tarde" || hp_lower == "boa noite" || hp_lower == "teste" || hp_lower == "hello" || hp_lower == "hi" || hp_lower == "tudo bem?" || hp_lower == "tudo bem" || hp_lower.len() < 3;
 
-if payload.deep_research.unwrap_or(false) {
+    let is_web = hp_lower.starts_with("/web");
+    let is_sys = hp_lower.starts_with("/sys");
+
+if payload.deep_research.unwrap_or(false) && !is_greeting {
     let mut url_to_scrape = String::new();
     let mut user_question = human_prompt.clone();
     
@@ -1103,17 +1106,19 @@ if let Some(global_prompt) = global_system_prompt {
     }));
 }
 
-// Injeta a Orquestração do ReWOO (Reasoning Without Observation) Apenas Se Houver Plano
-let workspace_id = payload.workspace_id.clone().unwrap_or_else(|| "default".to_string());
-send_thought("<thought>Consultando Plano de Tarefas Sovereign Hub...</thought>\n");
-let rewoo_observations = crate::rewoo::execute_rewoo_plan(&human_prompt, &workspace_id, &state.db).await;
-if !rewoo_observations.trim().is_empty() && rewoo_observations != "ReWOO Accumulated Observations:\n" {
-    send_thought("<thought>Sovereign ReWOO: Executando nós paralelos mapeados na memória local...</thought>\n<thought>Grafo ReWOO consolidado. Injetando descobertas.</thought>\n\n");
-    tracing::debug!("🧠 ReWOO Workflow Executed. Injecting compiled DAG observations.");
-    purified_messages.push(json!({
-        "role": "system",
-        "content": rewoo_observations
-    }));
+// Injeta a Orquestração do ReWOO (Reasoning Without Observation) Se Habilitado e não for saudação
+if payload.rewoo_enabled.unwrap_or(false) && !is_greeting {
+    let workspace_id = payload.workspace_id.clone().unwrap_or_else(|| "default".to_string());
+    send_thought("<thought>Consultando Plano de Tarefas Sovereign Hub...</thought>\n");
+    let rewoo_observations = crate::rewoo::execute_rewoo_plan(&human_prompt, &workspace_id, &state.db).await;
+    if !rewoo_observations.trim().is_empty() && rewoo_observations != "ReWOO Accumulated Observations:\n" {
+        send_thought("<thought>Sovereign ReWOO: Executando nós paralelos mapeados na memória local...</thought>\n<thought>Grafo ReWOO consolidado. Injetando descobertas.</thought>\n\n");
+        tracing::debug!("🧠 ReWOO Workflow Executed. Injecting compiled DAG observations.");
+        purified_messages.push(json!({
+            "role": "system",
+            "content": rewoo_observations
+        }));
+    }
 }
 
 // Injeta o Override de Desenho (RLHF Bypass) para combater a recusa algorítmica de IAs de texto (Qwen/Gemma)
@@ -1252,13 +1257,14 @@ if let Some(tools) = payload.tools.clone() {
 }
 
 // [HARDENING FIX]: Injeta Tools Nativas do Sovereign Trainer para Chat (Thought Nanny Chat Dispatcher)
-let registry_path = crate::api_trainer::resolve_python_workers_dir().join("registry.json");
-if let Ok(file_content) = std::fs::read_to_string(&registry_path) {
-    if let Ok(registry) = serde_json::from_str::<Vec<serde_json::Value>>(&file_content) {
-        for t in registry {
-            if let Some(func) = t.get("function") {
-                if let Some(_name) = func.get("name").and_then(|n| n.as_str()) {
-                    if true { // Inclui TODAS as ferramentas
+// Só injeta se Deep Research estiver ATIVO (evita latência desnecessária em chat simples)
+if payload.deep_research.unwrap_or(false) && !is_greeting {
+    let registry_path = crate::api_trainer::resolve_python_workers_dir().join("registry.json");
+    if let Ok(file_content) = std::fs::read_to_string(&registry_path) {
+        if let Ok(registry) = serde_json::from_str::<Vec<serde_json::Value>>(&file_content) {
+            for t in registry {
+                if let Some(func) = t.get("function") {
+                    if let Some(_name) = func.get("name").and_then(|n| n.as_str()) {
                         if let Ok(model) = serde_json::from_value(t.clone()) {
                             injected_tools.push(model);
                         }

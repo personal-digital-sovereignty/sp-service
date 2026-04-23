@@ -139,6 +139,9 @@ pub struct OpenAIChatRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub visual_artist_mode: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewoo_enabled: Option<bool>,
 }
 
 // ==========================================
