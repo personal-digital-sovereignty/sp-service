@@ -1560,11 +1560,12 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                                 }
                                                 // Store the tool name in a hacky way if it's not visual artist (since we only have visual_prompt string)
                                                 // We can prefix the visual_prompt to know which tool it is!
-                                                visual_prompt = format!("{}|||{}", n, visual_prompt);
-                                            }
+                                            visual_prompt = format!("{}|||{}", n, visual_prompt);
+                                            accumulator.push_str(&format!("\n\n⚙️ **Sovereign Dispatcher**: Acionando Worker Nativo para `{}`...\n\n", n));
                                         }
-                                        
-                                        let args = func.get("arguments").map(|a| {
+                                    }
+                                    
+                                    let args = func.get("arguments").map(|a| {
                                             if a.is_string() {
                                                 a.as_str().unwrap().to_string()
                                             } else {

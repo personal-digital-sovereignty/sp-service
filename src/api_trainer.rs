@@ -1053,7 +1053,7 @@ pub async fn run_deep_research_handler(
             // [HARDENING FIX]: Remoção da imposição "think": false que causava Resposta VAZIA nos modelos
             // Permitimos que os modelos usem o próprio chain-of-thought para formular a tool call.
 
-            if cycle < 25 {
+            if cycle < 15 {
                 synthesis_payload["tools"] = tools_schema.clone();
             } else {
                 // GAP-6 FIX: No ciclo 25, abortar se não há dados coletados em vez de forçar síntese paramétrica.
@@ -1235,7 +1235,7 @@ pub async fn run_deep_research_handler(
                                                 // O LLM gasta ~20 min por tentativa (sandbox + cold-start), e falha 100%
                                                 // porque os JSONs em /tmp/sovereign/ não são DataFrames serializados.
                                                 // Resultado: 5 tentativas = 1h40min desperdiçado no stress test v2.
-                                                let is_data_reprocessing = py_code.contains("sovereign_data_") || py_code.contains("pd.read_json") || py_code.contains("read_csv") || py_code.contains("/tmp/sovereign");
+                                                let is_data_reprocessing = py_code.contains("sovereign_data_") || py_code.contains("pd.read_json") || py_code.contains("read_csv") || py_code.contains("sovereign/");
                                                 let has_structured_data = !all_sources.is_empty() && all_sources.iter().any(|s: &String| s.contains("data_compressed") || s.contains("sovereign_data_"));
                                                 
                                                 if is_data_reprocessing && has_structured_data {
@@ -2096,7 +2096,7 @@ pub async fn run_deep_research_handler(
             
             // [SYMBIOTIC PIPELINE INTERCEPTOR]
             // Se houver múltiplas fontes espaciais, acionamos a marreta matemática do Pandas.
-            if all_sources.len() > 1 {
+            if all_sources.len() >= 1 {
                 let _ = TRAINER_LOGS.send("[Sovereign Symbiose] Múltiplos Fatos Brutos Detectados! Acionando Data Engineering (Pandas) sob os panos...".to_string());
                 // BUGFIX: Extrair `data_compressed` dos JSONs wrapados antes de passar ao joiner.
                 let clean_blocks = extract_raw_data_blocks(&all_sources);

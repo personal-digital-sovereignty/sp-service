@@ -24,7 +24,7 @@ def parse_markdown_blocks(raw_blocks):
     datasets = {}
     
     # regex for getting table headers
-    header_regex = re.compile(r'\[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO.*?([A-Z0-9_\-\.=\ \(\)]+)\]')
+    header_regex = re.compile(r'\[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO.*?([a-zA-Z0-9_\-\.=\ \(\)]+)\]')
     # regex for generic date string and numbers  "2024-01 | USD 75.3 | BRL 350.2" or "2024-01-10 | 0.5"
     row_regex = re.compile(r'^(\d{4}-\d{2}(?:-\d{2})?)\s*\|\s*(.*)$')
     
