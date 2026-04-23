@@ -1250,15 +1250,14 @@ let mut ollama_payload = json!({
     "options": ollama_options
 });
 
-// Injeção de Tools Requisitadas pelo Frontend (Vercel AI SDK JSON Schema)
+// [GATING FIX]: Só injeta tools se Deep Research (Internet) estiver ATIVO e não for saudação
 let mut injected_tools = Vec::new();
-if let Some(tools) = payload.tools.clone() {
-    injected_tools.extend(tools);
-}
-
-// [HARDENING FIX]: Injeta Tools Nativas do Sovereign Trainer para Chat (Thought Nanny Chat Dispatcher)
-// Só injeta se Deep Research estiver ATIVO (evita latência desnecessária em chat simples)
 if payload.deep_research.unwrap_or(false) && !is_greeting {
+    if let Some(tools) = payload.tools.clone() {
+        injected_tools.extend(tools);
+    }
+    
+    // Injeta Tools Nativas do Sovereign Trainer (Registry)
     let registry_path = crate::api_trainer::resolve_python_workers_dir().join("registry.json");
     if let Ok(file_content) = std::fs::read_to_string(&registry_path) {
         if let Ok(registry) = serde_json::from_str::<Vec<serde_json::Value>>(&file_content) {
@@ -1276,7 +1275,8 @@ if payload.deep_research.unwrap_or(false) && !is_greeting {
 }
 
 // ================= THE SOVEREIGN VISUAL ARTIST (NATIVE TOOL) =================
-if is_drawing_intent {
+// Também gateado por Deep Research (Ferramentas de Internet/Externas)
+if is_drawing_intent && payload.deep_research.unwrap_or(false) && !is_greeting {
     let visual_artist_tool = serde_json::json!({
         "type": "function",
         "function": {
