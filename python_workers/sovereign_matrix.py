@@ -168,7 +168,6 @@ def fetch_finance(ticker, years):
 
     # Passe 4: yfinance live + auto-aprendizado
     if not resolved:
-        import sys as _sys
         _candidates = []
         if not ticker.endswith('.SA'):
             _candidates.append(f"{ticker.upper()}.SA")
@@ -200,7 +199,7 @@ def fetch_finance(ticker, years):
                     f"ou use o nome da empresa — o resolvedor encontrará automaticamente."
                 )
             }))
-            _sys.exit(1)
+            sys.exit(1)
 
     start_date = (datetime.datetime.now() - datetime.timedelta(days=int(clean_years)*365)).strftime('%Y-%m-%d')
     end_date = datetime.datetime.now().strftime('%Y-%m-%d')

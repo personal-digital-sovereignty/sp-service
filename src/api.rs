@@ -729,7 +729,7 @@ if payload.deep_research.unwrap_or(false) && !is_greeting {
     }
 
     if !url_to_scrape.is_empty() {
-        send_thought(&format!("<thought>🔎 Lendo URL solicitada Diretamente: {}...</thought>\n\n", url_to_scrape));
+        send_thought(&format!("🔎 *Lendo URL solicitada Diretamente: {}...*\n\n", url_to_scrape));
         tracing::info!("🕸️ [WAG Native] O botão 'Deep Research' estava ATIVO na UI. Acionando raspagem perene p/ {}", url_to_scrape);
         let wag_args = serde_json::json!({ "url": url_to_scrape });
         let wag_result = crate::mcp::execute_mcp_tool(&state, "mcp_deep_research", &wag_args).await;
@@ -737,7 +737,7 @@ if payload.deep_research.unwrap_or(false) && !is_greeting {
         web_context = format!("INSTRUÇÃO SISTÊMICA (DEEP RESEARCH/WAG): O motor de Agentic Web-Scraping leu a URL solicitada ({}) e a salvou fisicamente na Sensus Database Vault local do usuário.\n\nEis o PREVIEW direto (Truncado) dos dados limpos recém-extraídos da internet:\n\n{}\n\nAGENTE: Baseado estritamente nestes dados in-locus, responda/analise de forma soberba a: '{}'", url_to_scrape, wag_result, user_question);
     } else {
         tracing::info!("🧠 [WAG Multi-Hop] Nenhuma URL explícita no prompt. Iniciando Deep Research Agentico (Sub-Processo LLM) para Múltiplas Visões: '{}'", user_question);
-        send_thought("<thought>Iniciando Sovereign Search Engine (WAG)...</thought>\n<thought>Acionando Sub-LLM O Doutrinador...</thought>\n");
+        send_thought("Iniciando *Sovereign Search Engine* (WAG)...\nAcionando *Sub-LLM O Doutrinador*...\n");
         // 1. Notifica o Frontend que o Loop Começou
         let _ = state.log_sender.send(crate::models::LogEntry {
             timestamp: chrono::Local::now().to_rfc3339(),
@@ -814,9 +814,9 @@ if payload.deep_research.unwrap_or(false) && !is_greeting {
             message: format!("📡 [Deep Research] 3 Queries Forjadas: {:?}. Lançando {} Spiders Concurrentes à Malha SearxNG...", extracted_queries, extracted_queries.len()),
         });
 
-        send_thought(&format!("<thought>Desdobramento em {} visões paralelas concluído. Lançando Meta-Spiders Cíbridas...</thought>\n", extracted_queries.len()));
+        send_thought(&format!("*Desdobramento em {} visões paralelas concluído. Lançando Meta-Spiders Cíbridas...*\n", extracted_queries.len()));
         for q in &extracted_queries {
-            send_thought(&format!("<thought>🔍 Querying web: \"{}\"</thought>\n", q));
+            send_thought(&format!("🔍 *Querying web: \"{}\"* \n", q));
         }
 
         let engine = std::sync::Arc::new(crate::research::DeepResearchEngine::new(Some(state.db.clone()), Some(state.adblock_engine.clone()), Some(state.vault_path.clone())));
@@ -1097,10 +1097,10 @@ if let Some(global_prompt) = global_system_prompt {
 // Injeta a Orquestração do ReWOO (Reasoning Without Observation) Se Habilitado e não for saudação
 if payload.rewoo_enabled.unwrap_or(false) && !is_greeting {
     let workspace_id = payload.workspace_id.clone().unwrap_or_else(|| "default".to_string());
-    send_thought("<thought>Consultando Plano de Tarefas Sovereign Hub...</thought>\n");
+    send_thought("🧭 *Sovereign Hub: Consultando Plano de Tarefas...*\n");
     let rewoo_observations = crate::rewoo::execute_rewoo_plan(&human_prompt, &workspace_id, &state.db).await;
     if !rewoo_observations.trim().is_empty() && rewoo_observations != "ReWOO Accumulated Observations:\n" {
-        send_thought("<thought>Sovereign ReWOO: Executando nós paralelos mapeados na memória local...</thought>\n<thought>Grafo ReWOO consolidado. Injetando descobertas.</thought>\n\n");
+        send_thought("🧠 *Sovereign ReWOO: Executando nós paralelos mapeados na memória local...*\n*Grafo ReWOO consolidado. Injetando descobertas.*\n\n");
         tracing::debug!("🧠 ReWOO Workflow Executed. Injecting compiled DAG observations.");
         purified_messages.push(json!({
             "role": "system",

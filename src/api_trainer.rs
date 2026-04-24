@@ -1727,19 +1727,18 @@ pub async fn run_deep_research_handler(
                                         let sovereign_tmp = std::env::temp_dir().join("sovereign");
                                         let _ = std::fs::create_dir_all(&sovereign_tmp);
 
-                                        // Clean content for file storage (strip UI headers like ### ...)
+                                        // Clean content for file storage (strip internal Sovereign UI headers ONLY)
                                         let mut clean_content = final_result.as_str();
-                                        if let Some(pos) = clean_content.find('{') {
-                                            if let Some(header_pos) = clean_content.find("###") {
-                                                if header_pos < pos {
-                                                    clean_content = &clean_content[pos..];
-                                                }
+                                        if clean_content.starts_with("### Sovereign") {
+                                            if let Some(next_line_pos) = clean_content.find('\n') {
+                                                clean_content = clean_content[next_line_pos..].trim();
                                             }
-                                        } else if let Some(pos) = clean_content.find("[- Chunk") {
-                                            if let Some(header_pos) = clean_content.find("## Source") {
-                                                 if header_pos < pos {
-                                                     clean_content = &clean_content[pos..];
-                                                 }
+                                        }
+                                        
+                                        // Specific JSON refinement (preserve raw JSON if wrapped in text)
+                                        if let Some(pos) = clean_content.find('{') {
+                                            if !clean_content.starts_with('{') {
+                                                clean_content = &clean_content[pos..];
                                             }
                                         }
 
@@ -1748,11 +1747,13 @@ pub async fn run_deep_research_handler(
                                             || final_result_up.contains("FALHA") 
                                             || final_result_up.contains("\"ERROR\":")
                                             || final_result_up.contains("SYSTEM EXECUTION ERROR")
-                                            || final_result_up.contains("CURL: (7)");
+                                            || final_result_up.contains("CURL: (7)")
+                                            || final_result_up.contains("TRACEBACK")
+                                            || final_result_up.contains("UNBOUNDLOCALERROR");
 
                                         // Um resultado só é válido se não for falha E tiver substância (JSON ou Chunks de pesquisa)
                                         let is_empty_extraction = is_failure
-                                            || (clean_content.len() < 100 && !clean_content.contains('{'))
+                                            || (clean_content.len() < 100 && !clean_content.contains('{') && !clean_content.contains("## Source"))
                                             || clean_content.starts_with("NÃO EXISTEM DADOS")
                                             || clean_content.starts_with("DADO NÃO ENCONTRADO");
 
