@@ -5,9 +5,11 @@ use crate::models::{ OpenAIChatChunkChoice, OpenAIChatChunkDelta, OpenAIChatChun
 use crate::api_tools::nvidia_client::NvidiaClient;
 // removed unused explicit scraper import
 
-// -------------------------------------------------------------
-// Autonomous Multi-Scraper Helperc
-// -------------------------------------------------------------
+/// 🕵️ **The Nurse | Scrape Engine**
+/// 
+/// Realiza a infiltração e extração de dados brutos de páginas web.
+/// Implementa um jitter biológico para evitar detecção e sanitiza o HTML
+/// para extrair apenas conteúdo semântico relevante (p, h1-h6, snippets).
 async fn scrape_engine(client: &reqwest::Client, name: &str, url: &str, jitter_base: u64) -> String {
     let jitter = jitter_base + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().subsec_micros() % 2500) as u64;
     tokio::time::sleep(tokio::time::Duration::from_millis(jitter)).await;
@@ -48,9 +50,11 @@ async fn scrape_engine(client: &reqwest::Client, name: &str, url: &str, jitter_b
     }
     String::new()
 }
-// -------------------------------------------------------------
-// Autonomous Fleet Orchestrator (Phase 39)
-// -------------------------------------------------------------
+/// 🧬 **Fleet Orchestrator | Model Discovery**
+/// 
+/// Interroga o backend local (Ollama) para identificar o melhor modelo disponível
+/// dentro de uma hierarquia de preferência. Permite que o sistema se adapte
+/// dinamicamente aos modelos que o usuário possui instalados.
 pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String {
     let client = reqwest::Client::new();
     if let Ok(res) = client.get(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/tags")).send().await
@@ -618,7 +622,11 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
     let val: String = sqlx::Row::get(&row, "value_json");
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
         
-        // --- Tri-Agent Sovereign Router (Heuristic MoE) ---
+        // 🧠 **Tri-Agent Sovereign Router (Heuristic MoE)**
+        // 
+        // Implementa um roteador semântico baseado em heurísticas de intenção (Mixture of Experts).
+        // Detecta se o usuário deseja código, matemática ou busca web e direciona para o agente
+        // especializado configurado no sistema.
         let prompt_lower = human_prompt.to_lowercase();
         let is_coding_semantics = prompt_lower.contains("def ") || prompt_lower.contains("function ") || prompt_lower.contains("fn ") 
                                   || prompt_lower.contains("class ") || prompt_lower.contains("struct ") || prompt_lower.contains("=>")
@@ -1087,7 +1095,11 @@ crate::api_chat::save_message(&state.db, active_session_id, "user", &human_promp
 // 2. Transcrever Mensagens Complexas (Multimodal/Arrays) para Strict Strings + Injeção de RAG Nativo
 let mut purified_messages: Vec<Value> = Vec::new();
 
-// --- SOVEREIGN CONTEXT INJECTOR (RAG V2 - KANBAN) ---
+// 🧬 **Sovereign Context Injector (RAG v2 - Project Memory)**
+// 
+// Este módulo é responsável por extrair a "consciência" do projeto atual do SQLite
+// e do Vault Markdown, injetando-a como contexto sistêmico no prompt do LLM.
+// Isso garante que o agente saiba exatamente em quais tarefas e documentos está trabalhando.
 let mut project_context = String::new();
 if let Some(pid) = payload.project_id
     && let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
