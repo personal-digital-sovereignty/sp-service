@@ -1932,10 +1932,110 @@ let final_stream = async_stream::stream! {
     }
 };
 
+
+
 // Envolve a Stream num responder SSE do Axum e devolve o header Keep-Alive.
 Sse::new(final_stream)
     .keep_alive(axum::response::sse::KeepAlive::new())
     .into_response()
+}
+
+/// Bypass Direto para OpenRouter Mesh (Para Ferramentas Externas/OpenCode)
+pub async fn openrouter_chat_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<OpenAIChatRequest>,
+) -> Response {
+    let mut openrouter_settings: Option<OpenRouterSettings> = None;
+    if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'openrouter'")
+        .fetch_optional(&state.db).await {
+        let val: String = sqlx::Row::get(&row, "value_json");
+        if let Ok(mut settings) = serde_json::from_str::<OpenRouterSettings>(&val) {
+            if let Some(decrypted) = crate::kms::decrypt_vault_secret(&settings.api_key) {
+                settings.api_key = decrypted;
+                openrouter_settings = Some(settings);
+            }
+        }
+    }
+
+    let settings = match openrouter_settings {
+        Some(s) if s.enabled => s,
+        _ => {
+            let err_msg = "🚨 **OpenRouter Bypass Falhou**: O serviço não está configurado ou está desabilitado nas configurações do Sovereign Pair.";
+            let chunk = crate::models::OpenAIChatChunkResponse {
+                id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Local::now().timestamp(),
+                model: payload.model.clone(),
+                choices: vec![crate::models::OpenAIChatChunkChoice {
+                    index: 0,
+                    delta: crate::models::OpenAIChatChunkDelta {
+                        role: Some("assistant".to_string()),
+                        content: Some(err_msg.to_string()),
+                        tool_calls: None,
+                    },
+                    finish_reason: Some("error".to_string()),
+                }],
+                usage: None,
+            };
+            let stream = futures_util::stream::iter(vec![
+                Ok::<Event, Infallible>(Event::default().data(serde_json::to_string(&chunk).unwrap_or_default())),
+                Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+            ]);
+            return Sse::new(stream).into_response();
+        }
+    };
+
+    let or_client = OpenRouterClient::new(settings);
+    let model_name = payload.model.clone();
+    
+    match or_client.chat_completions_stream(payload).await {
+        Ok(mut or_stream) => {
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Result<Event, Infallible>>();
+            
+            tokio::spawn(async move {
+                while let Some(event_res) = or_stream.next().await {
+                    match event_res {
+                        Ok(reqwest_eventsource::Event::Message(msg)) => {
+                            let _ = tx.send(Ok(Event::default().data(msg.data.clone())));
+                            if msg.data == "[DONE]" { break; }
+                        },
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("OpenRouter Bypass Stream Error: {}", e);
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let stream = tokio_stream::wrappers::UnboundedReceiverStream::new(rx);
+            Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()).into_response()
+        },
+        Err(e) => {
+            let err_msg = format!("🚨 **Falha de Conexão OpenRouter**: {}", e);
+            let chunk = crate::models::OpenAIChatChunkResponse {
+                id: format!("chatcmpl-err-{}", uuid::Uuid::new_v4()),
+                object: "chat.completion.chunk".to_string(),
+                created: chrono::Local::now().timestamp(),
+                model: model_name,
+                choices: vec![crate::models::OpenAIChatChunkChoice {
+                    index: 0,
+                    delta: crate::models::OpenAIChatChunkDelta {
+                        role: Some("assistant".to_string()),
+                        content: Some(err_msg),
+                        tool_calls: None,
+                    },
+                    finish_reason: Some("error".to_string()),
+                }],
+                usage: None,
+            };
+            let stream = futures_util::stream::iter(vec![
+                Ok::<Event, Infallible>(Event::default().data(serde_json::to_string(&chunk).unwrap_or_default())),
+                Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+            ]);
+            Sse::new(stream).into_response()
+        }
+    }
 }
 
 /// Spawns the Sovereign Pair Desktop GUI (Tauri App) process natively from the OS.

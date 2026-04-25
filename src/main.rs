@@ -490,6 +490,7 @@ async fn main() {
         // ------------------ Chat Endpoints ------------------
         .route("/opencode/v1/chat/completions", post(api::chat_completions_handler))
         .route("/v1/chat/completions", post(api::chat_completions_handler))
+        .route("/v1/chat/completions/openrouter", post(api::openrouter_chat_handler))
         .route("/chat/completions", post(api::chat_completions_handler))
         .route("/v1/responses", post(realtime::realtime_responses_handler))
         .route("/v1/feedback", post(api::feedback_handler))
