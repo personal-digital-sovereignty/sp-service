@@ -239,3 +239,34 @@ pub struct OpenAIChatChunkResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<OpenAITokenUsage>,
 }
+
+// ==========================================
+// OpenRouter Integration Models
+// ==========================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenRouterSettings {
+    pub api_key: String,
+    pub base_url: String,
+    pub site_url: String,
+    pub site_name: String,
+    pub enabled: bool,
+    pub default_model: String,
+    pub fallback_enabled: bool,
+}
+
+/// Extensão do request OpenAI para suportar parâmetros específicos do OpenRouter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenRouterRequest {
+    #[serde(flatten)]
+    pub openai_request: OpenAIChatRequest,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transforms: Option<Vec<String>>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub models: Option<Vec<String>>,
+    
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>, // 'fallback' ou 'native'
+}
