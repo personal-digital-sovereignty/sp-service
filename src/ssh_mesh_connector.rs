@@ -5,11 +5,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 
-/// 🕸️ **Sovereign Mesh | Malha P2P Criptografada**
-/// 
-/// Gerencia túneis SSH persistentes que conectam múltiplos Nós Sovereign.
-/// Permite que o tráfego de inferência e sincronização de conhecimento flua 
-/// de forma segura por redes públicas sem exposição de portas no firewall.
+// 🕸️ **Sovereign Mesh | Malha P2P Criptografada**
+// 
+// Gerencia túneis SSH persistentes que conectam múltiplos Nós Sovereign.
+// Permite que o tráfego de inferência e sincronização de conhecimento flua 
+// de forma segura por redes públicas sem exposição de portas no firewall.
 lazy_static::lazy_static! {
     /// Mapa de Túneis Ativos: Porta Local -> (URI Remota, Caminho da Chave).
     pub static ref ACTIVE_MESH_TUNNELS: Arc<Mutex<HashMap<u16, (String, String)>>> = Arc::new(Mutex::new(HashMap::<u16, (String, String)>::new()));

@@ -18,6 +18,7 @@ impl OpenRouterClient {
     }
 
     /// Execução de chat completions (Blocking)
+    #[allow(dead_code)]
     pub async fn chat_completions(&self, request: OpenAIChatRequest) -> Result<OpenAIChatResponse> {
         let url = format!("{}/chat/completions", self.settings.base_url.trim_end_matches('/'));
         

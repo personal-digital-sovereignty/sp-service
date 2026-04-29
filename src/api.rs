@@ -1,5 +1,5 @@
 use axum::{ extract::{Json, State}, response::{ sse::{Event, Sse}, IntoResponse, Response, }, }; use futures_util::StreamExt;  use serde_json::{json, Value}; use std::convert::Infallible; use std::sync::Arc; use tracing::{error, info};
-use sqlx::Row;
+
 
 use crate::models::{ OpenAIChatChunkChoice, OpenAIChatChunkDelta, OpenAIChatChunkResponse, OpenAIChatRequest, OpenRouterSettings, QwenSettings, NvidiaSettings }; use crate::AppState; use crate::api_tools::openrouter_client::OpenRouterClient; use crate::api_tools::qwen_client::QwenClient;
 use crate::api_tools::nvidia_client::NvidiaClient;
@@ -1513,9 +1513,11 @@ if let Some(r) = or_vault {
                 os.enabled = true;
                 openrouter_settings = Some(os);
             } else {
-                let mut os = OpenRouterSettings::default();
-                os.api_key = raw;
-                os.enabled = true;
+                let os = OpenRouterSettings {
+                    api_key: raw,
+                    enabled: true,
+                    ..Default::default()
+                };
                 openrouter_settings = Some(os);
             }
         }
@@ -1560,7 +1562,7 @@ if use_openrouter && let Some(settings) = openrouter_settings {
         let mut qwen_payload_model = ollama_model.replace("qwen/", "");
         if qwen_payload_model.is_empty() { qwen_payload_model = qwen_settings.default_model; }
 
-        match qwen_client.stream_chat_completions(qwen_payload_model, payload.messages.clone(), payload.temperature.map(|t| t as f32), payload.max_tokens).await {
+        match qwen_client.stream_chat_completions(qwen_payload_model, payload.messages.clone(), payload.temperature, payload.max_tokens).await {
             Ok(mut q_stream) => {
                 let tx_clone = tx_sse_clone.clone();
                 let mut accumulator = String::new();

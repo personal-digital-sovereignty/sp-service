@@ -257,6 +257,7 @@ pub struct OpenRouterSettings {
 
 /// Extensão do request OpenAI para suportar parâmetros específicos do OpenRouter
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct OpenRouterRequest {
     #[serde(flatten)]
     pub openai_request: OpenAIChatRequest,

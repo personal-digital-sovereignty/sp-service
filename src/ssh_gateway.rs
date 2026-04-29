@@ -1,7 +1,6 @@
 use std::process::Stdio;
 use tokio::process::Command;
 use tracing::{info, error, debug};
-use serde_json::Value;
 use reqwest::Client;
 use crate::mesh_router::MeshRouter;
 
@@ -13,7 +12,7 @@ impl SshGateway {
     /// Captures Stdout and Stderr to feed back into the Sovereign Pair 'ReWOO Solver'.
     pub async fn execute_sandboxed_script(script_payload: &str, db: sqlx::SqlitePool) -> Result<String, String> {
         let target_uri: String;
-        let mut key_path = String::new();
+        let key_path;
 
         let client = Client::new();
         // 1. TENTA ROTEAMENTO INTELIGENTE NA MALHA (Mesh Router P2P)
