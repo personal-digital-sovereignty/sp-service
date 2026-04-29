@@ -922,7 +922,7 @@ pub async fn run_deep_research_handler(
         }
 
         if must_escalate {
-            let dyn_mestre = crate::api::discover_capable_master_agent(engine_arc.db_pool.as_ref(), 3.0, true, true, "llama3.1:8b").await;
+            let dyn_mestre = crate::api::discover_capable_master_agent(engine_arc.db_pool.as_ref(), 3.0, true, true, "qwen2.5:7b").await;
             let _ = TRAINER_LOGS.send(format!("⚠️ [Proteção Cognitiva Ativa] O modelo [{}] mapeado não possui Tool Calling estrutural via DB. Escalonando Master Agent Dinâmico: [{}]", target_model_name, dyn_mestre));
             target_model_name = dyn_mestre;
         }
@@ -2089,7 +2089,7 @@ pub async fn run_deep_research_handler(
                                 has_failed_tools = true;
                                 let _ = TRAINER_LOGS.send(format!("⚠️ [Agentic Firewall] O modelo '{}' recusa Tools. Procurando rescate paramétrico...", target_model_name));
                                 
-                                target_model_name = crate::api::discover_capable_master_agent(engine_arc.db_pool.as_ref(), 4.0, true, true, "llama3.1:8b").await;
+                                target_model_name = crate::api::discover_capable_master_agent(engine_arc.db_pool.as_ref(), 4.0, true, true, "qwen2.5:7b").await;
                                 let _ = TRAINER_LOGS.send(format!("🚀 [Auto-Healing Dinâmico] Fallback ativado através do Banco de Capacidades: '{}'.", target_model_name));
                                 continue;
                             }
@@ -2530,28 +2530,32 @@ pub async fn run_deep_research_handler(
                     break;
                 }
 
-                // FIX-10: Após esgotar retries com o modelo primário, escalar para gemma4:e4b
-                // como Scribe de última instância antes de cair no failsafe de fatos brutos.
+                // FIX-10: Após esgotar retries com o modelo primário, escalar para um Scribe reserva na Matrix
                 if attempt == max_retries {
-                    let gemma_fallback = "gemma4:e4b".to_string();
-                    // Só escalar se o Scribe atual NÃO é já o gemma4 (evitar loop)
-                    if scribe_model != gemma_fallback {
-                        // FIX-F3: Se o auditor é o MESMO modelo que o novo Scribe (gemma4),
-                        // trocamos o auditor para o Scribe original (ex: qwen3:8b) para evitar
-                        // self-audit (gemma4 auditando gemma4 = sem viés cruzado).
-                        let original_scribe = scribe_model.clone();
-                        if auth_inquisitor.to_lowercase().contains("gemma") {
-                            auth_inquisitor = original_scribe.clone();
-                            let _ = TRAINER_LOGS.send(format!(
-                                "🔄 [Sycophancy Breaker] Auditor trocado para '{}' (evitando self-audit com Scribe de resgate).",
-                                auth_inquisitor
-                            ));
+                    let mut scribe_fallback = "qwen2.5:latest".to_string();
+                    if let Some(p) = engine_arc.db_pool.as_ref() {
+                        if let Ok(Some(row)) = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_scribe = 1 AND is_installed = 1 AND model_name != ? ORDER BY parameter_size DESC LIMIT 1")
+                            .bind(&scribe_model)
+                            .fetch_optional(p).await {
+                            if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+                                scribe_fallback = name;
+                            }
                         }
+                    }
+
+                    // Só escalar se o Scribe atual NÃO é já o fallback (evitar loop)
+                    if scribe_model != scribe_fallback {
+                        let original_scribe = scribe_model.clone();
+                        // Se o auditor for da mesma família, tentamos rotacionar
+                        if auth_inquisitor.to_lowercase().contains(&scribe_fallback.split(':').next().unwrap_or("").to_lowercase()) {
+                             auth_inquisitor = original_scribe.clone();
+                        }
+
                         let _ = TRAINER_LOGS.send(format!(
-                            "🔄 [Scribe Escalation] '{}' falhou {}× na auditoria. Escalando para '{}' como Scribe de resgate.",
-                            original_scribe, max_retries, gemma_fallback
+                            "🔄 [Scribe Escalation] '{}' falhou {}× na auditoria. Escalando para reserva dinâmico '{}'.",
+                            original_scribe, max_retries, scribe_fallback
                         ));
-                        scribe_model = gemma_fallback;
+                        scribe_model = scribe_fallback;
                         // Reset messages para o novo modelo (limpa o histórico de reprimendas do modelo anterior)
                         scribe_messages = vec![
                             serde_json::json!({"role": "system", "content": scribe_system}),

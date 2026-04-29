@@ -55,6 +55,20 @@ async fn scrape_engine(client: &reqwest::Client, name: &str, url: &str, jitter_b
 /// Interroga o backend local (Ollama) para identificar o melhor modelo disponível
 /// dentro de uma hierarquia de preferência. Permite que o sistema se adapte
 /// dinamicamente aos modelos que o usuário possui instalados.
+pub async fn discover_best_model_from_matrix(pool: &sqlx::SqlitePool, min_size: f32, fallback: &str) -> String {
+    if let Ok(Some(row)) = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_installed = 1 AND parameter_size >= ? ORDER BY parameter_size DESC LIMIT 1")
+        .bind(min_size)
+        .fetch_optional(pool).await
+    {
+        if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+            tracing::info!("✨ [Dynamic Discovery] Matrix Elegida (Auto): {}", name);
+            return name;
+        }
+    }
+    tracing::warn!("⚠️ [Dynamic Discovery] Matrix vazia. Usando fallback: {}", fallback);
+    fallback.to_string()
+}
+
 pub async fn discover_best_model(hierarchy: Vec<&str>, fallback: &str) -> String {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -112,7 +126,7 @@ pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
                 }
             }
             
-            if all_models.is_empty() { return "llama3.2:latest".to_string(); }
+            if all_models.is_empty() { return "qwen2.5:latest".to_string(); } // Last resort internal default
 
             // Mathematical Sizing Tiers
             let (min_b, max_b) = match tier {
@@ -148,7 +162,7 @@ pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
         }
         
         
-    "llama3.2:latest".to_string()
+    "qwen2.5:latest".to_string()
 }
 
 /// [Triviality Triage] - Zero-Latency Classification Layer
@@ -205,11 +219,13 @@ async fn perform_triviality_triage(prompt: &str, state: &Arc<AppState>) -> bool 
 
 pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(std::time::Duration::from_secs(10)) // Aumentado para 10s para redes lentas
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
+    
     let mut base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     
+    // Resolução de Clusters Dinâmicos (EPIC 3)
     if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'ollama_clusters'").fetch_optional(pool).await {
         let val: String = sqlx::Row::get(&row, "value_json");
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
@@ -228,15 +244,18 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
         }
     }
 
+    // Fallback de Sandbox (O Docker localhost != Host localhost)
     if base_url == "http://host.docker.internal:11434" && std::env::var("SOVEREIGN_RUN_ENV").unwrap_or_default() == "native" {
         base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string());
     }
     
+    tracing::info!("🔍 [Sovereign Core] Sincronizando Topologia Neural via {}", base_url);
+
     if let Ok(res) = client.get(format!("{}/api/tags", base_url)).send().await
         && let Ok(json) = res.json::<serde_json::Value>().await
         && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
             
-            // Amnésia Cognitiva: Invalida toda a topologia física no banco (mas mantém configs e restrições)
+            // Amnésia Cognitiva: Invalida toda a presença física no banco para reconstruir a verdade atual
             let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 0").execute(pool).await;
             
             for m in models {
@@ -253,15 +272,113 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                         };
                     }
 
-                    let exists: Option<i64> = sqlx::query_scalar("SELECT 1 FROM model_capabilities WHERE model_name = ?")
-                        .bind(name)
-                        .fetch_optional(pool)
-                        .await
-                        .unwrap_or(None);
+                    // Forçamos o profiling de TODOS os modelos (novos ou existentes)
+                    // para garantir que as novas heurísticas de 1.3.2 (Qwen 3.5, Phi-4) sejam aplicadas.
+                    let mut supports_tools = false;
+                    let mut is_reasoner = false;
+                    let mut template_str = String::new();
+                    
+                    let payload = serde_json::json!({"name": name});
+                    if let Ok(show_res) = client.post(format!("{}/api/show", base_url)).json(&payload).send().await
+                        && let Ok(show_json) = show_res.json::<serde_json::Value>().await {
+                            if let Some(t) = show_json.get("template").and_then(|v| v.as_str()) {
+                                template_str = t.to_string();
+                                let t_lower = t.to_lowercase();
+                                if t_lower.contains("tool") || t_lower.contains("function") {
+                                    supports_tools = true;
+                                }
+                                if t_lower.contains("think") {
+                                    is_reasoner = true;
+                                }
+                            }
+                    // Mapeamento heuristico v1.3.2: Suporte a Tools e Reasoners baseado em Família e Template
+                    let name_lower = name.to_lowercase();
+                    
+                    // Se o template não disse nada, tentamos via Família (Ollama details.family)
+                    if !supports_tools {
+                        if let Some(d) = show_json.get("details") {
+                            if let Some(fam) = d.get("family").and_then(|f| f.as_str()) {
+                                let fam_lower = fam.to_lowercase();
+                                // Famílias conhecidas por suportar tool-calling em versões modernas
+                                let tool_capable_families = ["qwen", "llama", "mistral", "gemma", "phi", "command-r", "firefunction"];
+                                if tool_capable_families.iter().any(|f| fam_lower.contains(f)) {
+                                    supports_tools = true;
+                                }
+                            }
+                        }
+                    }
 
-                    // Resolução de Alias: se o Ollama retorna 'model:tag' (ex: mistral-nemo:12b),
-                    // também marcar 'model:latest' como installed caso exista no banco (mesmo digest).
-                    // Isso evita entradas fantasmas OFFLINE para aliases canônicos.
+                    // Detecção de Reasoners via família ou nome
+                    if !is_reasoner {
+                        if let Some(d) = show_json.get("details") {
+                            if let Some(fam) = d.get("family").and_then(|f| f.as_str()) {
+                                let fam_lower = fam.to_lowercase();
+                                if fam_lower.contains("deepseek") || fam_lower.contains("r1") {
+                                    is_reasoner = true;
+                                }
+                            }
+                        }
+                        if name_lower.contains("reasoner") || name_lower.contains("r1") || name_lower.contains("think") {
+                            is_reasoner = true;
+                        }
+                    }
+
+                    let mut is_master = false;
+                    let mut is_scribe = false;
+                    let mut is_agent = false;
+                    let mut is_coder = false;
+                    let is_chat = true; 
+                    let mut is_project = false;
+
+                    // Definição inteligente baseada em parâmetros e capacidades
+                    // Master: Modelos com Tools, não-reasoners, e tamanho respeitável (>= 7B)
+                    if supports_tools && !is_reasoner && size_val >= 6.5 { is_master = true; }
+                    
+                    if supports_tools {
+                        is_scribe = true;
+                        is_agent = true;
+                        is_project = true;
+                    }
+                    
+                    if name_lower.contains("coder") || name_lower.contains("qwen") || name_lower.contains("deepseek") || name_lower.contains("llama") {
+                        is_coder = true;
+                    }
+
+                    // UPSERT: Atualiza TUDO, garantindo que o modelo seja marcado como instalado
+                    let _ = sqlx::query("
+                        INSERT INTO model_capabilities (
+                            model_name, parameter_size, supports_tools, is_reasoner, is_master, 
+                            is_scribe, is_agent, is_coder, is_chat, is_project, template, is_installed, last_checked
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                        ON CONFLICT(model_name) DO UPDATE SET
+                            parameter_size = excluded.parameter_size,
+                            supports_tools = excluded.supports_tools,
+                            is_reasoner = excluded.is_reasoner,
+                            is_master = excluded.is_master,
+                            is_scribe = excluded.is_scribe,
+                            is_agent = excluded.is_agent,
+                            is_coder = excluded.is_coder,
+                            is_chat = excluded.is_chat,
+                            is_project = excluded.is_project,
+                            template = excluded.template,
+                            is_installed = 1,
+                            last_checked = CURRENT_TIMESTAMP
+                    ")
+                    .bind(name)
+                    .bind(size_val)
+                    .bind(supports_tools)
+                    .bind(is_reasoner)
+                    .bind(is_master)
+                    .bind(is_scribe)
+                    .bind(is_agent)
+                    .bind(is_coder)
+                    .bind(is_chat)
+                    .bind(is_project)
+                    .bind(template_str)
+                    .execute(pool)
+                    .await;
+
+                    // Resolução de Alias: Se o Ollama retorna 'model:tag', também marca 'model:latest' se existir
                     if let Some(prefix) = name.split(':').next() {
                         let alias_latest = format!("{}:latest", prefix);
                         if alias_latest != name {
@@ -272,86 +389,11 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                         }
                     }
                         
-                    if exists.is_none() {
-                        let mut supports_tools = false;
-                        let mut is_reasoner = false;
-                        let mut template_str = String::new();
-                        
-                        let payload = serde_json::json!({"name": name});
-                        if let Ok(show_res) = client.post(format!("{}/api/show", base_url)).json(&payload).send().await
-                            && let Ok(show_json) = show_res.json::<serde_json::Value>().await {
-                                if let Some(t) = show_json.get("template").and_then(|v| v.as_str()) {
-                                    template_str = t.to_string();
-                                    let t_lower = t.to_lowercase();
-                                    if t_lower.contains("tool") || t_lower.contains("function") {
-                                        supports_tools = true;
-                                    }
-                                    if t_lower.contains("think") {
-                                        is_reasoner = true;
-                                    }
-                                }
-                                if let Some(d) = show_json.get("details")
-                                    && let Some(fam) = d.get("family").and_then(|f| f.as_str())
-                                        && fam.to_lowercase().contains("deepseek") { is_reasoner = true; }
-                            }
-                            
-                        // Mapeamento heuristico caso templates não sigam o padrão exato
-                        let name_lower = name.to_lowercase();
-                        if !supports_tools && (name_lower.contains("qwen") || name_lower.contains("llama3.1") || name_lower.contains("llama3.2") || name_lower.contains("mistral") || name_lower.contains("command-r") || name_lower.contains("gemma4")) {
-                            supports_tools = true;
-                        }
-                        if !is_reasoner && (name_lower.contains("deepseek") || name_lower.contains("reasoner")) {
-                            is_reasoner = true;
-                        }
-
-                        let mut is_master = false;
-                        let mut is_scribe = false;
-                        let mut is_agent = false;
-                        let mut is_coder = false;
-                        let is_chat = true; // Todo modelo pode chat
-                        let mut is_project = false;
-
-                        // Definição inteligente para facilitar o setup inicial!
-                        if supports_tools && !is_reasoner && size_val >= 7.0 {
-                            is_master = true; 
-                        }
-                        if supports_tools {
-                            is_scribe = true;
-                            is_agent = true;
-                            is_project = true;
-                        }
-                        if !supports_tools {
-                            is_master = false;
-                        }
-                        if name.to_lowercase().contains("coder") || name.to_lowercase().contains("qwen") || name.to_lowercase().contains("deepseek") {
-                            is_coder = true;
-                        }
-
-                        let _ = sqlx::query("INSERT OR REPLACE INTO model_capabilities (model_name, parameter_size, supports_tools, is_reasoner, is_master, is_scribe, is_agent, is_coder, is_chat, is_project, template) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-                            .bind(name)
-                            .bind(size_val)
-                            .bind(supports_tools)
-                            .bind(is_reasoner)
-                            .bind(is_master)
-                            .bind(is_scribe)
-                            .bind(is_agent)
-                            .bind(is_coder)
-                            .bind(is_chat)
-                            .bind(is_project)
-                            .bind(template_str)
-                            .execute(pool)
-                            .await;
-                            
-                        tracing::info!("🧠 [Model Capabilities] Profiling {}: Size={}B, Tools={}, Reasoner={}, Master={}, Scribe={}", name, size_val, supports_tools, is_reasoner, is_master, is_scribe);
-                    }
-                    
-                    // Independentemente de ser novo ou herdado, reascendemos sua Presença Física na Matrix
-                    let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 1 WHERE model_name = ?")
-                        .bind(name)
-                        .execute(pool)
-                        .await;
+                    tracing::info!("🧠 [Model Discovery] Synced {}: Size={}B, Tools={}, Reasoner={}, Master={}", name, size_val, supports_tools, is_reasoner, is_master);
                 }
             }
+        } else {
+            tracing::error!("❌ [Sovereign Core] Falha ao conectar ao Ollama em {}. Modelos offline não foram atualizados.", base_url);
         }
 }
 
@@ -679,8 +721,17 @@ let mut resolved_model = requested_model.clone();
 // If OpenCode (or the IDE) injects commercial models blindly, we forcefully hijack 
 // them down to the Sovereign Private Mesh locally, ensuring NO 404 Ollama Panics on Factory Installs.
 if requested_model.to_lowercase().contains("gpt") || requested_model.to_lowercase().contains("claude") {
-    let hierarchy = vec!["qwen3:8b", "gemma4:e4b", "qwen2.5:14b", "phi4:14b", "gemma2:9b", "llama3.1:8b", "qwen2.5:7b", "llama3.2"];
-    resolved_model = discover_best_model(hierarchy, "llama3.2:latest").await;
+    // Em vez de uma hierarquia estática, buscamos o melhor modelo Master instalado na Matrix
+    if let Ok(Some(row)) = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_master = 1 AND is_installed = 1 ORDER BY parameter_size DESC LIMIT 1")
+        .fetch_optional(&state.db).await
+    {
+        if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+            resolved_model = name;
+        }
+    } else {
+        // Fallback absoluto se a Matrix estiver vazia
+        resolved_model = "qwen2.5:latest".to_string();
+    }
     tracing::info!("🔄 Proxy OpenCode/IDE enviou modelo comercial [{}]. Hijacking dinâmico para Endpoint Soberano: [{}]", requested_model, resolved_model);
 }
 

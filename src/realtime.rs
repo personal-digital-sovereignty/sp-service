@@ -25,8 +25,7 @@ pub async fn realtime_responses_handler(
     info!("🔥 [Sovereign Core] Realtime Vercel Hack para o modelo: [{}]", requested_model);
 
     // 1. Transpilação Dinâmica
-    let realtime_hierarchy = vec!["llama3.2:3b", "llama3.2:1b", "qwen2.5:1.5b", "gemma2:2b", "llama3.2"];
-    let mut db_model_fallback = crate::api::discover_best_model(realtime_hierarchy, "llama3.2:latest").await;
+    let mut db_model_fallback = crate::api::discover_best_model_from_matrix(&state.db, 1.0, "qwen2.5:latest").await;
     if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(&state.db).await {
         let val: String = sqlx::Row::get(&row, "value_json");
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val)

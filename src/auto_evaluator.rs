@@ -24,8 +24,7 @@ pub async fn start_evaluator_loop(state: Arc<AppState>) {
                     // Local Ollama Judge Prompt (Zero-Shot)
                     let prompt = format!("You are an impartial AI Judge. Evaluate the following RAG response based on the provided context.\nQuery: {}\nContext: {}\nResponse: {}\n\nGive two scores from 0 to 100: Faithfulness (Is the answer supported by the context?) and Precision (Is it directly answering the query without hallucinations?). Also provide a 2-word 'topic' for the query, and an emotional 'sentiment' estimation (Frustrated, Neutral, or Inquisitive) of the user based on the query. Return ONLY a valid JSON object in this exact format: {{\"faithfulness\": 95, \"precision\": 90, \"topic\": \"Data Privacy\", \"sentiment\": \"Inquisitive\"}}", query, context, response);
                     
-                    let evaluator_hierarchy = vec!["qwen2.5:14b", "qwen2.5:7b", "gemma2", "llama3.1", "llama3.2"];
-                    let evaluator_model = crate::api::discover_best_model(evaluator_hierarchy, "llama3.2:latest").await;
+                    let evaluator_model = crate::api::discover_best_model_from_matrix(&state.db, 6.0, "qwen2.5:latest").await;
                     
                     let ollama_req = json!({
                         "model": evaluator_model,
