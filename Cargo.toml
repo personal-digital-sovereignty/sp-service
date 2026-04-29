@@ -34,6 +34,8 @@ dirs = "6.0.0"
 walkdir = "2.5.0"
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 notify = "8.2.0"
+# Linux: links dinamicamente com libsqlite3-dev instalado via apt
+# Windows/macOS: usa SQLite bundled (compilado junto) — sem dependência de lib de sistema
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid"] }
 chrono = { version = "0.4.44", features = ["serde"] }
 async-recursion = "1.1.1"
@@ -84,3 +86,8 @@ tower = { version = "0.4.13", features = ["util"] }
 sha2 = "0.10.8"
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+
+# GAP-01 FIX: Windows & macOS não possuem libsqlite3 de sistema nos runners de CI.
+# A feature 'bundled' compila o SQLite junto ao binário, eliminando a dependência dinâmica.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio-rustls", "chrono", "uuid", "bundled"] }
