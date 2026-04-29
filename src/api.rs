@@ -199,7 +199,29 @@ async fn perform_triviality_triage(prompt: &str, state: &Arc<AppState>) -> bool 
 
 pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
     let client = reqwest::Client::new();
-    let base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    let mut base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    
+    if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'ollama_clusters'").fetch_optional(pool).await {
+        let val: String = sqlx::Row::get(&row, "value_json");
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
+            let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
+            if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
+                for c in clusters {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
+                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                            let clean_url = url.trim_end_matches('/').to_string();
+                            if !clean_url.is_empty() {
+                                base_url = clean_url;
+                            }
+                        }
+                }
+            }
+        }
+    }
+
+    if base_url == "http://host.docker.internal:11434" && std::env::var("SOVEREIGN_RUN_ENV").unwrap_or_default() == "native" {
+        base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+    }
     
     if let Ok(res) = client.get(format!("{}/api/tags", base_url)).send().await
         && let Ok(json) = res.json::<serde_json::Value>().await
@@ -456,7 +478,6 @@ let mut qwen_settings = QwenSettings::default();
             }
         }
     }
-}
 
 let mut nvidia_settings = NvidiaSettings::default();
 if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'nvidia'").fetch_optional(&state.db).await {

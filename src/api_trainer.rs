@@ -647,6 +647,7 @@ async fn execute_sub_analyst(
     // - 50KB - 120KB: Senior (Modelos 70B)
     // - > 120KB: Specialist (Especialistas / DeepThinkers)
     // Isso otimiza o uso de VRAM e TTFT, usando 'canhões para matar moscas' apenas quando necessário.
+    let payload_size = reranked_md.len();
     let routed_sub_agent = if payload_size < 15_000 {
         let _ = TRAINER_LOGS.send(format!("📊 [Cognitive Routing] {} bytes: Escalonando Estagiário Dinâmico", payload_size));
         crate::api::discover_cognitive_model_by_tier("intern").await

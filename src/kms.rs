@@ -14,6 +14,8 @@ const KEK_ENV_VAR: &str = "SOVEREIGN_MASTER_KEK";
 
 use std::sync::OnceLock;
 
+static MASTER_KEY: OnceLock<[u8; 32]> = OnceLock::new();
+
 /// 🔐 **KMS | Key Management System (Sovereign Vault)**
 /// 
 /// Provê a infraestrutura de criptografia autenticada (AES-256-GCM) para

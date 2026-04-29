@@ -55,6 +55,11 @@ impl SyncEngine {
             );
             let mut watcher = match watcher_result {
                 Ok(w) => w,
+                Err(e) => {
+                    tracing::error!("Falha ao iniciar File Watcher: {}", e);
+                    return;
+                }
+            };
             // --- 🧹 0. Sovereign Garbage Collector (Orphan Purge) ---
             // Antes de iniciar a vigilância, o sistema varre a base de dados em busca de
             // referências a arquivos que não existem mais fisicamente no disco.
