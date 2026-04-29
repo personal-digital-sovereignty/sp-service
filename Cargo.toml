@@ -56,7 +56,7 @@ fastembed = "5.13.0"
 readability = "0.3.0"
 unicode-segmentation = "1.13.2"
 # Manipulação Multimodal (Visão & Áudio)
-ort = "2.0.0-rc.4"
+ort = { version = "2.0.0-rc.4", features = ["download-binaries"] }
 symphonia = { version = "0.5.4", features = ["all"] }
 image = "0.25.1"
 ndarray = "0.16.1"
