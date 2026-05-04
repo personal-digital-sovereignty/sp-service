@@ -1,0 +1,140 @@
+name: Deploy Sovereign Cloud (OCI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Terraform Action to perform'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
+      release_version:
+        description: 'Artefato a Imputar (Ex: 1.4.0, nightly, ou deixe "latest")'
+        required: true
+        default: 'latest'
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  opentofu-action:
+    name: "OpenTofu Apply & Binary Deployment (Oracle ARM A1)"
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./infra/terraform
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Resolve Release Version
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION_INPUT: ${{ github.event.inputs.release_version }}
+        run: |
+          TARGET_VERSION="$RELEASE_VERSION_INPUT"
+          if [ -z "$TARGET_VERSION" ] || [ "$TARGET_VERSION" == "latest" ]; then
+            LATEST=$(gh release list --limit 1 | awk '{print $1}')
+            echo "version=$LATEST" >> "$GITHUB_ENV"
+            echo "A versao Dinamica Selecionada foi: $LATEST"
+          else
+            echo "version=$TARGET_VERSION" >> "$GITHUB_ENV"
+            echo "A versao Manual Apontada foi: $TARGET_VERSION"
+          fi
+
+      - name: Fetch Encrypted TF State (Zero-Cost Backend)
+        id: fetch-state
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATE_PASSWORD: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          echo "Buscando o log mestre do ultimo sucesso (State)..."
+          LAST_RUN=$(gh run list --workflow "Deploy Sovereign Cloud (OCI)" --status success --branch main --limit 1 --json databaseId -q '.[0].databaseId')
+          if [ "$LAST_RUN" != "null" ] && [ -n "$LAST_RUN" ]; then
+            echo "Ultima run viavel: $LAST_RUN. Fazendo download do estado criptografado..."
+            gh run download "$LAST_RUN" -n tofu-state -D . || echo "Sem artefato de state previo encontrado."
+
+            if [ -f "terraform.tfstate.gpg" ]; then
+              echo "Descriptografando infra-state OCI injetado..."
+              SYMMETRIC_KEY=$(echo "$STATE_PASSWORD" | sha256sum | awk '{print $1}')
+              echo "$SYMMETRIC_KEY" | gpg --quiet --batch --yes --decrypt --passphrase-fd 0 --output terraform.tfstate terraform.tfstate
+              echo "Estado carregado com sucesso na maquina runner!"
+            fi
+          else
+            echo "Primeiro deploy oficial detectado ou retencao expirada. Nenhuma run-state encontrada."
+          fi
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb
+        with:
+          tofu_wrapper: false
+          tofu_version: latest
+
+      - name: OpenTofu Init
+        run: tofu init
+
+      - name: OpenTofu Validate
+        run: tofu validate
+
+      - name: OpenTofu Action (Infrastructure as Code)
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          TF_VAR_region: ${{ vars.OCI_REGION || 'sa-saopaulo-1' }}
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID != '' && secrets.OCI_COMPARTMENT_OCID || secrets.OCI_TENANCY_OCID }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          TF_VAR_ssh_private_key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          TF_VAR_pat_ghcr: ${{ secrets.PAT_GHCR }}
+          TF_VAR_boot_volume_size_in_gbs: ${{ vars.OCI_BOOT_VOLUME_SIZE || 200 }}
+          TF_VAR_release_version: ${{ github.event.inputs.release_version || 'nightly' }}
+          ACTION_INPUT: ${{ github.event.inputs.action || 'apply' }}
+        run: |
+          if [ "$ACTION_INPUT" == "destroy" ]; then
+            echo "Running OpenTofu Destroy..."
+            tofu destroy -auto-approve
+          else
+            echo "Running OpenTofu Apply (Zero-Downtime Pipeline)..."
+            tofu apply -auto-approve
+            echo "==================================================================="
+            echo "✅ INSTANCIA OCI VERIFICADA / PROVISIONADA!"
+            echo "⚡ O deploy remoto injetou o Binario Versao: $TF_VAR_release_version"
+            echo "==================================================================="
+          fi
+
+      - name: Encrypt Output State
+        if: always()
+        env:
+          STATE_PASSWORD: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -f "terraform.tfstate" ]; then
+            echo "Criptografando estado da infraestrutura Oracle para retencao..."
+            SYMMETRIC_KEY=$(echo "$STATE_PASSWORD" | sha256sum | awk '{print $1}')
+            echo "$SYMMETRIC_KEY" | gpg --quiet --batch --yes --symmetric --cipher-algo AES256 --passphrase-fd 0 --output terraform.tfstate.gpg terraform.tfstate
+          fi
+
+      - name: Upload Encrypted State Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tofu-state
+          path: infra/terraform/terraform.tfstate.gpg
+          retention-days: 90
+          overwrite: true

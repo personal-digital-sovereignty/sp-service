@@ -1,4 +1,3 @@
-use std::process::Command;
 use sha2::{Sha256, Digest};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -19,26 +18,9 @@ struct VaultEntry {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=../scripts/fetch_public_apis.py");
     println!("cargo:rerun-if-changed=prompts/core_vault.toml");
-    
-    // --- PHASE 1: API Vetorization (existing) ---
-    println!("cargo:warning=O Sovereign Build System está vetorizando a lista de APIs públicas...");
-    
-    let status = Command::new("python3")
-        .arg("../scripts/fetch_public_apis.py")
-        .status();
-        
-    match status {
-        Ok(s) if s.success() => {
-            println!("cargo:warning=APIs listadas com sucesso (Base64 gerado).");
-        }
-        _ => {
-            println!("cargo:warning=Falha ao executar o Python scraper (Fallback vazio será ativado).");
-        }
-    }
 
-    // --- PHASE 2: Prompt Vault Hash Generation ---
+    // --- Prompt Vault Hash Generation ---
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let hashes_path = std::path::Path::new(&out_dir).join("prompt_hashes.rs");
     let mut hashes_file = std::fs::File::create(&hashes_path).unwrap();
@@ -47,7 +29,7 @@ fn main() {
     if toml_path.exists() {
         let content = std::fs::read_to_string(toml_path).unwrap();
         let parsed: HashMap<String, VaultEntry> = toml::from_str(&content).unwrap_or_default();
-        
+
         let mut entries = Vec::new();
         for (slug, entry) in &parsed {
             let mut hasher = Sha256::new();
@@ -61,7 +43,7 @@ fn main() {
         writeln!(hashes_file, "pub const CORE_PROMPT_HASHES: &[(&str, &str)] = &[").unwrap();
         writeln!(hashes_file, "{}", entries.join(",\n")).unwrap();
         writeln!(hashes_file, "];").unwrap();
-        
+
         println!("cargo:warning=Prompt Vault: {} hashes SHA-256 compilados.", parsed.len());
     } else {
         // Fallback: array vazio (DB mantém prompts do último seed)

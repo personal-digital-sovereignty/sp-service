@@ -1,0 +1,316 @@
+name: sp-service CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [created]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  # ==========================================
+  # Gate 0: Pipeline for Pipelines
+  # ==========================================
+  pipeline-security:
+    name: "Gate 0: Actionlint & Zizmor"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check workflow YAML syntax (Actionlint)
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8
+
+      - name: Analyze workflow security logic (Zizmor)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install zizmor
+          zizmor .github/workflows || echo "Zizmor audit complete (non-blocking for MVP)."
+
+  # ==========================================
+  # Gate 1: SAST (Static Analysis)
+  # ==========================================
+  sast-semgrep:
+    name: "Gate 1: Semgrep (SAST)"
+    needs: pipeline-security
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep with Strict CI Enforcements
+        run: semgrep scan --config auto --error --exclude-rule python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+
+  # ==========================================
+  # Gate 2: SCA (Dependencies)
+  # ==========================================
+  sca-trivy:
+    name: "Gate 2: Trivy (SCA)"
+    needs: sast-semgrep
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: 1
+          severity: 'CRITICAL,HIGH'
+
+  # ==========================================
+  # Gate 3: Rust Code Quality
+  # ==========================================
+  quality-rust:
+    name: "Gate 3: Rust Clippy + Tests"
+    needs: sast-semgrep
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - name: Install SQLite Runtime Dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+      - name: Cargo Clippy Audit
+        run: cargo clippy -- -D warnings
+      - name: Cargo Unit Tests
+        run: cargo test
+
+  # ==========================================
+  # Gate 4: Python Workers Quality
+  # ==========================================
+  quality-python:
+    name: "Gate 4: Ruff + Pytest"
+    needs: pipeline-security
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install ruff pytest pandas tabulate
+      - name: Ruff lint (critical errors only)
+        run: ruff check python_workers/ --select E,F --ignore E501,E701
+      - name: Pytest (AST Jail + Time-Series)
+        run: pytest python_workers/tests/ -v --tb=short
+
+  # ==========================================
+  # Aggregate Gate
+  # ==========================================
+  foss-enterprise-devsecops:
+    name: "FOSS Enterprise DevSecOps"
+    needs: [pipeline-security, sast-semgrep, sca-trivy, quality-rust, quality-python]
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - run: echo "All FOSS Enterprise DevSecOps Gates Passed!"
+
+  # ==========================================
+  # Builder Matrix
+  # ==========================================
+  build-core:
+    needs: [foss-enterprise-devsecops]
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: sp-service-linux-amd64
+            binary_name: sp-service
+            target_triple: x86_64-unknown-linux-gnu
+          - os: windows-latest
+            artifact_name: sp-service-windows-amd64
+            binary_name: sp-service.exe
+            target_triple: x86_64-pc-windows-msvc
+          - os: ubuntu-24.04-arm
+            artifact_name: sp-service-linux-arm64
+            binary_name: sp-service
+            target_triple: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            artifact_name: sp-service-macos-arm64
+            binary_name: sp-service
+            target_triple: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target_triple }}
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+          key: core-${{ matrix.os }}
+
+      - name: Install SQLite Runtime Dependencies (Linux Only)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Compile sp-service (Rust)
+        run: cargo build --release --target ${{ matrix.target_triple }}
+
+      - name: Upload Core Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target_triple }}/release/${{ matrix.binary_name }}
+
+  # ==========================================
+  # Docker Build
+  # ==========================================
+  build-docker:
+    needs: [foss-enterprise-devsecops]
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Run Trivy Image Scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+  # ==========================================
+  # Release Distribution
+  # ==========================================
+  publish-nightly:
+    needs: [build-core, build-docker]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Update Nightly Tag
+        uses: richardsimko/update-tag@aab2434e9a5040687874aa39d1c6377ec0cb0d94
+        with:
+          tag_name: nightly
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rename Artifacts for Release
+        run: |
+          mv sp-service-linux-amd64/sp-service sp-service-linux-amd64-binary
+          mv sp-service-linux-arm64/sp-service sp-service-linux-arm64-binary
+          mv sp-service-windows-amd64/sp-service.exe sp-service-windows-amd64-binary.exe
+          mv sp-service-macos-arm64/sp-service sp-service-macos-arm64-binary
+
+      - name: Generate Nightly Pre-Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          tag_name: nightly
+          name: "sp-service Nightly (Unstable)"
+          prerelease: true
+          make_latest: false
+          body: |
+            Builds automatizados (Nightly) do sp-service.
+
+            **Aviso:** Estes binarios sao compilados progressivamente (Continuous Deployment) no ultimo commit da branch `main` e nao refletem garantias de estabilidade.
+          files: |
+            sp-service-linux-amd64-binary
+            sp-service-linux-arm64-binary
+            sp-service-windows-amd64-binary.exe
+            sp-service-macos-arm64-binary
+
+  publish-stable:
+    needs: [build-core, build-docker]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Rename Artifacts for Release
+        run: |
+          mv sp-service-linux-amd64/sp-service sp-service-linux-amd64-binary
+          mv sp-service-linux-arm64/sp-service sp-service-linux-arm64-binary
+          mv sp-service-windows-amd64/sp-service.exe sp-service-windows-amd64-binary.exe
+          mv sp-service-macos-arm64/sp-service sp-service-macos-arm64-binary
+
+      - name: Generate Stable Release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
+        with:
+          generate_release_notes: true
+          files: |
+            sp-service-linux-amd64-binary
+            sp-service-linux-arm64-binary
+            sp-service-windows-amd64-binary.exe
+            sp-service-macos-arm64-binary

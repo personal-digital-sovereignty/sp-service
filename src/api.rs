@@ -1598,7 +1598,7 @@ if use_openrouter && let Some(settings) = openrouter_settings {
     });
 
     if is_qwen_model && qwen_settings.enabled {
-        let qwen_client = QwenClient::new(qwen_settings.api_key.clone());
+        let qwen_client = QwenClient::new(qwen_settings.api_key.clone(), qwen_settings.base_url.clone());
         let mut qwen_payload_model = ollama_model.replace("qwen/", "");
         if qwen_payload_model.is_empty() { qwen_payload_model = qwen_settings.default_model; }
 

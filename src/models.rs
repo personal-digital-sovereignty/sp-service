@@ -278,9 +278,14 @@ pub struct OpenRouterRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct QwenSettings {
+    #[serde(default)]
     pub enabled: bool,
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub default_model: String,
+    #[serde(default)]
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

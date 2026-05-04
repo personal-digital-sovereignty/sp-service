@@ -1,0 +1,195 @@
+name: Docker Build & Push
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      push_to_registry:
+        description: 'Push to registry (or just build)'
+        type: boolean
+        default: true
+      platforms:
+        description: 'Comma-separated list of platforms to build for'
+        type: string
+        default: 'linux/amd64,linux/arm64'
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ==========================================
+  # Gate 0: Security Scan
+  # ==========================================
+  security-scan:
+    name: "Gate 0: Docker Security Scan"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner on Dockerfile
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          scan-type: 'config'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
+  # ==========================================
+  # Build and Push
+  # ==========================================
+  build-and-push:
+    name: "Build and Push Docker Image"
+    needs: security-scan
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub (Optional)
+        if: ${{ secrets.DOCKERHUB_TOKEN != '' }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}
+            ${{ secrets.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/sp-service', secrets.DOCKERHUB_USERNAME) || '' }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event.inputs.push_to_registry != 'false' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: ${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      - name: Generate SBOM (Software Bill of Materials)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          retention-days: 90
+
+  # ==========================================
+  # Post-Build Security Scan
+  # ==========================================
+  image-scan:
+    name: "Post-Build Image Scan"
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: 'sarif'
+          output: trivy-results.sarif
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Print scan summary
+        run: |
+          echo "============================================"
+          echo "  Docker Image Security Scan Summary"
+          echo "============================================"
+          echo ""
+          echo "Image: ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          echo "Scan Status: Complete"
+          echo ""
+          echo "Check the Security tab for detailed results."
+
+  # ==========================================
+  # Deploy to OCI (Optional)
+  # ==========================================
+  deploy-oci:
+    name: "Deploy to OCI Cloud"
+    needs: build-and-push
+    if: ${{ github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb
+        with:
+          tofu_wrapper: false
+          tofu_version: latest
+
+      - name: OpenTofu Init
+        working-directory: ./infra/terraform
+        run: tofu init
+
+      - name: OpenTofu Apply
+        working-directory: ./infra/terraform
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          TF_VAR_region: ${{ vars.OCI_REGION || 'sa-saopaulo-1' }}
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID != '' && secrets.OCI_COMPARTMENT_OCID || secrets.OCI_TENANCY_OCID }}
+          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
+          TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
+          TF_VAR_ssh_private_key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
+          TF_VAR_pat_ghcr: ${{ secrets.PAT_GHCR }}
+          TF_VAR_boot_volume_size_in_gbs: ${{ vars.OCI_BOOT_VOLUME_SIZE || 200 }}
+          TF_VAR_release_version: ${{ github.ref_name }}
+        run: tofu apply -auto-approve

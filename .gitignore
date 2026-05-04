@@ -1,0 +1,73 @@
+# Rust
+/target/
+**/target/
+debug/
+release/
+*.rlib
+*.dylib
+*.so
+*.dll
+*.exe
+*.pdb
+
+# Build
+*.d
+*.o
+*.a
+out/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Secrets (never commit these!)
+*.pem
+*.key
+*.crt
+secrets/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Test artifacts
+coverage/
+*.profraw
+*.profdata
+test_output/
+
+# Python workers
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+PYTHONPATH
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# SQLite
+*.db-journal

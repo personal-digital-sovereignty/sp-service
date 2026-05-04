@@ -7,6 +7,7 @@
 #![allow(clippy::if_same_then_else)]
 #![allow(clippy::unnecessary_sort_by)]
 
+pub mod common;
 pub mod turboquant;
 mod api;
 mod models;
@@ -53,7 +54,7 @@ pub mod oracle_worker;
 #[cfg(test)]
 pub mod tests;
 
-use axum::{routing::post, Router, response::IntoResponse, http::{header, StatusCode, Uri}};
+use axum::{routing::post, Router};
 use reqwest::Client;
 
 use std::sync::{Arc, RwLock};
@@ -68,36 +69,7 @@ impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
         write!(w, "{} ", chrono::Local::now().format("%Y-%m-%dT%H:%M:%S%.3f%z"))
     }
 }
-use rust_embed::RustEmbed;
 
-#[derive(RustEmbed)]
-#[folder = "../svelte-ui/build/"]
-struct BackendWebUI;
-
-async fn spa_static_handler(uri: Uri) -> impl IntoResponse {
-    let mut path = uri.path().trim_start_matches('/');
-    if path.is_empty() {
-        path = "index.html";
-    }
-
-    match BackendWebUI::get(path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
-        }
-        None => {
-            if path.contains('.') {
-                tracing::warn!("🚨 404: Static asset não encontrado -> {}", uri);
-                return (StatusCode::NOT_FOUND, "404 Sovereign Fallback (Asset Not Found)").into_response();
-            }
-            if let Some(index) = BackendWebUI::get("index.html") {
-                ([(header::CONTENT_TYPE, "text/html")], index.data).into_response()
-            } else {
-                (StatusCode::NOT_FOUND, "Sovereign Web-UI Offline").into_response()
-            }
-        }
-    }
-}
 
 async fn shutdown_signal() {
     let ctrl_c = async {
@@ -261,8 +233,7 @@ pub async fn system_logs_sse_handler(axum::extract::State(state): axum::extract:
     axum::response::sse::Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
 }
 
-#[tokio::main]
-async fn main() {
+pub async fn run() {
     // Inicializa o Corredor de Eventos Cíbridos antes do Tracing para capturar tudo
     let (log_tx, _) = broadcast::channel(500);
 
@@ -514,8 +485,7 @@ async fn main() {
         }))
         // Emparelhamento Mágico de Rede (QR Code Endpoint)
         .route("/v1/network/pair", axum::routing::get(network::get_pairing_info_handler))
-        // Static Web-UI Fallback Server (SPA HTML5 History Mode)
-        .fallback(spa_static_handler)
+
         .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn(network::lan_auth_guard))
         // P3-05: Body limit global — previne DoS por upload sem limite (50 MB)

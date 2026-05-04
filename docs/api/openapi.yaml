@@ -1,0 +1,872 @@
+openapi: 3.0.3
+info:
+  title: sp-service API
+  description: |
+    Backend Service/API do ecossistema Sovereign Pair.
+    
+    ## Links Úteis
+    - [GitHub](https://github.com/Personal-Digital-Sovereignty/sp-platform)
+    - [Documentation](https://github.com/Personal-Digital-Sovereignty/sp-platform/tree/main/sp-service/docs)
+  version: 1.4.0-dev
+  contact:
+    email: jefersonlopes@proton.me
+  license:
+    name: GPLv2
+    url: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: http://localhost:38002
+    description: Local development server (alternate port)
+
+tags:
+  - name: Health
+    description: Health check and readiness endpoints
+  - name: Chat
+    description: Chat and inference endpoints
+  - name: RAG
+    description: Retrieval-Augmented Generation pipeline
+  - name: Tools
+    description: Python workers and data tools
+  - name: Settings
+    description: Configuration and KMS
+  - name: Projects
+    description: Project and task management
+  - name: Network
+    description: P2P mesh networking
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns service health status
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: Service is unhealthy
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness probe
+      description: Checks database, models, and workers readiness
+      operationId: getReady
+      responses:
+        '200':
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
+
+  /v1/telemetry:
+    get:
+      tags:
+        - Health
+      summary: Hardware telemetry
+      description: Returns VRAM, RAM, CPU, and GPU metrics
+      operationId: getTelemetry
+      responses:
+        '200':
+          description: Telemetry data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryResponse'
+
+  /v1/chat/completions:
+    post:
+      tags:
+        - Chat
+      summary: Chat with streaming
+      description: Chat completion with optional SSE streaming
+      operationId: createChatCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Chat completion (SSE stream)
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionChunk'
+        '400':
+          description: Invalid payload
+        '503':
+          description: Model not available
+
+  /v1/research/deep:
+    post:
+      tags:
+        - Chat
+      summary: Deep research
+      description: Web-augmented generation with agentic loop
+      operationId: createDeepResearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeepResearchRequest'
+      responses:
+        '200':
+          description: Research results (SSE stream)
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/DeepResearchResponse'
+
+  /v1/rag/ingest:
+    post:
+      tags:
+        - RAG
+      summary: Upload documents
+      description: Ingest documents into RAG pipeline
+      operationId: ingestDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '200':
+          description: Document processed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestResponse'
+
+  /v1/rag/search:
+    get:
+      tags:
+        - RAG
+      summary: Vector search
+      description: Search documents by semantic similarity
+      operationId: searchRag
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 5
+          description: Max results
+        - name: threshold
+          in: query
+          required: false
+          schema:
+            type: number
+            default: 0.7
+          description: Similarity threshold
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RagSearchResponse'
+
+  /v1/rag/chat:
+    post:
+      tags:
+        - RAG
+      summary: RAG-powered chat
+      description: Chat with RAG context retrieval
+      operationId: ragChat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RagChatRequest'
+      responses:
+        '200':
+          description: RAG response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RagChatResponse'
+
+  /v1/tools/fetch_financial_ticker:
+    post:
+      tags:
+        - Tools
+      summary: Fetch financial data
+      description: Get stock prices and financial metrics
+      operationId: fetchFinancialTicker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinancialTickerRequest'
+      responses:
+        '200':
+          description: Financial data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinancialTickerResponse'
+
+  /v1/tools/fetch_macroeconomy:
+    post:
+      tags:
+        - Tools
+      summary: Fetch macroeconomic data
+      description: Get economic indicators (IPCA, SELIC, etc.)
+      operationId: fetchMacroeconomy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MacroeconomyRequest'
+      responses:
+        '200':
+          description: Macroeconomic data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacroeconomyResponse'
+
+  /v1/tools/dispatch_sub_researcher:
+    post:
+      tags:
+        - Tools
+      summary: Web research
+      description: Dispatch sub-researcher for web search
+      operationId: dispatchSubResearcher
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubResearcherRequest'
+      responses:
+        '200':
+          description: Research results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubResearcherResponse'
+
+  /v1/settings:
+    get:
+      tags:
+        - Settings
+      summary: Get settings
+      description: Retrieve current configuration
+      operationId: getSettings
+      responses:
+        '200':
+          description: Settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsResponse'
+    put:
+      tags:
+        - Settings
+      summary: Update settings
+      description: Update configuration
+      operationId: updateSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSettingsRequest'
+      responses:
+        '200':
+          description: Settings updated
+
+  /v1/settings/kms:
+    post:
+      tags:
+        - Settings
+      summary: Configure KMS
+      description: Set provider API key with encryption
+      operationId: configureKms
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KmsRequest'
+      responses:
+        '200':
+          description: KMS configured
+
+  /v1/projects:
+    get:
+      tags:
+        - Projects
+      summary: List projects
+      operationId: listProjects
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Projects list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectsListResponse'
+    post:
+      tags:
+        - Projects
+      summary: Create project
+      operationId: createProject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '200':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+
+  /v1/projects/{id}/tasks:
+    get:
+      tags:
+        - Projects
+      summary: List tasks
+      operationId: listTasks
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tasks list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TasksListResponse'
+
+  /v1/network/pair:
+    get:
+      tags:
+        - Network
+      summary: Get pairing token
+      description: Get P2P pairing token (loopback only)
+      operationId: getPairingToken
+      responses:
+        '200':
+          description: Pairing token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PairingTokenResponse'
+
+  /v1/network/connect:
+    post:
+      tags:
+        - Network
+      summary: Connect to node
+      description: Connect to remote P2P node
+      operationId: connectToNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectRequest'
+      responses:
+        '200':
+          description: Connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectResponse'
+
+components:
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        version:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    ReadinessResponse:
+      type: object
+      properties:
+        ready:
+          type: boolean
+        checks:
+          type: object
+          additionalProperties:
+            type: string
+
+    TelemetryResponse:
+      type: object
+      properties:
+        ram:
+          $ref: '#/components/schemas/MemoryInfo'
+        vram:
+          $ref: '#/components/schemas/MemoryInfo'
+        cpu:
+          $ref: '#/components/schemas/CpuInfo'
+        gpu:
+          $ref: '#/components/schemas/GpuInfo'
+
+    MemoryInfo:
+      type: object
+      properties:
+        used_mb:
+          type: integer
+        total_mb:
+          type: integer
+        percent:
+          type: number
+
+    CpuInfo:
+      type: object
+      properties:
+        percent:
+          type: number
+        cores:
+          type: integer
+
+    GpuInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        load_percent:
+          type: number
+
+    ChatRequest:
+      type: object
+      required:
+        - model
+        - messages
+      properties:
+        model:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        stream:
+          type: boolean
+          default: true
+        workspace_id:
+          type: string
+        session_id:
+          type: string
+          nullable: true
+        deep_research:
+          type: boolean
+          default: false
+        rewoo_enabled:
+          type: boolean
+          default: false
+
+    Message:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+
+    ChatCompletionChunk:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+        choices:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatChoice'
+
+    ChatChoice:
+      type: object
+      properties:
+        delta:
+          type: object
+          properties:
+            content:
+              type: string
+
+    DeepResearchRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+        agentic_mode:
+          type: boolean
+          default: true
+        max_iterations:
+          type: integer
+          default: 10
+        tools:
+          type: array
+          items:
+            type: string
+            enum: [financial, macro, academic, culture]
+
+    DeepResearchResponse:
+      type: object
+      properties:
+        stage:
+          type: string
+          enum: [planning, tool_call, synthesis, complete]
+        message:
+          type: string
+        artifact_id:
+          type: string
+
+    IngestRequest:
+      type: object
+      properties:
+        file:
+          type: string
+          format: binary
+        project_id:
+          type: string
+        tags:
+          type: string
+
+    IngestResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        chunks_created:
+          type: integer
+        status:
+          type: string
+
+    RagSearchResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SearchResult'
+
+    SearchResult:
+      type: object
+      properties:
+        document_id:
+          type: string
+        content:
+          type: string
+        score:
+          type: number
+        metadata:
+          type: object
+
+    RagChatRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+        use_rag:
+          type: boolean
+          default: true
+        top_k:
+          type: integer
+          default: 5
+
+    RagChatResponse:
+      type: object
+      properties:
+        answer:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/RagSource'
+
+    RagSource:
+      type: object
+      properties:
+        document_id:
+          type: string
+        relevance:
+          type: number
+
+    FinancialTickerRequest:
+      type: object
+      required:
+        - ticker
+      properties:
+        ticker:
+          type: string
+        metrics:
+          type: array
+          items:
+            type: string
+        period:
+          type: string
+
+    FinancialTickerResponse:
+      type: object
+      properties:
+        ticker:
+          type: string
+        name:
+          type: string
+        data:
+          type: array
+          items:
+            type: object
+        currency:
+          type: string
+
+    MacroeconomyRequest:
+      type: object
+      required:
+        - indicators
+      properties:
+        indicators:
+          type: array
+          items:
+            type: string
+        period:
+          type: string
+
+    MacroeconomyResponse:
+      type: object
+      properties:
+        indicators:
+          type: array
+          items:
+            $ref: '#/components/schemas/Indicator'
+
+    Indicator:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+        unit:
+          type: string
+        date:
+          type: string
+          format: date
+
+    SubResearcherRequest:
+      type: object
+      required:
+        - query
+      properties:
+        query:
+          type: string
+        max_results:
+          type: integer
+          default: 10
+
+    SubResearcherResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResearchResult'
+
+    ResearchResult:
+      type: object
+      properties:
+        title:
+          type: string
+        url:
+          type: string
+        snippet:
+          type: string
+
+    SettingsResponse:
+      type: object
+      properties:
+        ollama_host:
+          type: string
+        default_model:
+          type: string
+        rag_top_k:
+          type: integer
+        body_limit_bytes:
+          type: integer
+        providers:
+          type: object
+
+    UpdateSettingsRequest:
+      type: object
+      properties:
+        ollama_host:
+          type: string
+        default_model:
+          type: string
+        rag_top_k:
+          type: integer
+
+    KmsRequest:
+      type: object
+      required:
+        - provider
+        - api_key
+      properties:
+        provider:
+          type: string
+        api_key:
+          type: string
+        endpoint:
+          type: string
+
+    ProjectsListResponse:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Project'
+        total:
+          type: integer
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        task_count:
+          type: integer
+
+    CreateProjectRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+
+    ProjectResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    TasksListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        status:
+          type: string
+          enum: [pending, in_progress, completed]
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    PairingTokenResponse:
+      type: object
+      properties:
+        alias:
+          type: string
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    ConnectRequest:
+      type: object
+      required:
+        - host
+        - port
+        - token
+      properties:
+        host:
+          type: string
+        port:
+          type: integer
+        token:
+          type: string
+
+    ConnectResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        remote_alias:
+          type: string

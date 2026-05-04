@@ -1,0 +1,115 @@
+# ============================================
+# sp-service — Docker Compose
+# ============================================
+# Orquestração de serviços para desenvolvimento e produção
+# ============================================
+
+version: '3.8'
+
+services:
+  # --------------------------------------------
+  # sp-service (Backend Rust)
+  # --------------------------------------------
+  sp-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sp-service
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persist database and vault
+      - ./data:/app/data
+      # Optional: Mount local python workers for development
+      # - ./python_workers:/app/python_workers
+    environment:
+      # Server
+      - HOST=0.0.0.0
+      - PORT=8080
+      - ENVIRONMENT=production
+      
+      # Database
+      - DATABASE_PATH=/app/data/sensus_nexus.db
+      - WORKSPACE_PATH=/app/data/vault
+      
+      # Ollama (requires host.docker.internal)
+      - OLLAMA_HOST=host.docker.internal:11434
+      
+      # Cloud Providers (set via .env)
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      
+      # Logging
+      - RUST_LOG=info
+      
+      # Security
+      - BODY_LIMIT_BYTES=52428800
+      - HTTP_TIMEOUT_SECS=30
+      
+      # RAG
+      - RAG_TOP_K=5
+      - RAG_SIMILARITY_THRESHOLD=0.7
+      
+      # Agentic
+      - REWOO_ENABLED=false
+      - DEEP_RESEARCH_ENABLED=false
+      - TOOL_CALL_TIMEOUT_SECS=120
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - sovereign-network
+    # For Apple Silicon / Mac
+    platform: linux/arm64
+    # For Intel / AMD
+    # platform: linux/amd64
+
+  # --------------------------------------------
+  # Ollama (Optional - Local Inference)
+  # --------------------------------------------
+  # Uncomment if you want to run Ollama in Docker
+  # Otherwise, use your host Ollama installation
+  # --------------------------------------------
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ./ollama-data:/root/.ollama
+  #   restart: unless-stopped
+  #   networks:
+  #     - sovereign-network
+  #   # GPU support (NVIDIA)
+  #   # deploy:
+  #   #   resources:
+  #   #     reservations:
+  #   #       devices:
+  #   #         - driver: nvidia
+  #   #           count: all
+  #   #           capabilities: [gpu]
+
+  # --------------------------------------------
+  # pgadmin (Optional - Database UI)
+  # --------------------------------------------
+  # SQLite doesn't need a separate admin tool,
+  # but you can mount a volume for backup
+  # --------------------------------------------
+
+networks:
+  sovereign-network:
+    driver: bridge
+
+# --------------------------------------------
+# Volumes (for future expansion)
+# --------------------------------------------
+volumes:
+  # ollama-data:
+  #   driver: local

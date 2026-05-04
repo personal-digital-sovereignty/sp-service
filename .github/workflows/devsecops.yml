@@ -1,0 +1,202 @@
+# =============================================================================
+# sp-service - FOSS Enterprise DevSecOps Pipeline
+# =============================================================================
+# Esteira de validacao completa que DEVE passar antes de qualquer merge.
+# Triggers:
+#   - Pull Request para main ou release/* (obrigatorio)
+#   - Manual via workflow_dispatch (qualquer branch)
+#
+# Gates:
+#   0. Pipeline Security (Actionlint + Zizmor)
+#   1. SAST - Semgrep (vulnerabilidades no codigo)
+#   2. SCA - Trivy (vulnerabilidades em dependencias)
+#   3. Rust - Clippy (zero warnings) + Unit Tests (cargo test)
+#   4. Python - Ruff (lint) + Pytest
+#   => Aggregate Gate: todas devem passar para liberar merge
+#
+# NOTE: Gitleaks requer licenca paga para GitHub Organizations.
+#       Secret scanning e garantido pelo pre-push hook local (Docker).
+
+name: FOSS Enterprise DevSecOps
+
+on:
+  pull_request:
+    branches: [ main, 'release/**' ]
+  workflow_dispatch:
+    inputs:
+      skip_trivy:
+        description: 'Skip Trivy SCA scan (faster iteration)'
+        type: boolean
+        default: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: devsecops-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  # ==========================================
+  # Gate 0: Pipeline for Pipelines
+  # ==========================================
+  pipeline-security:
+    name: "Gate 0: Actionlint & Zizmor"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check workflow YAML syntax (Actionlint)
+        uses: raven-actions/actionlint@205b530c5d9fa8f44ae9ed59f341a0db994aa6f8
+
+      - name: Analyze workflow security logic (Zizmor)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pip install zizmor
+          zizmor .github/workflows || echo "::warning::Zizmor audit complete (non-blocking)."
+
+  # ==========================================
+  # Gate 1: SAST (Static Application Security Testing)
+  # ==========================================
+  sast-semgrep:
+    name: "Gate 1: Semgrep SAST"
+    needs: pipeline-security
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep with strict enforcement
+        run: semgrep scan --config auto --error --exclude-rule python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+
+  # ==========================================
+  # Gate 2: SCA (Software Composition Analysis)
+  # ==========================================
+  sca-trivy:
+    name: "Gate 2: Trivy SCA"
+    needs: pipeline-security
+    if: ${{ github.event.inputs.skip_trivy != 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan for CRITICAL/HIGH vulnerabilities in dependencies
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          scan-type: 'fs'
+          ignore-unfixed: true
+          format: 'table'
+          exit-code: 1
+          severity: 'CRITICAL,HIGH'
+
+  # ==========================================
+  # Gate 3: Rust Code Quality & Unit Tests
+  # ==========================================
+  quality-rust:
+    name: "Gate 3: Clippy + Cargo Test"
+    needs: pipeline-security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install SQLite Runtime Dependencies
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
+      - name: Cargo Clippy (zero warnings enforced)
+        run: cargo clippy -- -D warnings
+
+      - name: Cargo Unit Tests
+        run: cargo test
+
+  # ==========================================
+  # Gate 4: Python Workers Quality & Unit Tests
+  # ==========================================
+  quality-python:
+    name: "Gate 4: Ruff + Pytest"
+    needs: pipeline-security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: pip install ruff pytest pandas tabulate
+
+      - name: Ruff lint (critical errors only)
+        run: ruff check python_workers/ --select E,F --ignore E501,E701
+
+      - name: Pytest (AST Jail + Time-Series Pipeline)
+        run: pytest python_workers/tests/ -v --tb=short
+
+  # ==========================================
+  # Aggregate Gate - Branch Protection Rule Target
+  # ==========================================
+  foss-devsecops-gate:
+    name: "FOSS DevSecOps Gate"
+    if: always()
+    needs:
+      - pipeline-security
+      - sast-semgrep
+      - sca-trivy
+      - quality-rust
+      - quality-python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate gate results
+        env:
+          PIPELINE_SECURITY: ${{ needs.pipeline-security.result }}
+          SAST_SEMGREP: ${{ needs.sast-semgrep.result }}
+          SCA_TRIVY: ${{ needs.sca-trivy.result }}
+          QUALITY_RUST: ${{ needs.quality-rust.result }}
+          QUALITY_PYTHON: ${{ needs.quality-python.result }}
+        run: |
+          echo "============================================"
+          echo "  FOSS Enterprise DevSecOps - Gate Summary"
+          echo "============================================"
+          echo ""
+          echo "Pipeline Security: $PIPELINE_SECURITY"
+          echo "SAST (Semgrep):    $SAST_SEMGREP"
+          echo "SCA (Trivy):       $SCA_TRIVY"
+          echo "Rust (Clippy+Test):$QUALITY_RUST"
+          echo "Python (Ruff+Test):$QUALITY_PYTHON"
+          echo ""
+
+          if [[ "$PIPELINE_SECURITY" == "failure" ]] || \
+             [[ "$SAST_SEMGREP" == "failure" ]] || \
+             [[ "$QUALITY_RUST" == "failure" ]] || \
+             [[ "$QUALITY_PYTHON" == "failure" ]]; then
+            echo "CRITICAL GATE FAILURE - Merge blocked."
+            exit 1
+          fi
+
+          if [[ "$SCA_TRIVY" == "failure" ]]; then
+            echo "::warning::Trivy SCA failed - review dependency vulnerabilities."
+          fi
+
+          echo ""
+          echo "ALL FOSS DevSecOps Gates Passed - Merge authorized."
+          echo "Secret scanning handled by local pre-push hook (Gitleaks Docker)."

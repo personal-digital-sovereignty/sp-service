@@ -1,0 +1,19 @@
+# sp-service E2E Tests - Dependencies
+# Install: pip install -r requirements.txt
+
+# HTTP client for API requests
+requests>=2.31.0
+
+# Test framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Async support
+aiohttp>=3.9.0
+
+# JSON validation
+jsonschema>=4.19.0
+
+# SSE stream parsing
+sseclient-py>=1.8.0

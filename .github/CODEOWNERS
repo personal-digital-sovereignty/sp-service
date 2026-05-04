@@ -1,0 +1,33 @@
+# sp-service CODEOWNERS
+# Document: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Rule 0: Professional, clean, direct
+
+# Default owners for everything in the repo
+* @jefersonlopes
+
+# Core Rust backend
+/core/ @jefersonlopes
+/src/ @jefersonlopes
+Cargo.toml @jefersonlopes
+Cargo.lock @jefersonlopes
+
+# Python workers
+/python_workers/ @jefersonlopes
+
+# Infrastructure
+/infra/ @jefersonlopes
+Dockerfile @jefersonlopes
+docker-compose.yml @jefersonlopes
+
+# GitHub Actions workflows
+/.github/workflows/ @jefersonlopes
+
+# Documentation
+/docs/ @jefersonlopes
+*.md @jefersonlopes
+
+# Security-sensitive files
+.env.example @jefersonlopes
+.gitignore @jefersonlopes
+LICENSE @jefersonlopes
