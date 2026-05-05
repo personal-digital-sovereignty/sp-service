@@ -101,7 +101,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                                             if let Some(func) = tc.get("function") {
                                                 let name = func.get("name").and_then(|n| n.as_str()).unwrap_or("");
                                                 let arguments = func.get("arguments").cloned().unwrap_or(json!({}));
-                                                
+
                                                 let _ = log_sender.send(LogEntry {
                                                     timestamp: chrono::Local::now().to_rfc3339(),
                                                     level: "mcp".to_string(), // Especial p/ Frontend
@@ -112,12 +112,14 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                                                 aggregated_results.push_str(&format!("\n[Ação de FileSystem MCP do Step {}]: {}\n", i + 1, mcp_result));
                                             }
                                         }
-                                    } 
+                                    }
                                     // Se cuspiu apenas Text Content
                                     else if let Some(content) = message.get("content").and_then(|c| c.as_str()) {
                                         aggregated_results.push_str(&format!("\n[Conclusão Semântica do Step {}]:\n{}\n", i + 1, content));
                                     }
                                 }
+                            }
+                        }
                     }
 
                     let _ = log_sender.send(LogEntry {
