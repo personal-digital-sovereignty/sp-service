@@ -5,7 +5,6 @@ Tests the sovereign_matrix.py financial data fetcher for correctness.
 """
 import sys
 import os
-import json
 import tempfile
 import sqlite3
 
