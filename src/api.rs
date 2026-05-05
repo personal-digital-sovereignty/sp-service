@@ -2147,74 +2147,71 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                     let sql_tokens = total_real_tokens as i64;
                     let sql_dur = duration as i64;
                     tokio::spawn(async move {
-                                    let _ = sqlx::query(
-                                        "INSERT INTO model_metrics (model_name, total_tokens, total_duration_ms, first_used_at, last_used_at) 
-                                         VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                                         ON CONFLICT(model_name) DO UPDATE SET 
-                                             total_tokens = total_tokens + excluded.total_tokens,
-                                             total_duration_ms = total_duration_ms + excluded.total_duration_ms,
-                                             last_used_at = CURRENT_TIMESTAMP"
-                                    )
-                                    .bind(&sql_model)
-                                    .bind(sql_tokens)
-                                    .bind(sql_dur)
-                                    .execute(&sql_db)
-                                    .await;
-                                });
-                                
-                                let tps = if duration > 0 { (total_real_tokens as f64 / (duration as f64 / 1000.0)).round() } else { 0.0 };
-                                let _ = tracking_log_sender.send(crate::models::LogEntry {
-                                    timestamp: chrono::Local::now().to_rfc3339(),
-                                    level: "system".to_string(),
-                                    message: format!("⚡ Geração de Conhecimento: {} tokens a {} T/s [{}]", total_real_tokens, tps, tracking_model),
-                                });
+                        let _ = sqlx::query(
+                            "INSERT INTO model_metrics (model_name, total_tokens, total_duration_ms, first_used_at, last_used_at)
+                             VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                             ON CONFLICT(model_name) DO UPDATE SET
+                                 total_tokens = total_tokens + excluded.total_tokens,
+                                 total_duration_ms = total_duration_ms + excluded.total_duration_ms,
+                                 last_used_at = CURRENT_TIMESTAMP"
+                        )
+                        .bind(&sql_model)
+                        .bind(sql_tokens)
+                        .bind(sql_dur)
+                        .execute(&sql_db)
+                        .await;
+                    });
 
-                                // 🗄️ Imortalidade de Diálogo: Insere via Spawn para não bloquear o Axum Stream
-                                let final_text = accumulator.clone();
-                                let db_clone = tracking_db.clone();
-                                let tr_q = tracking_human_query.clone();
-                                let tr_ctx = tracking_rag_context.clone();
-                                
-                                tokio::spawn(async move {
-                                    crate::api_chat::save_message(&db_clone, tracking_session, "assistant", &final_text).await;
+                    let tps = if duration > 0 { (total_real_tokens as f64 / (duration as f64 / 1000.0)).round() } else { 0.0 };
+                    let _ = tracking_log_sender.send(crate::models::LogEntry {
+                        timestamp: chrono::Local::now().to_rfc3339(),
+                        level: "system".to_string(),
+                        message: format!("⚡ Geração de Conhecimento: {} tokens a {} T/s [{}]", total_real_tokens, tps, tracking_model),
+                    });
 
-                                    // Engatilha a Avaliação (Auto Evaluator / The Nurse) no Rastro
-                                    let eval_id = uuid::Uuid::new_v4().to_string();
-                                    let _ = sqlx::query("INSERT INTO evaluations (id, conversation_id, user_query, rag_context, ai_response, status) VALUES (?, ?, ?, ?, ?, 'pending')")
-                                        .bind(&eval_id)
-                                        .bind(tracking_session.to_string())
-                                        .bind(&tr_q)
-                                        .bind(&tr_ctx)
-                                        .bind(&final_text)
-                                        .execute(&db_clone)
-                                        .await;
-                                });
+                    // 🗄️ Imortalidade de Diálogo: Insere via Spawn para não bloquear o Axum Stream
+                    let final_text = accumulator.clone();
+                    let db_clone = tracking_db.clone();
+                    let tr_q = tracking_human_query.clone();
+                    let tr_ctx = tracking_rag_context.clone();
 
-                                let finish_response = OpenAIChatChunkResponse {
-                                    id: "chatcmpl-end".to_string(),
-                                    object: "chat.completion.chunk".to_string(),
-                                    created: 1234567890,
-                                    model: requested_model.clone(),
-                                    choices: vec![OpenAIChatChunkChoice {
-                                        index: 0,
-                                        delta: OpenAIChatChunkDelta {
-                                            role: None,
-                                            content: None,
-                                            tool_calls: None,
-                                        },
-                                        finish_reason: Some("stop".to_string()),
-                                    }],
-                                    usage: Some(crate::models::OpenAITokenUsage {
-                                        prompt_tokens: llm_prompt_tokens as i32,
-                                        completion_tokens: llm_gen_tokens as i32,
-                                        total_tokens: total_real_tokens as i32,
-                                    }),
-                                };
-                                if let Ok(json_str) = serde_json::to_string(&finish_response) {
-                                    return Ok::<Event, Infallible>(Event::default().data(json_str));
-                                }
-                            }
-                        }
+                    tokio::spawn(async move {
+                        crate::api_chat::save_message(&db_clone, tracking_session, "assistant", &final_text).await;
+
+                        // Engatilha a Avaliação (Auto Evaluator / The Nurse) no Rastro
+                        let eval_id = uuid::Uuid::new_v4().to_string();
+                        let _ = sqlx::query("INSERT INTO evaluations (id, conversation_id, user_query, rag_context, ai_response, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+                            .bind(&eval_id)
+                            .bind(tracking_session.to_string())
+                            .bind(&tr_q)
+                            .bind(&tr_ctx)
+                            .bind(&final_text)
+                            .execute(&db_clone)
+                            .await;
+                    });
+
+                    let finish_response = OpenAIChatChunkResponse {
+                        id: "chatcmpl-end".to_string(),
+                        object: "chat.completion.chunk".to_string(),
+                        created: 1234567890,
+                        model: requested_model.clone(),
+                        choices: vec![OpenAIChatChunkChoice {
+                            index: 0,
+                            delta: OpenAIChatChunkDelta {
+                                role: None,
+                                content: None,
+                                tool_calls: None,
+                            },
+                            finish_reason: Some("stop".to_string()),
+                        }],
+                        usage: Some(crate::models::OpenAITokenUsage {
+                            prompt_tokens: llm_prompt_tokens as i32,
+                            completion_tokens: llm_gen_tokens as i32,
+                            total_tokens: total_real_tokens as i32,
+                        }),
+                    };
+                    if let Ok(json_str) = serde_json::to_string(&finish_response) {
+                        return Ok::<Event, Infallible>(Event::default().data(json_str));
                     }
                 }
             }
