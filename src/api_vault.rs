@@ -55,8 +55,8 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                 });
             } else {
                 let mut wikilinks = vec![];
-                if filename.ends_with(".md")
-                    && let Ok(content) = fs::read_to_string(&abs_path).await {
+                if filename.ends_with(".md") {
+                    if let Ok(content) = fs::read_to_string(&abs_path).await {
                         // Extração Simples de Markdown Synapses/Tags [[...]]
                         for chunk in content.split("[[").skip(1) {
                             if let Some(end_idx) = chunk.find("]]") {
@@ -68,6 +68,7 @@ async fn scan_directory(path: &Path, root_path: &Path) -> Vec<VaultNode> {
                             }
                         }
                     }
+                }
                 nodes.push(VaultNode {
                     id: rel_id.clone(),
                     name: filename.clone(),

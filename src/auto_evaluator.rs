@@ -37,17 +37,20 @@ pub async fn start_evaluator_loop(state: Arc<AppState>) {
                     let mut p_score = 0;
                     let mut topic = "General Topics".to_string();
                     let mut sentiment = "Neutral".to_string();
-                    
+
                     // Attempt to call Ollama Node in the Mesh Layer
-                    if let Ok(res) = client.post(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/generate")).json(&ollama_req).send().await
-                        && let Ok(json_res) = res.json::<serde_json::Value>().await
-                            && let Some(resp_text) = json_res["response"].as_str()
-                                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(resp_text) {
+                    if let Ok(res) = client.post(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/generate")).json(&ollama_req).send().await {
+                        if let Ok(json_res) = res.json::<serde_json::Value>().await {
+                            if let Some(resp_text) = json_res["response"].as_str() {
+                                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(resp_text) {
                                     f_score = parsed["faithfulness"].as_i64().unwrap_or(0) as i32;
                                     p_score = parsed["precision"].as_i64().unwrap_or(0) as i32;
                                     if let Some(t) = parsed["topic"].as_str() { topic = t.to_string(); }
                                     if let Some(s) = parsed["sentiment"].as_str() { sentiment = s.to_string(); }
                                 }
+                            }
+                        }
+                    }
 
                     // Strict auto-fallback so pipeline doesn't hang if mesh node fails
                     if f_score == 0 && p_score == 0 {

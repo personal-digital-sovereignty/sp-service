@@ -13,16 +13,17 @@ impl MeshRouter {
         
         for (port, (uri, key)) in tunnels.iter() {
             let handshake_url = format!("http://127.0.0.1:{}/v1/mesh/handshake", port);
-            
+
             // Timeout curto pra não travar a esteira do Cíbrido
-            if let Ok(res) = client.get(&handshake_url).timeout(std::time::Duration::from_millis(800)).send().await
-                && let Ok(profile) = res.json::<HardwareProfile>().await {
+            if let Ok(res) = client.get(&handshake_url).timeout(std::time::Duration::from_millis(800)).send().await {
+                if let Ok(profile) = res.json::<HardwareProfile>().await {
                     debug!("Mesh Node Profile @ {}: {:?}", uri, profile);
                     if profile.is_sandbox_isolated && profile.accepts_agent_delegation {
                         info!("🚀 [Mesh Router] Achou Oásis Sandbox! O Coder irá despachar carga para: {}", uri);
                         return Some((uri.clone(), key.clone()));
                     }
                 }
+            }
         }
         info!("⚠️ [Mesh Router] Nenhum Sandbox Zero-Trust disponível na malha ativa. Fallback ativado.");
         None
@@ -37,16 +38,18 @@ impl MeshRouter {
 
         for (port, (_uri, _key)) in tunnels.iter() {
             let handshake_url = format!("http://127.0.0.1:{}/v1/mesh/handshake", port);
-            
-            if let Ok(res) = client.get(&handshake_url).timeout(std::time::Duration::from_millis(800)).send().await
-                && let Ok(profile) = res.json::<HardwareProfile>().await
-                    && (profile.has_gpu || profile.has_npu) && profile.accepts_agent_delegation {
+
+            if let Ok(res) = client.get(&handshake_url).timeout(std::time::Duration::from_millis(800)).send().await {
+                if let Ok(profile) = res.json::<HardwareProfile>().await {
+                    if (profile.has_gpu || profile.has_npu) && profile.accepts_agent_delegation {
                         // Prioriza o nó com mais RAM gráfica / de sistema disponível se houver conflito de GPUs
                         if profile.available_ram_mb > max_ram {
                             max_ram = profile.available_ram_mb;
                             best_port = Some(*port);
                         }
                     }
+                }
+            }
         }
         
         if let Some(port) = best_port {

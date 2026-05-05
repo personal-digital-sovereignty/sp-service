@@ -41,10 +41,10 @@ pub async fn read_vault_file_handler(
     if let Ok(workspace) = sqlx::query_as::<_, crate::api_vault::WorkspaceRow>("SELECT id, name, absolute_path as path, created_at FROM workspaces WHERE id = ?")
         .bind(&payload.workspace_id)
         .fetch_optional(&state.db)
-        .await
-        && let Some(w) = workspace {
+        .await {
+        if let Some(w) = workspace {
             let full_path = PathBuf::from(&w.path).join(&payload.relative_path);
-            
+
             // Verificação Anti-Traversal
             if let Ok(canonical) = fs::canonicalize(&full_path).await {
                 if !canonical.starts_with(&w.path) {
@@ -64,6 +64,7 @@ pub async fn read_vault_file_handler(
                 }
             }
         }
+    }
     
     Json(serde_json::json!({"error": "Workspace not found"})).into_response()
 }

@@ -114,13 +114,15 @@ fn validate_safe_path(vault_root: &Path, target: &str) -> std::io::Result<PathBu
             return Ok(canon);
         }
     } else {
-         // O arquivo pode não existir ainda (No caso do mcp_write_file). 
+         // O arquivo pode não existir ainda (No caso do mcp_write_file).
          // Validamos apenas se a pasta PAI do arquivo novo está permitida.
-         if let Some(parent) = resolved.parent()
-             && let Ok(canon_parent) = std::fs::canonicalize(parent)
-                 && canon_parent.starts_with(vault_root) {
+         if let Some(parent) = resolved.parent() {
+             if let Ok(canon_parent) = std::fs::canonicalize(parent) {
+                 if canon_parent.starts_with(vault_root) {
                      return Ok(resolved);
                  }
+             }
+         }
     }
     
     Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "MCP Security Violation: Path unresolvable inside restricted scope."))
