@@ -1266,21 +1266,26 @@ if let Some(pid) = payload.project_id {
                     }
                 }
             }
+        }
     }
+}
 
-if project_context.is_empty()
-    && let Ok(active_projs) = sqlx::query("SELECT name, purpose FROM projects WHERE is_archived = 0 OR is_archived IS NULL")
+if project_context.is_empty() {
+    if let Ok(active_projs) = sqlx::query("SELECT name, purpose FROM projects WHERE is_archived = 0 OR is_archived IS NULL")
         .fetch_all(&state.db)
         .await
-            && !active_projs.is_empty() {
-                project_context.push_str("INSTRUÇÃO SISTÊMICA (CONSCIÊNCIA DE PROJETOS): O usuário possui os seguintes Projetos ativos no Kanban local neste exato momento:\n");
-                for p in active_projs {
-                    let n: String = sqlx::Row::get(&p, "name");
-                    let purp: Option<String> = sqlx::Row::get(&p, "purpose");
-                    project_context.push_str(&format!("- KANBAN '{}': {}\n", n, purp.unwrap_or_default()));
-                }
-                project_context.push_str("Use esta consciência periférica se o usuário pedir ajuda para gerenciar o seu dia, idéias ou se for relevante durante a conversa.\n");
+    {
+        if !active_projs.is_empty() {
+            project_context.push_str("INSTRUÇÃO SISTÊMICA (CONSCIÊNCIA DE PROJETOS): O usuário possui os seguintes Projetos ativos no Kanban local neste exato momento:\n");
+            for p in active_projs {
+                let n: String = sqlx::Row::get(&p, "name");
+                let purp: Option<String> = sqlx::Row::get(&p, "purpose");
+                project_context.push_str(&format!("- KANBAN '{}': {}\n", n, purp.unwrap_or_default()));
             }
+            project_context.push_str("Use esta consciência periférica se o usuário pedir ajuda para gerenciar o seu dia, idéias ou se for relevante durante a conversa.\n");
+        }
+    }
+}
 
 
 // 🧬 **Sovereign Context Injector (RAG v2 - Project Memory)**
@@ -2100,27 +2105,27 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                 }
                             }
                         }
+                    }
 
-                        if has_content_or_tools {
-                            let chunk_response = OpenAIChatChunkResponse {
-                                id: format!("session_{}", tracking_session),
-                                object: "chat.completion.chunk".to_string(),
-                                created: 1234567890,
-                                model: requested_model.clone(),
-                                choices: vec![OpenAIChatChunkChoice {
-                                    index: 0,
-                                    delta: OpenAIChatChunkDelta {
-                                        role: Some("assistant".to_string()),
-                                        content: extracted_content,
-                                        tool_calls: extracted_tool_calls,
-                                    },
-                                    finish_reason: None,
-                                }],
-                                usage: None,
-                            };
-                            if let Ok(json_str) = serde_json::to_string(&chunk_response) {
-                                return Ok::<Event, Infallible>(Event::default().data(json_str));
-                            }
+                    if has_content_or_tools {
+                        let chunk_response = OpenAIChatChunkResponse {
+                            id: format!("session_{}", tracking_session),
+                            object: "chat.completion.chunk".to_string(),
+                            created: 1234567890,
+                            model: requested_model.clone(),
+                            choices: vec![OpenAIChatChunkChoice {
+                                index: 0,
+                                delta: OpenAIChatChunkDelta {
+                                    role: Some("assistant".to_string()),
+                                    content: extracted_content,
+                                    tool_calls: extracted_tool_calls,
+                                },
+                                finish_reason: None,
+                            }],
+                            usage: None,
+                        };
+                        if let Ok(json_str) = serde_json::to_string(&chunk_response) {
+                            return Ok::<Event, Infallible>(Event::default().data(json_str));
                         }
                     }
                 }
@@ -2225,12 +2230,11 @@ let mut map_stream = res.bytes_stream().map(move |result| {
         }
     }
 }
-});
+}); // Fim do map_stream
 
 while let Some(Ok(event)) = futures_util::StreamExt::next(&mut map_stream).await {
     let _ = tx_sse_clone.send(event);
 }
-}); // Fim do tokio::spawn
 
 let final_stream = async_stream::stream! {
     while let Some(event) = rx_sse.recv().await {
