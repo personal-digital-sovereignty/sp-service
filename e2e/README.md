@@ -1,31 +1,30 @@
-# sp-service E2E Tests
+# sp-service E2E Tests (LOCAIS APENAS)
 
-End-to-end tests for sp-service API via REST.
+**⚠️ IMPORTANTE:** Estes testes **NÃO** rodam no CI/CD do GitHub.
+
+**Motivo:** Testes E2E exigem o sp-service rodando em `localhost:8080`, o que requer:
+- Docker ou binário compilado
+- Ollama configurado (opcional)
+- Python workers provisionados
+- Tempo de startup (~30s)
+
+**Uso:** Executar **apenas localmente** durante desenvolvimento.
 
 ---
 
-## Quick Start
+## 📋 Pré-requisitos
 
-### 1. Install Dependencies
+1. **sp-service rodando:**
+   ```bash
+   cd ..
+   cargo run --release
+   # Aguardar: "Listening on 127.0.0.1:8080"
+   ```
 
-```bash
-cd e2e
-pip install -r requirements.txt
-```
-
-### 2. Start sp-service
-
-```bash
-cd ..
-cargo run --release
-```
-
-### 3. Run Tests
-
-```bash
-cd e2e
-pytest tests/ -v
-```
+2. **Python dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ---
 
