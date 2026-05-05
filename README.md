@@ -4,8 +4,10 @@
 
 [![Version](https://img.shields.io/badge/version-1.4.0--dev-blue.svg)](https://github.com/Personal-Digital-Sovereignty/sp-platform)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/license-GPLv2-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-red.svg)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/ci.yml?branch=main)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions)
+[![E2E Pipeline](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/e2e.yml?label=E2E%20Tests)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions/workflows/e2e.yml)
+[![Docker Build](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/docker.yml?label=Docker%20Build)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions/workflows/docker.yml)
 
 ---
 
@@ -383,9 +385,9 @@ Todo PR requer:
 
 ## 📄 Licenciamento
 
-Este projeto está sob licença **GPLv2**. Veja [LICENSE](LICENSE) para detalhes.
+Este projeto está sob licença **PolyForm Noncommercial 1.0.0**. Veja [LICENSE](LICENSE) para detalhes.
 
-**Uso Comercial:** Restrito. Para implantações empresariais, contate: jefersonlopes@proton.me
+**Uso Comercial:** Restrito. Para implantações empresariais, contate: [personal-digitalsovereignty@proton.me]
 
 ---
 
@@ -393,7 +395,7 @@ Este projeto está sob licença **GPLv2**. Veja [LICENSE](LICENSE) para detalhes
 
 - **Repositório:** [GitHub](https://github.com/Personal-Digital-Sovereignty/sp-platform)
 - **Issues:** [GitHub Issues](https://github.com/Personal-Digital-Sovereignty/sp-platform/issues)
-- **Email:** jefersonlopes@proton.me
+- **Email:** [personal-digitalsovereignty@proton.me]
 
 ---
 

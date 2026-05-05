@@ -12,3 +12,8 @@ pub mod stress_tests;
 pub mod sandbox_tests;
 pub mod office_parser_tests;
 pub mod sync_engine_tests;
+pub mod multimodal_tests;
+pub mod telemetry_tests;
+pub mod memory_manager_tests;
+pub mod garbage_collector_tests;
+pub mod rag_tests;

@@ -1,0 +1,27 @@
+name: Auto Release Notes
+
+on:
+  push:
+    tags:
+      - 'v*' # Aciona o workflow apenas quando criar tags como v1.0.0
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Necessário para criar releases
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Busca todo o histórico para os changelogs
+
+      - name: Generate Changelog and Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

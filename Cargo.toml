@@ -2,7 +2,7 @@
 name = "sp-service"
 version = "1.4.0-dev"
 edition = "2024"
-license = "GPL-2.0"
+license = "PolyForm-Noncommercial-1.0.0"
 build = "build.rs"
 
 [dependencies]
