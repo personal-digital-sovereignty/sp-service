@@ -75,8 +75,10 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Lowercase Image Name
+        env:
+          OWNER: ${{ github.repository_owner }}
         run: |
-          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/sp-service" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+          echo "IMAGE_NAME=ghcr.io/$OWNER/sp-service" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
 
       - name: Extract metadata (tags, labels)
         id: meta
