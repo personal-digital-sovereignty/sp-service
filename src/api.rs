@@ -1090,8 +1090,7 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
                                     }
                                 }
                             }
-                        }
-
+                        
                         if reranked_text.trim().is_empty() {
                             markdown.truncate(4000);
                             master_dossier.push_str(&format!("## Origem Escaneada Profundamente (Fallback): {}\n{}\n\n", link, markdown));
@@ -2236,8 +2235,6 @@ let mut map_stream = res.bytes_stream().map(move |result| {
 while let Some(Ok(event)) = futures_util::StreamExt::next(&mut map_stream).await {
     let _ = tx_sse_clone.send(event);
 }
-
-}); // Fim do tokio::spawn
 
 let final_stream = async_stream::stream! {
     while let Some(event) = rx_sse.recv().await {
