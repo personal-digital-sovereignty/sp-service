@@ -266,13 +266,14 @@ async fn get_ollama_base_url(state: Arc<AppState>) -> String {
             let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                 for c in clusters {
-                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
-                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                             let clean_url = url.trim_end_matches('/').to_string();
                             if !clean_url.is_empty() {
                                 ollama_base_url = clean_url;
                             }
                         }
+                    }
                 }
             }
         }
@@ -322,11 +323,13 @@ pub async fn run_distillation_handler(
                         Ok(bytes) => {
                             if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                 for line in text.lines() {
-                                    if !line.trim().is_empty()
-                                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
-                                            && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
+                                    if !line.trim().is_empty() {
+                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                                            if let Some(status) = json.get("status").and_then(|s| s.as_str()) {
                                                 let _ = TRAINER_LOGS.send(format!("[Layer Sync]: {}", status));
                                             }
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -395,11 +398,13 @@ pub async fn run_finetuning_handler(
                         Ok(bytes) => {
                             if let Ok(text) = String::from_utf8(bytes.to_vec()) {
                                 for line in text.lines() {
-                                    if !line.trim().is_empty()
-                                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(line)
-                                            && let Some(status) = json.get("status").and_then(|s| s.as_str()) {
+                                    if !line.trim().is_empty() {
+                                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                                            if let Some(status) = json.get("status").and_then(|s| s.as_str()) {
                                                 let _ = TRAINER_LOGS.send(format!("[Epoch Tensor Swap]: {}", status));
                                             }
+                                        }
+                                    }
                                 }
                             }
                         },
@@ -833,9 +838,9 @@ async fn execute_sub_analyst(
             "options": { "temperature": 0.0, "num_ctx": dynamic_num_ctx, "repeat_penalty": 1.03 }
         });
 
-        if let Ok(res_verif) = client.post(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat")).json(&verifier_payload).send().await
-            && let Ok(v_json) = res_verif.json::<serde_json::Value>().await
-                && let Some(v_content) = v_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+        if let Ok(res_verif) = client.post(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat")).json(&verifier_payload).send().await {
+            if let Ok(v_json) = res_verif.json::<serde_json::Value>().await {
+                if let Some(v_content) = v_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     let v_upper = v_content.to_uppercase();
                     if v_upper.contains("REJECTED") {
                         let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] O modelo '{}' marcou a extração como alucinada (Soft-Fail).", verifier_model));
@@ -847,6 +852,8 @@ async fn execute_sub_analyst(
                     let _ = TRAINER_LOGS.send(format!("[Adversarial Verifier] Falha de comunicação com '{}'. Assumindo Soft-Fail.", verifier_model));
                     distilled_text = format!("> [!WARNING]\n> **[ALERTA FIREWALL COGNITIVO]:** O auditor ({}) falhou ao responder. O dado primário foi mantido sem dupla checagem.\n\n{}", verifier_model, distilled_text);
                 }
+            }
+        }
     }
 
     let mut sources_used = String::new();
@@ -1090,8 +1097,8 @@ pub async fn run_deep_research_handler(
 
                             let mut join_handles = Vec::new();
                             for tc in tool_calls {
-                                if let Some(func) = tc.get("function")
-                                    && func.get("name").and_then(|n| n.as_str()) == Some("dispatch_sub_researcher") {
+                                if let Some(func) = tc.get("function") {
+                                    if func.get("name").and_then(|n| n.as_str()) == Some("dispatch_sub_researcher") {
                                         let mut queries_extracted: Vec<String> = Vec::new();
 
                                         fn extract_arrays(val: &serde_json::Value, out: &mut Vec<String>) {
@@ -1141,12 +1148,14 @@ pub async fn run_deep_research_handler(
 
                                         for mut sq in queries_extracted {
                                             // Fallback para modelos menores (Llama 3B) que podem cuspir o JSON Schema
-                                            if sq.starts_with('{') && sq.contains("\"description\"")
-                                                && let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(&sq)
-                                                    && let Some(desc) = pseudo_json.get("description").and_then(|d| d.as_str()) {
+                                            if sq.starts_with('{') && sq.contains("\"description\"") {
+                                                if let Ok(pseudo_json) = serde_json::from_str::<serde_json::Value>(&sq) {
+                                                    if let Some(desc) = pseudo_json.get("description").and_then(|d| d.as_str()) {
                                                         let _ = TRAINER_LOGS.send("[Firewall Cognitivo] Desarmando alucinação do JSON Schema LLama 3B...".to_string());
                                                         sq = desc.to_string();
                                                     }
+                                                }
+                                            }
 
                                             let _ = TRAINER_LOGS.send(format!("[The Honest Inquisitor] Acionando Inquisidor Único (Thread Paralela): '{}'", sq));
                                             
@@ -1686,6 +1695,7 @@ pub async fn run_deep_research_handler(
                                             }
                                         }
                                     }
+                                }
                             }
 
                             for handle in join_handles {
