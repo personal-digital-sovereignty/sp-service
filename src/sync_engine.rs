@@ -164,20 +164,21 @@ impl SyncEngine {
                             let path_str = path.to_string_lossy().to_string();
                             
                             // --- ⏱️ 2.5 Debounce & Anti-Race Condition ---
-                            // Sistemas de arquivos (especialmente no Linux/Wayland) podem disparar 
+                            // Sistemas de arquivos (especialmente no Linux/Wayland) podem disparar
                             // múltiplos eventos para uma única escrita de arquivo. O debounce de 2s
                             // garante que processemos apenas a versão final estável do documento.
-                            if let Some(last_time) = last_processed.get(&path_str)
-                                && last_time.elapsed() < std::time::Duration::from_secs(2) {
+                            if let Some(last_time) = last_processed.get(&path_str) {
+                                if last_time.elapsed() < std::time::Duration::from_secs(2) {
                                     continue;
+                                }
                             }
                             last_processed.insert(path_str.clone(), std::time::Instant::now());
-                            
+
                             // 3. Parser do .sovereignignore on-the-fly + Hardcoded (Segurança Extrema)
                             let mut ignored_patterns = vec!["node_modules".to_string(), ".venv".to_string(), ".git".to_string(), "target".to_string()];
                             let ignore_file = path.ancestors().find(|a| a.join(".sovereignignore").exists());
-                            if let Some(root) = ignore_file
-                                && let Ok(content) = fs::read_to_string(root.join(".sovereignignore")) {
+                            if let Some(root) = ignore_file {
+                                if let Ok(content) = fs::read_to_string(root.join(".sovereignignore")) {
                                     for line in content.lines() {
                                         let trimmed = line.trim();
                                         if !trimmed.is_empty() && !trimmed.starts_with('#') {
@@ -185,6 +186,7 @@ impl SyncEngine {
                                         }
                                     }
                                 }
+                            }
 
                             // Verifica se o caminho absoluto contém qualquer diretório proibido
                             let is_ignored = ignored_patterns.iter().any(|pattern| path_str.contains(pattern));
@@ -320,11 +322,13 @@ impl SyncEngine {
                 "stream": false
             }))
             .timeout(Duration::from_secs(30))
-            .send().await
-            && let Ok(json) = resp.json::<serde_json::Value>().await
-                && let Some(res_text) = json.get("response").and_then(|r| r.as_str()) {
+            .send().await {
+            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                if let Some(res_text) = json.get("response").and_then(|r| r.as_str()) {
                     final_summary = res_text.trim().to_string();
                 }
+            }
+        }
 
         // Step 4: SQLite Store (Atomic Write O(1))
         job.current_step = 3;
