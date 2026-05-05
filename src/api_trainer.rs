@@ -2510,11 +2510,11 @@ pub async fn run_deep_research_handler(
                 });
 
                 let _ = TRAINER_LOGS.send(format!("[Sycophancy Breaker] Verificando integridade epistêmica da formatação (Tentativa {}/{})...", attempt, max_retries));
-                
+
                 let mut is_clean = true;
-                if let Ok(aud_res) = synthesis_client.post(&olla_url).json(&auditor_payload).send().await
-                    && let Ok(aud_json) = aud_res.json::<serde_json::Value>().await
-                        && let Some(aud_content) = aud_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                if let Ok(aud_res) = synthesis_client.post(&olla_url).json(&auditor_payload).send().await {
+                    if let Ok(aud_json) = aud_res.json::<serde_json::Value>().await {
+                        if let Some(aud_content) = aud_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                             let clean_eval = aud_content.to_uppercase().trim().trim_matches(|c: char| !c.is_alphabetic()).to_string();
                             if !clean_eval.starts_with("OK") && aud_content.len() > 10 {
                                 is_clean = false;
@@ -2524,6 +2524,8 @@ pub async fn run_deep_research_handler(
                                 scribe_messages.push(serde_json::json!({"role": "user", "content": format!("🚨 [EPISTEMIC REPRIMAND]: O Auditor identificou alucinação grave no seu relatório:\n\n{}\n\nREFAÇA o relatório focado única e exclusivamente na verdade fornecida. NÃO inclua nenhum cálculo percentual dedutivo a menos que esteja claramente impresso na tabela bruta.", raw_err)}));
                             }
                         }
+                    }
+                }
 
                 if is_clean {
                     // Auditoria aprovada pelo Sycophancy Breaker.
@@ -2587,9 +2589,9 @@ pub async fn run_deep_research_handler(
                                 }
                             });
                             let mut rescue_format = String::new();
-                            if let Ok(res) = synthesis_client.post(&olla_url).json(&rescue_payload).send().await
-                                && let Ok(json) = res.json::<serde_json::Value>().await
-                                    && let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                            if let Ok(res) = synthesis_client.post(&olla_url).json(&rescue_payload).send().await {
+                                if let Ok(json) = res.json::<serde_json::Value>().await {
+                                    if let Some(content) = json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                                         let mut cleaned = content.trim().to_string();
                                         // FIX-23: Strip <think> tags no rescue Scribe
                                         while let Some(start) = cleaned.find("<think>") {
@@ -2607,6 +2609,8 @@ pub async fn run_deep_research_handler(
                                         if cleaned.ends_with("```") { cleaned = cleaned.trim_end_matches("```").trim_end().to_string(); }
                                         rescue_format = cleaned;
                                     }
+                                }
+                            }
 
                             // FIX-20+22: Rescue Auditor com contexto SIMÉTRICO ao Scribe
                             let rescue_audit_prompt = format!(
@@ -2624,9 +2628,9 @@ pub async fn run_deep_research_handler(
                             });
                             let _ = TRAINER_LOGS.send(format!("[Sycophancy Breaker] Auditando Scribe de resgate '{}' (Tentativa {}/2)...", scribe_model, rescue_attempt));
                             let mut rescue_clean = true;
-                            if let Ok(aud_res) = synthesis_client.post(&olla_url).json(&rescue_audit_payload).send().await
-                                && let Ok(aud_json) = aud_res.json::<serde_json::Value>().await
-                                    && let Some(aud_content) = aud_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                            if let Ok(aud_res) = synthesis_client.post(&olla_url).json(&rescue_audit_payload).send().await {
+                                if let Ok(aud_json) = aud_res.json::<serde_json::Value>().await {
+                                    if let Some(aud_content) = aud_json.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                                         let clean_eval = aud_content.to_uppercase().trim().trim_matches(|c: char| !c.is_alphabetic()).to_string();
                                         if !clean_eval.starts_with("OK") && aud_content.len() > 10 {
                                             rescue_clean = false;
@@ -2636,6 +2640,8 @@ pub async fn run_deep_research_handler(
                                             scribe_messages.push(serde_json::json!({"role": "user", "content": format!("🚨 [EPISTEMIC REPRIMAND]: {}\n\nREFAÇA o relatório citando APENAS valores exatos visíveis nos dados. Use r=X.XX para correlações e R$ XXX,XX para preços.", raw_err)}));
                                         }
                                     }
+                                }
+                            }
                             if rescue_clean {
                                 if !rescue_format.trim().is_empty() {
                                     final_formatted_report = rescue_format;

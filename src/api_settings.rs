@@ -340,13 +340,14 @@ pub async fn get_available_models_handler(State(state): State<Arc<crate::AppStat
             let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                 for c in clusters {
-                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
-                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                             let clean_url = url.trim_end_matches('/').to_string();
                             if !clean_url.is_empty() {
                                 ollama_base_url = clean_url;
                             }
                         }
+                    }
                 }
             }
         }
@@ -440,12 +441,15 @@ pub async fn get_openrouter_settings_handler(State(state): State<Arc<AppState>>)
             
             // Decifra a API Key se presente
             if let Some(obj) = parsed.as_object_mut() {
-                if let Some(val) = obj.get("api_key")
-                    && let Some(str_val) = val.as_str()
-                        && !str_val.is_empty()
-                            && let Some(decrypted) = kms::decrypt_vault_secret(str_val) {
+                if let Some(val) = obj.get("api_key") {
+                    if let Some(str_val) = val.as_str() {
+                        if !str_val.is_empty() {
+                            if let Some(decrypted) = kms::decrypt_vault_secret(str_val) {
                                 obj.insert("api_key".to_string(), serde_json::json!(decrypted));
                             }
+                        }
+                    }
+                }
             }
             
             Json(parsed).into_response()
@@ -461,12 +465,15 @@ pub async fn set_openrouter_settings_handler(
 ) -> impl IntoResponse {
     // Cifra a API Key se enviada (AES-GCM at rest)
     if let Some(obj) = payload.as_object_mut() {
-        if let Some(val) = obj.get("api_key")
-            && let Some(str_val) = val.as_str()
-                && !str_val.is_empty()
-                    && let Some(encrypted) = kms::encrypt_vault_secret(str_val) {
+        if let Some(val) = obj.get("api_key") {
+            if let Some(str_val) = val.as_str() {
+                if !str_val.is_empty() {
+                    if let Some(encrypted) = kms::encrypt_vault_secret(str_val) {
                         obj.insert("api_key".to_string(), serde_json::json!(encrypted));
                     }
+                }
+            }
+        }
     }
 
     let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
