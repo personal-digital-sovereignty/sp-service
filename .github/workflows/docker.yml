@@ -80,7 +80,7 @@ jobs:
           OWNER: ${{ github.repository_owner }}
         run: |
           IMG="ghcr.io/$OWNER/sp-service"
-          echo "image_name=$(echo $IMG | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+          echo "image_name=$(echo "$IMG" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
       - name: Extract metadata (tags, labels)
         id: meta
