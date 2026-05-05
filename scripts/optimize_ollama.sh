@@ -145,8 +145,7 @@ Environment="HSA_OVERRIDE_GFX_VERSION=9.0.0"
 
 # [FALLBACK UNIVERSAL]: Vulkan Compute
 # Se a AMD quebrar o suporte ao ROCm spoofing, ative o modo Vulkan (Open-Source)
-# Environment="OLLAMA_BACKEND=vulkan"
-
+Environment="OLLAMA_BACKEND=vulkan"
 # Tuning de Memória Global (32GB RAM física)
 Environment="OLLAMA_MAX_QUEUE=512"
 Environment="OLLAMA_KEEP_ALIVE=5m"

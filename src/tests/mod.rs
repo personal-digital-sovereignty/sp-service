@@ -9,3 +9,6 @@ pub mod oracle_worker_tests;
 pub mod openrouter_tests;
 pub mod provider_integration_tests;
 pub mod stress_tests;
+pub mod sandbox_tests;
+pub mod office_parser_tests;
+pub mod sync_engine_tests;
