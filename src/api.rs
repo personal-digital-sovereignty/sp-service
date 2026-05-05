@@ -75,10 +75,10 @@ pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    
-    if let Ok(res) = client.get(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string()), "/api/tags")).send().await
-        && let Ok(json) = res.json::<serde_json::Value>().await
-        && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+
+    if let Ok(res) = client.get(format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_string()), "/api/tags")).send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
             
             let mut all_models = Vec::new();
             for m in models {
@@ -138,8 +138,9 @@ pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
             tracing::warn!("⚠️ [Dynamic Squad Scanner] Fresta Cognitiva! Nenhum SLM estrito para a Patente [{}]. Substituição Euclidiana mais próxima: '{}'", tier, fallback_elected);
             return fallback_elected;
         }
-        
-        
+    }
+    }
+
     "qwen2.5:latest".to_string()
 }
 
@@ -210,13 +211,14 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
             let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
             if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                 for c in clusters {
-                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
-                        && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                    if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                        if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                             let clean_url = url.trim_end_matches('/').to_string();
                             if !clean_url.is_empty() {
                                 base_url = clean_url;
                             }
                         }
+                    }
                 }
             }
         }
@@ -229,13 +231,13 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
     
     tracing::info!("🔍 [Sovereign Core] Sincronizando Topologia Neural via {}", base_url);
 
-    if let Ok(res) = client.get(format!("{}/api/tags", base_url)).send().await
-        && let Ok(json) = res.json::<serde_json::Value>().await
-        && let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+    if let Ok(res) = client.get(format!("{}/api/tags", base_url)).send().await {
+        if let Ok(json) = res.json::<serde_json::Value>().await {
+            if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
             
             // Amnésia Cognitiva: Invalida toda a presença física no banco para reconstruir a verdade atual
             let _ = sqlx::query("UPDATE model_capabilities SET is_installed = 0").execute(pool).await;
-            
+
             for m in models {
                 if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
                     let mut size_val = 0.0;
@@ -255,10 +257,10 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                     let mut supports_tools = false;
                     let mut is_reasoner = false;
                     let mut template_str = String::new();
-                    
+
                     let payload = serde_json::json!({"name": name});
-                    if let Ok(show_res) = client.post(format!("{}/api/show", base_url)).json(&payload).send().await
-                        && let Ok(show_json) = show_res.json::<serde_json::Value>().await {
+                    if let Ok(show_res) = client.post(format!("{}/api/show", base_url)).json(&payload).send().await {
+                        if let Ok(show_json) = show_res.json::<serde_json::Value>().await {
                             if let Some(t) = show_json.get("template").and_then(|v| v.as_str()) {
                                 template_str = t.to_string();
                                 let t_lower = t.to_lowercase();
@@ -269,10 +271,10 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                                     is_reasoner = true;
                                 }
                             }
-                            
+
                             // Mapeamento heuristico v1.3.2: Suporte a Tools e Reasoners baseado em Família e Template
                             let name_lower = name.to_lowercase();
-                            
+
                             // Se o template não disse nada, tentamos via Família (Ollama details.family)
                             if !supports_tools {
                                 if let Some(d) = show_json.get("details") {
@@ -306,19 +308,19 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                             let mut is_scribe = false;
                             let mut is_agent = false;
                             let mut is_coder = false;
-                            let is_chat = true; 
+                            let is_chat = true;
                             let mut is_project = false;
 
                             // Definição inteligente baseada em parâmetros e capacidades
                             // Master: Modelos com Tools, não-reasoners, e tamanho respeitável (>= 7B)
                             if supports_tools && !is_reasoner && size_val >= 6.5 { is_master = true; }
-                            
+
                             if supports_tools {
                                 is_scribe = true;
                                 is_agent = true;
                                 is_project = true;
                             }
-                            
+
                             if name_lower.contains("coder") || name_lower.contains("qwen") || name_lower.contains("deepseek") || name_lower.contains("llama") {
                                 is_coder = true;
                             }
@@ -326,7 +328,7 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                             // UPSERT: Atualiza TUDO, garantindo que o modelo seja marcado como instalado
                             let _ = sqlx::query("
                                 INSERT INTO model_capabilities (
-                                    model_name, parameter_size, supports_tools, is_reasoner, is_master, 
+                                    model_name, parameter_size, supports_tools, is_reasoner, is_master,
                                     is_scribe, is_agent, is_coder, is_chat, is_project, template, is_installed, last_checked
                                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
                                 ON CONFLICT(model_name) DO UPDATE SET
@@ -367,14 +369,17 @@ pub async fn sync_model_capabilities(pool: &sqlx::SqlitePool) {
                                         .await;
                                 }
                             }
-                                
+
                             tracing::info!("🧠 [Model Discovery] Synced {}: Size={}B, Tools={}, Reasoner={}, Master={}", name, size_val, supports_tools, is_reasoner, is_master);
                         }
+                    }
                 }
             }
-        } else {
-            tracing::error!("❌ [Sovereign Core] Falha ao conectar ao Ollama em {}. Modelos offline não foram atualizados.", base_url);
+            }
         }
+    } else {
+        tracing::error!("❌ [Sovereign Core] Falha ao conectar ao Ollama em {}. Modelos offline não foram atualizados.", base_url);
+    }
 }
 
 pub async fn discover_capable_master_agent(pool: Option<&sqlx::SqlitePool>, min_size: f32, require_tools: bool, exclude_reasoner: bool, fallback: &str) -> String {
@@ -2613,7 +2618,7 @@ pub async fn vault_graph_handler(
         let doc_id: i32 = doc.get("id");
         let doc_path: String = doc.get("relative_path");
         let node_id = format!("doc_{}", doc_id);
-        
+
         nodes.push(serde_json::json!({
             "id": node_id.clone(),
             "name": doc_path,
