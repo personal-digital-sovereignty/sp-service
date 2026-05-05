@@ -1463,8 +1463,6 @@ purified_messages.extend(active_messages.into_iter().map(|msg| {
     })
 }));
 
-}); // Fim do tokio::spawn
-
 // 3. Empacotar para o Servidor Local com Controle Rigoroso de VRAM (Sovereign Enterprise - B2B)
 let mut ollama_options = json!({
     "num_keep": 4, // Forçar Lock do System Prompt na VRAM
