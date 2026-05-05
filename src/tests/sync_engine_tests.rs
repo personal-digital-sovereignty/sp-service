@@ -86,7 +86,6 @@ mod tests {
         // Criar banco de dados temporário
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("test.db");
-        let db_url = format!("sqlite://{}", db_path.to_string_lossy());
 
         let options = SqliteConnectOptions::new()
             .filename(&db_path)

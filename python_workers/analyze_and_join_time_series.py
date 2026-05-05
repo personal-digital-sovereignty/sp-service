@@ -14,32 +14,26 @@ except ImportError:
         print(json.dumps({"error": "Failed to install required pandas package"}))
         sys.exit(1)
 
+# Mapa semântico: normaliza nomes longos de headers para colunas curtas e legíveis
+# IMPORTANTE: chaves mais longas/específicas DEVEM vir antes das mais curtas!
+# Ex: DOLAR_PTAX antes de DOLAR, senão "DOLAR" match prematuramente.
+SEMANTIC_MAP = [
+    ("BZ=F", "BRENT"), ("BRENT", "BRENT"), ("PETROLEO", "BRENT"), ("PETRÓLEO", "BRENT"),
+    ("DOLAR_PTAX", "DOLAR_PTAX"),  # Antes de DOLAR!
+    ("BRL=X", "DOLAR"), ("DÓLAR", "DOLAR"),
+    ("GASOLINA", "GASOLINA"), ("DIESEL", "DIESEL"),
+    ("IPCA", "IPCA"), ("SELIC", "SELIC"), ("DESEMPREGO", "DESEMPREGO"),
+    ("CAMBIO", "CAMBIO"),
+]
+
 def parse_markdown_blocks(raw_blocks):
-    """
-    Parses multiple raw strings formatted as:
-    [CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO INDICADOR IPCA]
-    2024-01-01 | 0.42
-    2024-02-01 | 0.83
-    """
     datasets = {}
     
     # regex for getting table headers (permissive to capture mix-case names like 'Banco do Brasil')
     header_regex = re.compile(r'\[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO\s*(?:ATIVO)?\s*(.*?)\]')
     # regex for generic date string and numbers  "2024-01 | USD 75.3 | BRL 350.2" or "2024-01-10 | 0.5"
     row_regex = re.compile(r'^(\d{4}-\d{2}(?:-\d{2})?)\s*\|\s*(.*)$')
-    
-    # Mapa semântico: normaliza nomes longos de headers para colunas curtas e legíveis
-    # IMPORTANTE: chaves mais longas/específicas DEVEM vir antes das mais curtas!
-    # Ex: DOLAR_PTAX antes de DOLAR, senão "DOLAR" match prematuramente.
-    SEMANTIC_MAP = [
-        ("BZ=F", "BRENT"), ("BRENT", "BRENT"), ("PETROLEO", "BRENT"), ("PETRÓLEO", "BRENT"),
-        ("DOLAR_PTAX", "DOLAR_PTAX"),  # Antes de DOLAR!
-        ("BRL=X", "DOLAR"), ("DÓLAR", "DOLAR"),
-        ("GASOLINA", "GASOLINA"), ("DIESEL", "DIESEL"),
-        ("IPCA", "IPCA"), ("SELIC", "SELIC"), ("DESEMPREGO", "DESEMPREGO"),
-        ("CAMBIO", "CAMBIO"),
-    ]
-    
+
     def normalize_ds_name(raw_name, block_text):
         """Normaliza o nome do dataset usando mapa semântico."""
         upper = raw_name.upper()

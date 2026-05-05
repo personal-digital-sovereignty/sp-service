@@ -119,6 +119,22 @@ class TestAutoLearn:
         """Create temporary database for testing."""
         self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
         self.temp_db.close()
+        # Initialize schema
+        conn = sqlite3.connect(self.temp_db.name)
+        conn.execute("""
+            CREATE TABLE ticker_registry (
+                search_key TEXT PRIMARY KEY,
+                yf_symbol TEXT,
+                full_name TEXT,
+                market TEXT,
+                query_type_hint TEXT,
+                is_active INTEGER,
+                source TEXT,
+                last_verified_at TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
 
     def tearDown(self):
         """Clean up temporary database."""

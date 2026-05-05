@@ -163,7 +163,7 @@ class TestVerifyFunction(unittest.TestCase):
 
         # Verify the request was made to custom URL
         call_args = mock_urlopen.call_args[0][0]
-        self.assertIn("custom:11434", call_args.url)
+        self.assertIn("custom:11434", call_args.get_full_url())
 
 
 class TestPromptConstruction(unittest.TestCase):

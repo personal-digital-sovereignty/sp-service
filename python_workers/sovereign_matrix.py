@@ -61,6 +61,12 @@ def normalize_date(raw):
             parts = s.split('/')
             if len(parts) == 3:
                 return f"{parts[2]}-{parts[1]}"
+            elif len(parts) == 2:
+                # Handle YYYY/MM or MM/YYYY
+                if len(parts[0]) == 4:
+                    return f"{parts[0]}-{parts[1]}"
+                else:
+                    return f"{parts[1]}-{parts[0]}"
         elif '-' in s:
             parts = s.split('-')
             if len(parts) >= 2:
