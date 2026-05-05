@@ -114,8 +114,8 @@ jobs:
             echo "Running OpenTofu Apply (Zero-Downtime Pipeline)..."
             tofu apply -auto-approve
             echo "==================================================================="
-            echo "✅ INSTANCIA OCI VERIFICADA / PROVISIONADA!"
-            echo "⚡ O deploy remoto injetou o Binario Versao: $TF_VAR_release_version"
+            echo "INSTANCIA OCI VERIFICADA / PROVISIONADA!"
+            echo "O deploy remoto injetou o Binario Versao: $TF_VAR_release_version"
             echo "==================================================================="
           fi
 

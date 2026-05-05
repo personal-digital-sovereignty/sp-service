@@ -10,12 +10,12 @@ jobs:
     name: Create Release
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Necessário para criar releases
+      contents: write # Necessario para criar releases
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Busca todo o histórico para os changelogs
+          fetch-depth: 0 # Busca todo o historico para os changelogs
 
       - name: Generate Changelog and Create Release
         uses: softprops/action-gh-release@v2
