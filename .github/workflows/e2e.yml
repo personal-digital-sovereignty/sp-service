@@ -61,5 +61,5 @@ jobs:
         if: always()
         run: |
           if [ -f sp_service.pid ]; then
-            kill $(cat sp_service.pid) || true
+            kill "$(cat sp_service.pid)" || true
           fi
