@@ -220,14 +220,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Lowercase Image Name
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/sp-service" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/sp-service:latest
-            ghcr.io/${{ github.repository_owner }}/sp-service:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
@@ -235,7 +239,7 @@ jobs:
       - name: Run Trivy Image Scan
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/sp-service:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH'

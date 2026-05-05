@@ -74,12 +74,16 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Lowercase Image Name
+        run: |
+          echo "IMAGE_NAME=ghcr.io/${{ github.repository_owner }}/sp-service" | tr '[:upper:]' '[:lower:]' >> $GITHUB_ENV
+
       - name: Extract metadata (tags, labels)
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
-            ghcr.io/${{ github.repository_owner }}/sp-service
+            ${{ env.IMAGE_NAME }}
             ${{ vars.DOCKERHUB_USERNAME != '' && format('docker.io/{0}/sp-service', vars.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=ref,event=branch
@@ -108,7 +112,7 @@ jobs:
       - name: Generate SBOM (Software Bill of Materials)
         uses: anchore/sbom-action@v0
         with:
-          image: ghcr.io/${{ github.repository_owner }}/sp-service:${{ github.sha }}
+          image: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: spdx-json
           output-file: sbom.spdx.json
 
@@ -131,7 +135,7 @@ jobs:
       - name: Run Trivy vulnerability scanner on image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
-          image-ref: ghcr.io/${{ github.repository_owner }}/sp-service:${{ github.sha }}
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
           format: 'sarif'
           output: trivy-results.sarif
           severity: 'CRITICAL,HIGH,MEDIUM'
@@ -148,7 +152,7 @@ jobs:
           echo "  Docker Image Security Scan Summary"
           echo "============================================"
           echo ""
-          echo "Image: ghcr.io/${{ github.repository_owner }}/sp-service:${{ github.sha }}"
+          echo "Image: ${{ env.IMAGE_NAME }}:${{ github.sha }}"
           echo "Scan Status: Complete"
           echo ""
           echo "Check the Security tab for detailed results."
