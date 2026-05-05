@@ -395,12 +395,13 @@ pub async fn discover_capable_master_agent(pool: Option<&sqlx::SqlitePool>, min_
         
         if exclude_reasoner { query.push_str(" AND is_reasoner = 0"); }
         query.push_str(" ORDER BY parameter_size DESC LIMIT 1");
-        
-        if let Ok(Some(row)) = sqlx::query(&query).bind(min_size).fetch_optional(p).await
-            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+
+        if let Ok(Some(row)) = sqlx::query(&query).bind(min_size).fetch_optional(p).await {
+            if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
                 tracing::info!("✨ [Dynamic Discovery] Matrix Elegida: {}", name);
                 return name;
             }
+        }
     }
     tracing::warn!("⚠️ [Dynamic Discovery] Banco de Capacidades falhou. Acionando Fallback: {}", fallback);
     fallback.to_string()
@@ -465,18 +466,20 @@ pub async fn discover_adversarial_auditor(pool: Option<&sqlx::SqlitePool>, origi
 
         // PRIORITY 1: Explicit is_auditor=1 flagged models (cross-family)
         let auditor_query = "SELECT model_name FROM model_capabilities WHERE model_name NOT LIKE ? AND is_auditor = 1 AND is_installed = 1 ORDER BY parameter_size ASC LIMIT 1";
-        if let Ok(Some(row)) = sqlx::query(auditor_query).bind(&exclude_like).fetch_optional(p).await
-            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+        if let Ok(Some(row)) = sqlx::query(auditor_query).bind(&exclude_like).fetch_optional(p).await {
+            if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
                 tracing::info!("⚖️ [Sycophancy Breaker] Auditor explícito escalado: '{}' (is_auditor=1, cross-family '{}')", name, family);
                 return name;
+            }
         }
 
         // PRIORITY 2: Fallback heuristic (largest non-family model 3-9B)
         let heuristic_query = "SELECT model_name FROM model_capabilities WHERE model_name NOT LIKE ? AND parameter_size >= 3.0 AND parameter_size <= 9.0 ORDER BY parameter_size DESC LIMIT 1";
-        if let Ok(Some(row)) = sqlx::query(heuristic_query).bind(exclude_like).fetch_optional(p).await
-            && let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+        if let Ok(Some(row)) = sqlx::query(heuristic_query).bind(exclude_like).fetch_optional(p).await {
+            if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
                 tracing::info!("⚖️ [Sycophancy Breaker] Auditor Adversarial dinâmico escalado: '{}' (Filtrando viés estatístico da família origem '{}')", name, family);
                 return name;
+            }
         }
     }
     tracing::warn!("⚠️ [Sycophancy Breaker] Banco falhou em achar Auditor cruzado na malha O.S. Usando Fallback primário: {}", fallback);
@@ -773,21 +776,23 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         
         if let Some(t) = parsed.get("temperature").and_then(|v| v.as_f64()) { sys_temperature = Some(t); }
         if let Some(k) = parsed.get("top_k").and_then(|v| v.as_i64()) { sys_top_k = Some(k); }
-        
+
         let mut base_prompt = String::new();
         // Support both ai_name and aiName json structures
         let name_val = parsed.get("ai_name").or_else(|| parsed.get("aiName")).and_then(|v| v.as_str());
-        if let Some(name) = name_val
-            && !name.is_empty() {
+        if let Some(name) = name_val {
+            if !name.is_empty() {
                 system_ai_name = name.to_string();
                 base_prompt = format!("Identidade Sistêmica: Assuma a persona local soberana definida pelo usuário. Seu nome é {}. Aja de forma coerente e amigável sem ser repetitivo.\n\n", name);
             }
-        
-        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str())
-            && !p.is_empty() { 
-                base_prompt.push_str(p); 
+        }
+
+        if let Some(p) = parsed.get("system_prompt").and_then(|v| v.as_str()) {
+            if !p.is_empty() {
+                base_prompt.push_str(p);
             }
-        
+        }
+
         if !base_prompt.is_empty() {
             global_system_prompt = Some(base_prompt);
         }
@@ -973,10 +978,11 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
                 let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
                 if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
                     for c in clusters {
-                        if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
-                            && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                        if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                            if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                                 sub_ollama_url = url.trim_end_matches('/').to_string();
                             }
+                        }
                     }
                 }
             }
@@ -988,12 +994,15 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
         let query_endpoint = format!("{}/api/chat", sub_ollama_url);
         let mut extracted_queries = Vec::new();
 
-        if let Ok(res) = state.http_client.post(&query_endpoint).json(&llm_payload).timeout(std::time::Duration::from_secs(30)).send().await
-            && let Ok(json_res) = res.json::<serde_json::Value>().await
-                && let Some(content) = json_res.get("message").and_then(|m| m.get("content").and_then(|c| c.as_str()))
-                    && let Ok(queries) = serde_json::from_str::<Vec<String>>(content) {
+        if let Ok(res) = state.http_client.post(&query_endpoint).json(&llm_payload).timeout(std::time::Duration::from_secs(30)).send().await {
+            if let Ok(json_res) = res.json::<serde_json::Value>().await {
+                if let Some(content) = json_res.get("message").and_then(|m| m.get("content").and_then(|c| c.as_str())) {
+                    if let Ok(queries) = serde_json::from_str::<Vec<String>>(content) {
                         extracted_queries = queries;
                     }
+                }
+            }
+        }
 
         if extracted_queries.is_empty() {
             tracing::warn!("⚠️ [WAG Multi-Hop] Sub-LLM falhou no Strict JSON. Fallback para Query Direta.");
@@ -1058,23 +1067,23 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
         }
 
         for res in futures_util::future::join_all(scrape_handles).await {
-            if let Ok((link, mut markdown)) = res
-                && markdown.len() > 100 {
-                    
+            if let Ok((link, mut markdown)) = res {
+                if markdown.len() > 100 {
+
                     // WAG 2.0 RERANKER (FastEmbed Cross-Attention)
                     let text_str = markdown.clone();
                     let chunks: Vec<&str> = text_str.split("\n\n").filter(|c| c.len() > 50).collect();
-                    
+
                     if chunks.len() > 2 {
                         let mut reranked_text = String::new();
                         let q_str = user_question.clone();
                         let limited_chunks: Vec<&str> = chunks.into_iter().take(35).collect(); // Limitador de tempo de CPU (~5s)
-                        
-                        if let Ok(mut rlock) = crate::api_trainer::RERANKER.lock()
-                            && let Ok(mut results) = rlock.rerank(q_str.as_str(), limited_chunks, true, None) {
+
+                        if let Ok(mut rlock) = crate::api_trainer::RERANKER.lock() {
+                            if let Ok(mut results) = rlock.rerank(q_str.as_str(), limited_chunks, true, None) {
                                 results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
                                 let top_k: Vec<_> = results.into_iter().take(5).collect(); // Pegar apenas o Suco de 5 blocos densos
-                                
+
                                 for res in top_k {
                                     if let Some(txt) = res.document {
                                         reranked_text.push_str(&format!("(Score: {:.2}): {}\n...\n", res.score, txt));
@@ -1203,15 +1212,15 @@ let mut purified_messages: Vec<Value> = Vec::new();
 // e do Vault Markdown, injetando-a como contexto sistêmico no prompt do LLM.
 // Isso garante que o agente saiba exatamente em quais tarefas e documentos está trabalhando.
 let mut project_context = String::new();
-if let Some(pid) = payload.project_id
-    && let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
+if let Some(pid) = payload.project_id {
+    if let Ok(Some(proj_info)) = sqlx::query("SELECT name, purpose FROM projects WHERE id = ?")
         .bind(&pid)
         .fetch_optional(&state.db)
         .await
     {
         let p_name: String = sqlx::Row::get(&proj_info, "name");
         let p_purpose: Option<String> = sqlx::Row::get(&proj_info, "purpose");
-        
+
         project_context.push_str(&format!("INSTRUÇÃO SISTÊMICA MÁXIMA (SOVEREIGN PROJECT ASSISTANT): 🧠 O usuário está focando absolutamente no Projeto Kanban: '{}'.\n", p_name));
         if let Some(purp) = p_purpose {
             project_context.push_str(&format!("🎯 O PROPÓSITO raiz desse projeto é: '{}'. Seu comportamento deve orbitar este propósito.\n", purp));
@@ -1221,33 +1230,36 @@ if let Some(pid) = payload.project_id
             .bind(&pid)
             .fetch_all(&state.db)
             .await
-            && !tasks.is_empty() {
+        {
+            if !tasks.is_empty() {
                 project_context.push_str("\n📌 TAREFAS ATIVAS NO KANBAN (Com Cronologia):\n");
                 for row in tasks {
                     let t_title: String = sqlx::Row::get(&row, "title");
                     let t_status: String = sqlx::Row::get(&row, "status");
                     let t_created: Option<String> = sqlx::Row::get(&row, "created_at");
                     let t_deadline: Option<String> = sqlx::Row::get(&row, "deadline");
-                    
+
                     let c = t_created.unwrap_or_else(|| "Desconhecida".to_string());
                     let d = t_deadline.unwrap_or_else(|| "Sem prazo".to_string());
-                    
+
                     project_context.push_str(&format!("- [{}] {} (Criada: {} | Prazo: {})\n", t_status, t_title, c, d));
                 }
             }
+        }
 
         if let Ok(docs) = sqlx::query("SELECT file_path FROM project_documents WHERE project_id = ?")
             .bind(&pid)
             .fetch_all(&state.db)
             .await
-            && !docs.is_empty() {
+        {
+            if !docs.is_empty() {
                 project_context.push_str("\n📚 DOCUMENTOS CÍBRIDOS VINCULADOS AO PROJETO (RAG NATIVO ABSOLUTO):\n");
                 for row in docs {
                     let mut doc_path: String = sqlx::Row::get(&row, "file_path");
                     if !doc_path.starts_with('/') {
                         doc_path = format!("{}/{}", state.vault_path.display(), doc_path);
                     }
-                    
+
                     if let Ok(content) = std::fs::read_to_string(&doc_path) {
                         let truncated: String = content.chars().take(6000).collect(); // 6K ch limit to spare VRAM
                         project_context.push_str(&format!("\n--- Arquivo: {} ---\n{}\n---\n", doc_path, truncated));
@@ -1403,10 +1415,10 @@ let active_messages = if turn_count > 3 {
     // 2. Cross-Attention Recovery (MLA Simulation v1.0)
     if let Ok(mut rlock) = crate::api_trainer::RERANKER.lock() {
         let refs: Vec<&str> = history_chunks.iter().map(|s| s.as_str()).collect();
-        if !refs.is_empty()
-            && let Ok(mut results) = rlock.rerank(human_prompt.as_str(), refs, true, None) {
+        if !refs.is_empty() {
+            if let Ok(mut results) = rlock.rerank(human_prompt.as_str(), refs, true, None) {
                 results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-                
+
                 // Profundidade Latente: 4 Blocos solicitados pelo usuário
                 for res in results.into_iter().take(4) {
                     if let Some(txt) = res.document {
@@ -1414,6 +1426,7 @@ let active_messages = if turn_count > 3 {
                     }
                 }
             }
+        }
     }
     recent.to_vec()
 } else {
@@ -1508,8 +1521,8 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
         let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
         if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
             for c in clusters {
-                if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id
-                    && let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                    if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
                         let cluster_url = url.trim_end_matches('/').to_string();
                         // Se a URL na UI não for nula nem vazia, adotamos:
                         if !cluster_url.is_empty() {
@@ -1517,6 +1530,7 @@ if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE
                             is_custom_cluster = ollama_base_url != std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()) && ollama_base_url != std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()) && ollama_base_url != "http://host.docker.internal:11434";
                         }
                     }
+                }
             }
         }
     }
@@ -1954,17 +1968,18 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                             let mut extracted_content = None;
                             let mut extracted_tool_calls: Option<Vec<crate::models::ChunkToolCall>> = None;
 
-                            if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str())
-                                && !content.is_empty() {
+                            if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
+                                if !content.is_empty() {
                                     session_tokens += 1;
-                                    
+
                                     // Live TPS Broadcast: Atualiza a métrica em tempo real se a engine de telemetria estiver operando
                                     if session_tokens % 5 == 0 {
                                         let live_duration_sec = start_time.elapsed().as_secs_f64();
-                                        if live_duration_sec > 0.0
-                                            && let Ok(mut t) = tracking_telemetry.write() {
+                                        if live_duration_sec > 0.0 {
+                                            if let Ok(mut t) = tracking_telemetry.write() {
                                                 t.live_tps = (session_tokens as f64 / live_duration_sec * 100.0).round() / 100.0;
                                             }
+                                        }
                                     }
 
                                     // Sovereign DeepSeek Paradigm: Translating <think> on-the-fly to beautiful UI details
@@ -1975,6 +1990,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     extracted_content = Some(mapped_content);
                                     has_content_or_tools = true;
                                 }
+                            }
 
                             if let Some(tool_calls_arr) = msg_obj.get("tool_calls").and_then(|tc| tc.as_array()) {
                                 let mut tcs = Vec::new();
@@ -2083,51 +2099,54 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     has_content_or_tools = true;
                                 }
                             }
+                        }
 
-                            if has_content_or_tools {
-                                let chunk_response = OpenAIChatChunkResponse {
-                                    id: format!("session_{}", tracking_session),
-                                    object: "chat.completion.chunk".to_string(),
-                                    created: 1234567890,
-                                    model: requested_model.clone(),
-                                    choices: vec![OpenAIChatChunkChoice {
-                                        index: 0,
-                                        delta: OpenAIChatChunkDelta {
-                                            role: Some("assistant".to_string()),
-                                            content: extracted_content,
-                                            tool_calls: extracted_tool_calls,
-                                        },
-                                        finish_reason: None,
-                                    }],
-                                    usage: None,
-                                };
-                                if let Ok(json_str) = serde_json::to_string(&chunk_response) {
-                                    return Ok::<Event, Infallible>(Event::default().data(json_str));
-                                }
+                        if has_content_or_tools {
+                            let chunk_response = OpenAIChatChunkResponse {
+                                id: format!("session_{}", tracking_session),
+                                object: "chat.completion.chunk".to_string(),
+                                created: 1234567890,
+                                model: requested_model.clone(),
+                                choices: vec![OpenAIChatChunkChoice {
+                                    index: 0,
+                                    delta: OpenAIChatChunkDelta {
+                                        role: Some("assistant".to_string()),
+                                        content: extracted_content,
+                                        tool_calls: extracted_tool_calls,
+                                    },
+                                    finish_reason: None,
+                                }],
+                                usage: None,
+                            };
+                            if let Ok(json_str) = serde_json::to_string(&chunk_response) {
+                                return Ok::<Event, Infallible>(Event::default().data(json_str));
                             }
                         }
-                        
-                        // Tratar Evento de Fim de Transmissão do Ollama
-                        // (Ollama envia "done": true no último pacote, com as estatísticas embutidas)
-                        if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool())
-                            && done {
-                                // Bater na payload absoluta "eval_count" e "prompt_eval_count" do Ollama final JSON
-                                let llm_gen_tokens = ollama_resp.get("eval_count").and_then(|e| e.as_u64()).unwrap_or(session_tokens as u64) as usize;
-                                let llm_prompt_tokens = ollama_resp.get("prompt_eval_count").and_then(|e| e.as_u64()).unwrap_or(0) as usize;
-                                let total_real_tokens = llm_gen_tokens + llm_prompt_tokens;
-                                
-                                // 🚩 Observabilidade: Fim de Interação -> Gravando Métricas Cíbridas!
-                                let duration = start_time.elapsed().as_millis();
-                                if let Ok(mut t) = tracking_telemetry.write() {
-                                    t.record_session(total_real_tokens, duration, &tracking_model);
-                                }
-                                
-                                // 🗄️ Histórico Absoluto: Persistindo Tokens e Uptime no Ledger SQLite
-                                let sql_db = tracking_db.clone();
-                                let sql_model = tracking_model.clone();
-                                let sql_tokens = total_real_tokens as i64;
-                                let sql_dur = duration as i64;
-                                tokio::spawn(async move {
+                    }
+                }
+            }
+
+            // Tratar Evento de Fim de Transmissão do Ollama
+            // (Ollama envia "done": true no último pacote, com as estatísticas embutidas)
+            if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool()) {
+                if done {
+                    // Bater na payload absoluta "eval_count" e "prompt_eval_count" do Ollama final JSON
+                    let llm_gen_tokens = ollama_resp.get("eval_count").and_then(|e| e.as_u64()).unwrap_or(session_tokens as u64) as usize;
+                    let llm_prompt_tokens = ollama_resp.get("prompt_eval_count").and_then(|e| e.as_u64()).unwrap_or(0) as usize;
+                    let total_real_tokens = llm_gen_tokens + llm_prompt_tokens;
+
+                    // 🚩 Observabilidade: Fim de Interação -> Gravando Métricas Cíbridas!
+                    let duration = start_time.elapsed().as_millis();
+                    if let Ok(mut t) = tracking_telemetry.write() {
+                        t.record_session(total_real_tokens, duration, &tracking_model);
+                    }
+
+                    // 🗄️ Histórico Absoluto: Persistindo Tokens e Uptime no Ledger SQLite
+                    let sql_db = tracking_db.clone();
+                    let sql_model = tracking_model.clone();
+                    let sql_tokens = total_real_tokens as i64;
+                    let sql_dur = duration as i64;
+                    tokio::spawn(async move {
                                     let _ = sqlx::query(
                                         "INSERT INTO model_metrics (model_name, total_tokens, total_duration_ms, first_used_at, last_used_at) 
                                          VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -2195,10 +2214,11 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     return Ok::<Event, Infallible>(Event::default().data(json_str));
                                 }
                             }
+                        }
                     }
                 }
             }
-            
+
             // Keep-alive/vazios
             Ok::<Event, Infallible>(Event::default())
         }
@@ -2207,6 +2227,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
             Ok::<Event, Infallible>(Event::default())
         }
     }
+}
 });
 
 while let Some(Ok(event)) = futures_util::StreamExt::next(&mut map_stream).await {
@@ -2423,13 +2444,14 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     let mut vault_categories = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&state.vault_path) {
         for entry in entries.flatten() {
-            if let Ok(file_type) = entry.file_type()
-                && file_type.is_dir() {
+            if let Ok(file_type) = entry.file_type() {
+                if file_type.is_dir() {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if !name.starts_with('.') {
                         vault_categories.push(name);
                     }
                 }
+            }
         }
     }
 
@@ -2467,12 +2489,13 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     let mut topic_counts: std::collections::HashMap<String, i32> = std::collections::HashMap::new();
     if let Ok(sessions) = sqlx::query("SELECT tags_json FROM chat_sessions WHERE tags_json IS NOT NULL").fetch_all(&state.db).await {
         for row in sessions {
-            if let Ok(tags_str) = sqlx::Row::try_get::<String, _>(&row, "tags_json")
-                && let Ok(tags) = serde_json::from_str::<Vec<String>>(&tags_str) {
+            if let Ok(tags_str) = sqlx::Row::try_get::<String, _>(&row, "tags_json") {
+                if let Ok(tags) = serde_json::from_str::<Vec<String>>(&tags_str) {
                     for tag in tags {
                         *topic_counts.entry(tag).or_insert(0) += 1;
                     }
                 }
+            }
         }
     }
     let mut top_topics: Vec<_> = topic_counts.into_iter().map(|(topic, count)| serde_json::json!({ "topic": topic, "count": count })).collect();
