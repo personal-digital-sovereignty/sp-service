@@ -7,10 +7,14 @@
 # --------------------------------------------
 # Stage 1: Build (Rust)
 # --------------------------------------------
-FROM rust:1.95-slim-bookworm AS builder
+FROM ubuntu:24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install dependencies
 RUN apt-get update && apt-get install -y \
+    curl \
+    build-essential \
     cmake \
     pkg-config \
     libssl-dev \
@@ -19,6 +23,10 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     git \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Set working directory
 WORKDIR /app
@@ -37,7 +45,9 @@ RUN cargo build --release
 # --------------------------------------------
 # Stage 2: Runtime
 # --------------------------------------------
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04 AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
