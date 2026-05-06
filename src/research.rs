@@ -252,12 +252,13 @@ impl DeepResearchEngine {
 
             if ghost_count < 3 {
                 tracing::warn!("⚠️ [The Nurse / Scraper] Vazio Epistêmico Detectado! SPA interceptado ({} bytes extraídos). Acionando The Ghost Fallback Protocol ({}/3)...", markdown.len(), ghost_count + 1);
-                if let Ok(ghost_markdown) = self.scrape_ghost_fallbacks(&url).await
-                    && ghost_markdown.len() > markdown.len() {
+                if let Ok(ghost_markdown) = self.scrape_ghost_fallbacks(&url).await {
+                    if ghost_markdown.len() > markdown.len() {
                         tracing::info!("✅ [Ghost Protocol] Sucesso! Payload histórico resgatado do Vácuo Multi-Plataforma.");
                         self.update_domain_ledger(&url, false, true).await;
                         return Ok(ghost_markdown);
                     }
+                }
             } else {
                 tracing::warn!("🛑 [Ghost Protocol] Rate-limit atingido ({}/3). Ignorando fallback de arquivo para evitar sobrecarga de rede.", ghost_count + 1);
             }
@@ -273,11 +274,12 @@ impl DeepResearchEngine {
     fn extract_hydration_json(&self, html: &str) -> Option<String> {
         // 1. Next.js __NEXT_DATA__
         let next_re = Regex::new(r#"<script id="__NEXT_DATA__" type="application/json">(\{.*?\})</script>"#).unwrap();
-        if let Some(cap) = next_re.captures(html)
-            && let Some(json_str) = cap.get(1) {
+        if let Some(cap) = next_re.captures(html) {
+            if let Some(json_str) = cap.get(1) {
                 // Return formatado para o LLM não precisar lutar com o AST
                 return Some(format!("```json\n{}\n```", json_str.as_str()));
             }
+        }
 
         // 2. SEO Microdata (JSON-LD)
         let ld_re = Regex::new(r#"<script type="application/ld\+json">([\s\S]*?)</script>"#).unwrap();
@@ -326,43 +328,53 @@ impl DeepResearchEngine {
         );
 
         // Retorna o primeiro que tiver conteúdo útil (corrida de latência paralela!)
-        if let Ok(md) = arquivo_pt
-            && md.len() > 200 { return Ok(md); }
-        if let Ok(md) = ukwa
-            && md.len() > 200 { return Ok(md); }
-        if let Ok(md) = vefsafn
-            && md.len() > 200 { return Ok(md); }
-        if let Ok(md) = wayback
-            && md.len() > 200 { return Ok(md); }
-        if let Ok(md) = gcache
-            && md.len() > 200 { return Ok(md); }
-        if let Ok(md) = archive_ph
-            && md.len() > 200 { return Ok(md); }
+        if let Ok(md) = arquivo_pt {
+            if md.len() > 200 { return Ok(md); }
+        }
+        if let Ok(md) = ukwa {
+            if md.len() > 200 { return Ok(md); }
+        }
+        if let Ok(md) = vefsafn {
+            if md.len() > 200 { return Ok(md); }
+        }
+        if let Ok(md) = wayback {
+            if md.len() > 200 { return Ok(md); }
+        }
+        if let Ok(md) = gcache {
+            if md.len() > 200 { return Ok(md); }
+        }
+        if let Ok(md) = archive_ph {
+            if md.len() > 200 { return Ok(md); }
+        }
 
         Err("Todas as 6 matrizes do The Ghost Fallback Protocol (Institucionais e Caches) falharam ou retornaram o vácuo.".to_string())
     }
 
     async fn scrape_via_google_cache(&self, url: &str) -> Result<String, String> {
         let cache_url = format!("https://webcache.googleusercontent.com/search?q=cache:{}", urlencoding::encode(url));
-        if let Ok(resp) = self.client.get(&cache_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await
-            && resp.status().is_success()
-                && let Ok(html) = resp.text().await {
+        if let Ok(resp) = self.client.get(&cache_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await {
+            if resp.status().is_success() {
+                if let Ok(html) = resp.text().await {
                     let markdown = self.sanitize_to_markdown(&html);
                     tracing::info!("👻 [Ghost Protocol] Google Cache Hit: {} bytes resgatados.", markdown.len());
                     return Ok(markdown);
                 }
+            }
+        }
         Err("Google Cache Fallback Failed".to_string())
     }
 
     async fn scrape_via_archive_today(&self, url: &str) -> Result<String, String> {
         let archive_url = format!("https://archive.ph/latest/{}", url);
-        if let Ok(resp) = self.client.get(&archive_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await
-            && resp.status().is_success()
-                && let Ok(html) = resp.text().await {
+        if let Ok(resp) = self.client.get(&archive_url).header(reqwest::header::USER_AGENT, Self::get_random_user_agent()).send().await {
+            if resp.status().is_success() {
+                if let Ok(html) = resp.text().await {
                     let markdown = self.sanitize_to_markdown(&html);
                     tracing::info!("👻 [Ghost Protocol] Archive.today Hit: {} bytes resgatados.", markdown.len());
                     return Ok(markdown);
                 }
+            }
+        }
         Err("Archive.today Fallback Failed".to_string())
     }
 
@@ -904,8 +916,8 @@ impl DeepResearchEngine {
             Ok(response) => {
                 let status = response.status();
                 if status.is_success() {
-                    if let Ok(json_data) = response.json::<serde_json::Value>().await
-                        && let Some(results) = json_data.get("web").and_then(|w| w.get("results")).and_then(|r| r.as_array()) {
+                    if let Ok(json_data) = response.json::<serde_json::Value>().await {
+                        if let Some(results) = json_data.get("web").and_then(|w| w.get("results")).and_then(|r| r.as_array()) {
                             let mut links = Vec::new();
                             for res in results {
                                 if let Some(url_str) = res.get("url").and_then(|u| u.as_str()) {
@@ -919,6 +931,7 @@ impl DeepResearchEngine {
                             prioritized_links.truncate(scrape_cap);
                             return Ok(prioritized_links);
                         }
+                    }
                 }
                 Err(format!("Brave API falhou com HTTP {}", status))
             },
@@ -937,15 +950,18 @@ impl DeepResearchEngine {
         ];
 
         // Se o banco Cíbrido estiver acoplado, verifique os IPs configurados pelo usuário
-        if let Some(pool) = &self.db_pool
-            && let Ok(json_str) = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'searxng_nodes'")
+        if let Some(pool) = &self.db_pool {
+            if let Ok(json_str) = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'searxng_nodes'")
                 .fetch_one(pool)
-                .await
-                && let Ok(parsed) = serde_json::from_str::<Vec<String>>(&json_str)
-                    && !parsed.is_empty() {
+                .await {
+                if let Ok(parsed) = serde_json::from_str::<Vec<String>>(&json_str) {
+                    if !parsed.is_empty() {
                         instances = parsed;
                         tracing::info!("🔗 [SearxNG] {} Nodes Customizados de Busca carregados do Sensus Vault!", instances.len());
                     }
+                }
+            }
+        }
 
         let mut last_error = String::new();
 
@@ -958,8 +974,8 @@ impl DeepResearchEngine {
             match req {
                 Ok(response) => {
                     if response.status().is_success() {
-                        if let Ok(json_data) = response.json::<serde_json::Value>().await
-                            && let Some(results) = json_data.get("results").and_then(|r| r.as_array()) {
+                        if let Ok(json_data) = response.json::<serde_json::Value>().await {
+                            if let Some(results) = json_data.get("results").and_then(|r| r.as_array()) {
                                 let mut links = Vec::new();
                                 for res in results {
                                     if let Some(url_str) = res.get("url").and_then(|u| u.as_str()) {
@@ -973,6 +989,7 @@ impl DeepResearchEngine {
                                 prioritized_links.truncate(scrape_cap);
                                 return Ok(prioritized_links);
                             }
+                        }
                     } else {
                         tracing::debug!("Instância {} fechou as portas HTTP {}", base_url, response.status());
                         last_error = format!("HTTP {}", response.status());

@@ -1090,6 +1090,7 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
                                     }
                                 }
                             }
+                        }
                         
                         if reranked_text.trim().is_empty() {
                             markdown.truncate(4000);
@@ -1103,6 +1104,7 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
                         master_dossier.push_str(&format!("## Origem Escaneada Profundamente: {}\n{}\n\n", link, markdown));
                     }
                 }
+        }
         }
 
         let _ = state.log_sender.send(crate::models::LogEntry {
@@ -1591,7 +1593,7 @@ if let Some(r) = or_vault {
 let is_openrouter_model = ollama_model.starts_with("openrouter/");
 let use_openrouter = is_openrouter_model || (openrouter_settings.as_ref().map(|s| s.enabled).unwrap_or(false) && (ollama_model.contains("gpt") || ollama_model.contains("claude")));
 
-if use_openrouter && let Some(settings) = openrouter_settings {
+if use_openrouter { if let Some(settings) = openrouter_settings {
     info!("☁️ [Sovereign Mesh] Roteando requisição para OpenRouter: [{}]", ollama_model);
     
     // Converte a payload de volta para OpenAIChatRequest
@@ -1801,6 +1803,7 @@ if use_openrouter && let Some(settings) = openrouter_settings {
             error!("OpenRouter Connection Failed: {}. Falling back to local...", e);
         }
     }
+}
 }
 
 let endpoint = format!("{}/api/chat", ollama_base_url);
@@ -2104,8 +2107,6 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     has_content_or_tools = true;
                                 }
                             }
-                        }
-                    }
 
                     if has_content_or_tools {
                         let chunk_response = OpenAIChatChunkResponse {
@@ -2129,7 +2130,6 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                         }
                     }
                 }
-            }
 
             // Tratar Evento de Fim de Transmissão do Ollama
             // (Ollama envia "done": true no último pacote, com as estatísticas embutidas)
@@ -2220,6 +2220,9 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                     }
                 }
             }
+                    }
+                }
+            }
 
             // Keep-alive/vazios
             Ok::<Event, Infallible>(Event::default())
@@ -2229,12 +2232,12 @@ let mut map_stream = res.bytes_stream().map(move |result| {
             Ok::<Event, Infallible>(Event::default())
         }
     }
-}
 }); // Fim do map_stream
 
 while let Some(Ok(event)) = futures_util::StreamExt::next(&mut map_stream).await {
     let _ = tx_sse_clone.send(event);
 }
+}); // Fim do tokio::spawn principal
 
 let final_stream = async_stream::stream! {
     while let Some(event) = rx_sse.recv().await {

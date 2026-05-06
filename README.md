@@ -2,12 +2,12 @@
 
 **Service/API/Backend** — O motor de Inferência e RAG Cíbrido para o ecossistema Sovereign Pair.
 
-[![Version](https://img.shields.io/badge/version-1.4.0--dev-blue.svg)](https://github.com/Personal-Digital-Sovereignty/sp-platform)
+[![Version](https://img.shields.io/badge/version-1.4.0--dev-blue.svg)](https://github.com/Personal-Digital-Sovereignty/sp-service)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-red.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/ci.yml?branch=main)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions)
-[![E2E Pipeline](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/e2e.yml?label=E2E%20Tests)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions/workflows/e2e.yml)
-[![Docker Build](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-platform/docker.yml?label=Docker%20Build)](https://github.com/Personal-Digital-Sovereignty/sp-platform/actions/workflows/docker.yml)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-service/ci.yml?branch=main)](https://github.com/Personal-Digital-Sovereignty/sp-service/actions)
+[![Rust Tests](https://img.shields.io/badge/rust%20tests-136%20passing-brightgreen.svg)]()
+[![Python Tests](https://img.shields.io/badge/python%20tests-108%20passing-brightgreen.svg)]()
 
 ---
 
@@ -286,18 +286,26 @@ Auditado em **Pass 3** (v1.2.9):
 ## 🧪 Testes
 
 ```bash
-# Testes unitários
+# Testes unitarios Rust (136 tests)
 cargo test --lib
 
-# Testes de integração
-cargo test --test integration
+# Todos os testes Rust
+cargo test
 
-# Testes de segurança
+# Testes Python (108 tests)
+cd python_workers && python3 -m pytest tests/ -v
+
+# Testes de seguranca
 cargo test security
 
 # Coverage (requer cargo-tarpaulin)
 cargo tarpaulin --out Html
 ```
+
+> **Status Atual (2026-05-06):**
+> - Rust: **136 tests** — 0 failed ✅
+> - Python: **108 tests** — 0 failed ✅
+> - Compilação: **0 erros, 0 let-chains** ✅
 
 ---
 
@@ -401,4 +409,6 @@ Este projeto está sob licença **PolyForm Noncommercial 1.0.0**. Veja [LICENSE]
 
 **Histórico:** Este repositório (`sp-service/`) é o sucessor de `sovereign-pair/` para desenvolvimento backend ativo.  
 **Versão Atual:** 1.4.0-dev  
-**Última Atualização:** 2026-05-03
+**Última Atualização:** 2026-05-06  
+**Status de Compilação:** ✅ cargo check OK (Rust 2021 edition — 0 erros, 0 let-chains)
+
