@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased] — Hotfix: CVE Patches + Clippy Gate
+
+### Fixed — Seguranca (CVEs Trivy HIGH)
+- **CVE-2026-42327** (`openssl 0.10.78`): Undefined Behavior em `X509Ref::ocsp_responders` para certificados com OCSP URLs nao-UTF-8. Bumped para `0.10.79` no `Cargo.toml` + `cargo update` atualizou o `Cargo.lock`.
+- **GHSA-82j2-j2ch-gfr8** (`rustls-webpki 0.103.10`): Denial of Service via panic em CRL BIT STRING malformado. Bumped para `0.103.13` via `cargo update rustls-webpki`.
+
+### Fixed — Clippy Gate (`-D warnings`)
+- **`clippy::manual_flatten`** (`api.rs:1069`): Substituiu `for res in join_all(...).await { if let Ok((link, md)) = res { ... } }` por `for (link, md) in join_all(...).await.into_iter().flatten() { ... }` conforme sugerido pelo Clippy.
+
+---
+
 ## [1.4.0-dev] - 2026-05-06 — Estabilizacao Estrutural Critica
 
 ### Fixed — AST e Delimitadores (api.rs)

@@ -1066,8 +1066,7 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
              master_dossier.push_str(&format!("## ZERO-CLICK SEARCH SNIPPETS (Multi-Query)\n{}\n\n", all_snippets));
         }
 
-        for res in futures_util::future::join_all(scrape_handles).await {
-            if let Ok((link, mut markdown)) = res {
+        for (link, mut markdown) in futures_util::future::join_all(scrape_handles).await.into_iter().flatten() {
                 if markdown.len() > 100 {
 
                     // WAG 2.0 RERANKER (FastEmbed Cross-Attention)
@@ -1104,7 +1103,6 @@ if is_web || (payload.deep_research.unwrap_or(false) && !is_trivial) {
                         master_dossier.push_str(&format!("## Origem Escaneada Profundamente: {}\n{}\n\n", link, markdown));
                     }
                 }
-        }
         }
 
         let _ = state.log_sender.send(crate::models::LogEntry {
