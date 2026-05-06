@@ -187,7 +187,16 @@ jobs:
 
       - name: Install SQLite Runtime Dependencies (Linux Only)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev pkg-config libssl-dev
+
+      - name: Install OpenSSL (Windows Only)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install openssl --no-progress -y
+          echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $env:GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=C:\Program Files\OpenSSL-Win64\include" >> $env:GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=C:\Program Files\OpenSSL-Win64\lib\VC\x64\MD" >> $env:GITHUB_ENV
 
       - name: Compile sp-service (Rust)
         run: cargo build --release --target ${{ matrix.target_triple }}
