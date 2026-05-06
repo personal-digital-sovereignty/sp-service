@@ -122,11 +122,11 @@ fn is_root() -> bool {
 }
 
 fn elevate_privileges() {
-    let exe = env::current_exe().unwrap();
     println!("🔄 Injetando prompt do O.S para reinicialização...");
 
     #[cfg(target_os = "linux")]
     {
+        let exe = env::current_exe().unwrap();
         // Tenta pkexec para pop-up visual (Wayland/X11), cai pra sudo se puro TTY
         let status = Command::new("pkexec")
             .arg(&exe)
@@ -139,6 +139,7 @@ fn elevate_privileges() {
 
     #[cfg(target_os = "macos")]
     {
+        let exe = env::current_exe().unwrap();
         let script = format!("do shell script \"{} --setup\" with administrator privileges", exe.display());
         let status = Command::new("osascript")
             .arg("-e")
