@@ -207,83 +207,12 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: target/${{ matrix.target_triple }}/release/${{ matrix.binary_name }}
 
-  # ==========================================
-  # Docker Build (Runtime-Only — uses pre-compiled binaries from build-core)
-  # ==========================================
-  build-docker:
-    needs: [build-core]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Download Linux AMD64 Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: sp-service-linux-amd64
-          path: binaries/amd64
-
-      - name: Download Linux ARM64 Binary
-        uses: actions/download-artifact@v4
-        with:
-          name: sp-service-linux-arm64
-          path: binaries/arm64
-
-      - name: Prepare Binaries
-        run: |
-          chmod +x binaries/amd64/sovereign-daemon
-          chmod +x binaries/arm64/sovereign-daemon
-          ls -la binaries/amd64/ binaries/arm64/
-
-      - name: Set up QEMU (for multi-arch)
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Prepare Image Name
-        id: prep
-        env:
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          IMG="ghcr.io/$OWNER/sp-service"
-          echo "image_name=$(echo "$IMG" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      - name: Build and Push Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.prep.outputs.image_name }}:latest
-            ${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-          platforms: linux/amd64,linux/arm64
-
-      - name: Run Trivy Image Scan
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
-        with:
-          image-ref: ${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
 
   # ==========================================
   # Release Distribution
   # ==========================================
   publish-nightly:
-    needs: [build-core, build-docker]
+    needs: [build-core]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
@@ -326,7 +255,7 @@ jobs:
             sp-service-macos-arm64-binary
 
   publish-stable:
-    needs: [build-core, build-docker]
+    needs: [build-core]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:

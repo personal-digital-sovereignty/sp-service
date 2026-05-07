@@ -1,8 +1,6 @@
 name: Docker Build & Push
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       push_to_registry:
@@ -13,6 +11,10 @@ on:
         description: 'Comma-separated list of platforms to build for'
         type: string
         default: 'linux/amd64,linux/arm64'
+      release_tag:
+        description: 'Specific release tag to use (leave empty for auto-detection: stable → nightly)'
+        type: string
+        default: ''
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -27,35 +29,137 @@ permissions:
 
 jobs:
   # ==========================================
-  # Gate 0: Security Scan
+  # Resolve Release Binaries
   # ==========================================
-  security-scan:
-    name: "Gate 0: Docker Security Scan"
+  resolve-release:
+    name: "Resolve Release Binaries"
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      release_found: ${{ steps.resolve.outputs.release_found }}
+    steps:
+      - name: Resolve Release Tag
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REPO="${{ github.repository }}"
+
+          # 1. If user specified a tag, use it
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            TAG="${{ github.event.inputs.release_tag }}"
+            echo "Using user-specified tag: $TAG"
+            echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+            echo "release_found=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 2. Try latest stable release first
+          STABLE_TAG=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+          if [ -n "$STABLE_TAG" ]; then
+            echo "Found stable release: $STABLE_TAG"
+            echo "release_tag=$STABLE_TAG" >> "$GITHUB_OUTPUT"
+            echo "release_found=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 3. Fallback to nightly pre-release
+          NIGHTLY_TAG=$(gh release list --repo "$REPO" --limit 10 --json tagName,isPrerelease -q '.[] | select(.isPrerelease) | .tagName' 2>/dev/null | head -1 || echo "")
+          if [ -n "$NIGHTLY_TAG" ]; then
+            echo "No stable release found. Using nightly: $NIGHTLY_TAG"
+            echo "release_tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
+            echo "release_found=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 4. No release at all — graceful abort
+          echo "⚠️ No releases found. Nothing to containerize."
+          echo "release_tag=" >> "$GITHUB_OUTPUT"
+          echo "release_found=false" >> "$GITHUB_OUTPUT"
+
+  # ==========================================
+  # Download Binaries from Release
+  # ==========================================
+  download-binaries:
+    name: "Download Release Binaries"
+    needs: resolve-release
+    if: needs.resolve-release.outputs.release_found == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Download Linux AMD64 Binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.resolve-release.outputs.release_tag }}"
+          echo "Downloading sp-service-linux-amd64-binary from release $TAG..."
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "sp-service-linux-amd64-binary" \
+            --output sovereign-daemon-amd64
+          chmod +x sovereign-daemon-amd64
 
-      - name: Run Trivy vulnerability scanner on Dockerfile
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+      - name: Download Linux ARM64 Binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.resolve-release.outputs.release_tag }}"
+          echo "Downloading sp-service-linux-arm64-binary from release $TAG..."
+          gh release download "$TAG" \
+            --repo "${{ github.repository }}" \
+            --pattern "sp-service-linux-arm64-binary" \
+            --output sovereign-daemon-arm64
+          chmod +x sovereign-daemon-arm64
+
+      - name: Upload AMD64 Binary as Artifact
+        uses: actions/upload-artifact@v4
         with:
-          scan-type: 'config'
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+          name: docker-binary-amd64
+          path: sovereign-daemon-amd64
+          retention-days: 1
+
+      - name: Upload ARM64 Binary as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-binary-arm64
+          path: sovereign-daemon-arm64
+          retention-days: 1
 
   # ==========================================
-  # Build and Push
+  # Build and Push Docker Image
   # ==========================================
   build-and-push:
     name: "Build and Push Docker Image"
-    needs: security-scan
+    needs: [resolve-release, download-binaries]
+    if: needs.resolve-release.outputs.release_found == 'true'
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Download AMD64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-binary-amd64
+          path: binaries/amd64
+
+      - name: Download ARM64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-binary-arm64
+          path: binaries/arm64
+
+      - name: Prepare Binaries
+        run: |
+          mv binaries/amd64/sovereign-daemon-amd64 binaries/amd64/sovereign-daemon
+          mv binaries/arm64/sovereign-daemon-arm64 binaries/arm64/sovereign-daemon
+          chmod +x binaries/amd64/sovereign-daemon binaries/arm64/sovereign-daemon
+          echo "=== AMD64 ===" && ls -la binaries/amd64/
+          echo "=== ARM64 ===" && ls -la binaries/arm64/
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -81,11 +185,7 @@ jobs:
         with:
           images: ${{ steps.prep.outputs.image_name }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.resolve-release.outputs.release_tag }}
             type=sha,prefix=
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
 
@@ -96,50 +196,32 @@ jobs:
           push: ${{ github.event.inputs.push_to_registry != 'false' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: ${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
-          build-args: |
-            BUILD_DATE=${{ github.event.head_commit.timestamp }}
-            VCS_REF=${{ github.sha }}
-            VERSION=${{ github.ref_name }}
-
-      - name: Generate SBOM (Software Bill of Materials)
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-          format: spdx-json
-          output-file: sbom.spdx.json
-
-      - name: Upload SBOM Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom.spdx.json
-          retention-days: 90
 
   # ==========================================
   # Post-Build Security Scan
   # ==========================================
   image-scan:
     name: "Post-Build Image Scan"
-    needs: build-and-push
+    needs: [resolve-release, build-and-push]
     runs-on: ubuntu-latest
-    if: always()
+    if: needs.resolve-release.outputs.release_found == 'true'
     steps:
+      - name: Prepare Image Name
+        id: prep
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          IMG="ghcr.io/$OWNER/sp-service"
+          echo "image_name=$(echo "$IMG" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
       - name: Run Trivy vulnerability scanner on image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
-          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-          format: 'sarif'
-          output: trivy-results.sarif
+          image-ref: ${{ steps.prep.outputs.image_name }}:${{ needs.resolve-release.outputs.release_tag }}
+          format: 'table'
+          exit-code: '0'
           severity: 'CRITICAL,HIGH,MEDIUM'
-
-      - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy-results.sarif
 
       - name: Print scan summary
         run: |
@@ -147,48 +229,28 @@ jobs:
           echo "  Docker Image Security Scan Summary"
           echo "============================================"
           echo ""
-          echo "Image: ${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          echo "Release: ${{ needs.resolve-release.outputs.release_tag }}"
           echo "Scan Status: Complete"
           echo ""
           echo "Check the Security tab for detailed results."
 
   # ==========================================
-  # Deploy to OCI (Optional)
+  # Graceful Abort (No Release Found)
   # ==========================================
-  deploy-oci:
-    name: "Deploy to OCI Cloud"
-    needs: build-and-push
-    if: ${{ github.event_name == 'release' }}
+  no-release:
+    name: "No Release Available"
+    needs: resolve-release
+    if: needs.resolve-release.outputs.release_found != 'true'
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@fc711fa910b93cba0f3fbecaafc9f42fd0c411cb
-        with:
-          tofu_wrapper: false
-          tofu_version: latest
-
-      - name: OpenTofu Init
-        working-directory: ./infra/terraform
-        run: tofu init
-
-      - name: OpenTofu Apply
-        working-directory: ./infra/terraform
-        env:
-          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
-          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
-          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
-          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
-          TF_VAR_region: ${{ vars.OCI_REGION || 'sa-saopaulo-1' }}
-          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID != '' && secrets.OCI_COMPARTMENT_OCID || secrets.OCI_TENANCY_OCID }}
-          TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
-          TF_VAR_ssh_public_key: ${{ secrets.OCI_SSH_PUBLIC_KEY }}
-          TF_VAR_ssh_private_key: ${{ secrets.OCI_SSH_PRIVATE_KEY }}
-          TF_VAR_pat_ghcr: ${{ secrets.PAT_GHCR }}
-          TF_VAR_boot_volume_size_in_gbs: ${{ vars.OCI_BOOT_VOLUME_SIZE || 200 }}
-          TF_VAR_release_version: ${{ github.ref_name }}
-        run: tofu apply -auto-approve
+      - name: Abort Gracefully
+        run: |
+          echo "============================================"
+          echo "  ⚠️  No Release Available"
+          echo "============================================"
+          echo ""
+          echo "No stable or nightly release was found."
+          echo "Run the CI pipeline first to generate binaries"
+          echo "and publish a nightly or stable release."
+          echo ""
+          echo "Pipeline exiting cleanly (no error)."
