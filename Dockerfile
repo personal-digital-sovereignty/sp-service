@@ -59,8 +59,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -m -u 1000 -r sovereign
+# Create non-root user (remove default ubuntu user first since it occupies UID 1000)
+RUN id -u ubuntu > /dev/null 2>&1 && userdel -r ubuntu || true; \
+    useradd -m -u 1000 -r sovereign
 
 # Set working directory
 WORKDIR /app
