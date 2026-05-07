@@ -208,10 +208,10 @@ jobs:
           path: target/${{ matrix.target_triple }}/release/${{ matrix.binary_name }}
 
   # ==========================================
-  # Docker Build
+  # Docker Build (Runtime-Only — uses pre-compiled binaries from build-core)
   # ==========================================
   build-docker:
-    needs: [foss-enterprise-devsecops]
+    needs: [build-core]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -221,6 +221,27 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+
+      - name: Download Linux AMD64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sp-service-linux-amd64
+          path: binaries/amd64
+
+      - name: Download Linux ARM64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: sp-service-linux-arm64
+          path: binaries/arm64
+
+      - name: Prepare Binaries
+        run: |
+          chmod +x binaries/amd64/sovereign-daemon
+          chmod +x binaries/arm64/sovereign-daemon
+          ls -la binaries/amd64/ binaries/arm64/
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -248,8 +269,6 @@ jobs:
           tags: |
             ${{ steps.prep.outputs.image_name }}:latest
             ${{ steps.prep.outputs.image_name }}:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
 
       - name: Run Trivy Image Scan

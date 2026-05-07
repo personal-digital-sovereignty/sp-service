@@ -1,56 +1,17 @@
 # ============================================
-# sp-service — Dockerfile
+# sp-service — Dockerfile (Runtime-Only)
 # ============================================
-# Containerização do backend Rust para produção
+# Receives the pre-compiled sovereign-daemon binary from CI.
+# No Rust compilation happens here — binaries are built by
+# the build-core matrix and injected via build context.
 # ============================================
 
-# --------------------------------------------
-# Stage 1: Build (Rust)
-# --------------------------------------------
-FROM ubuntu:24.04 AS builder
+FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    build-essential \
-    cmake \
-    pkg-config \
-    libssl-dev \
-    python3 \
-    python3-pip \
-    python3-venv \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# Set working directory
-WORKDIR /app
-
-# Copy manifests first (for better caching)
-COPY Cargo.toml Cargo.lock ./
-COPY build.rs ./
-COPY prompts ./prompts
-COPY python_workers ./python_workers
-COPY src ./src
-COPY tests ./tests
-
-# Build in release mode
-RUN cargo build --release
-
-# --------------------------------------------
-# Stage 2: Runtime
-# --------------------------------------------
-FROM ubuntu:24.04 AS runtime
-
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y \
+# Install runtime dependencies only
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     openssl \
     python3 \
@@ -66,11 +27,13 @@ RUN id -u ubuntu > /dev/null 2>&1 && userdel -r ubuntu || true; \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/sovereign-daemon /app/sovereign-daemon
+# Copy pre-compiled binary (architecture is resolved by Docker buildx TARGETARCH)
+ARG TARGETARCH
+COPY binaries/${TARGETARCH}/sovereign-daemon /app/sovereign-daemon
+RUN chmod +x /app/sovereign-daemon
 
 # Copy Python workers
-COPY --from=builder /app/python_workers /app/python_workers
+COPY python_workers /app/python_workers
 
 # Create directories for data
 RUN mkdir -p /app/data /app/data/vault && \
