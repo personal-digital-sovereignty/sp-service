@@ -67,7 +67,7 @@ RUN id -u ubuntu > /dev/null 2>&1 && userdel -r ubuntu || true; \
 WORKDIR /app
 
 # Copy binary from builder
-COPY --from=builder /app/target/release/sp-service /app/sp-service
+COPY --from=builder /app/target/release/sovereign-daemon /app/sovereign-daemon
 
 # Copy Python workers
 COPY --from=builder /app/python_workers /app/python_workers
@@ -93,4 +93,4 @@ ENV WORKSPACE_PATH=/app/data/vault
 ENV OLLAMA_HOST=host.docker.internal:11434
 
 # Run the service
-CMD ["./sp-service"]
+CMD ["./sovereign-daemon"]
