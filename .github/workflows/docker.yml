@@ -42,20 +42,19 @@ jobs:
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          REPO="${{ github.repository }}"
-
           # 1. If user specified a tag, use it
-          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
-            TAG="${{ github.event.inputs.release_tag }}"
-            echo "Using user-specified tag: $TAG"
-            echo "release_tag=$TAG" >> "$GITHUB_OUTPUT"
+          if [ -n "$INPUT_RELEASE_TAG" ]; then
+            echo "Using user-specified tag: $INPUT_RELEASE_TAG"
+            echo "release_tag=$INPUT_RELEASE_TAG" >> "$GITHUB_OUTPUT"
             echo "release_found=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           # 2. Try latest stable release first
-          STABLE_TAG=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
+          STABLE_TAG=$(gh release list --repo "$GH_REPO" --exclude-drafts --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || echo "")
           if [ -n "$STABLE_TAG" ]; then
             echo "Found stable release: $STABLE_TAG"
             echo "release_tag=$STABLE_TAG" >> "$GITHUB_OUTPUT"
@@ -64,7 +63,7 @@ jobs:
           fi
 
           # 3. Fallback to nightly pre-release
-          NIGHTLY_TAG=$(gh release list --repo "$REPO" --limit 10 --json tagName,isPrerelease -q '.[] | select(.isPrerelease) | .tagName' 2>/dev/null | head -1 || echo "")
+          NIGHTLY_TAG=$(gh release list --repo "$GH_REPO" --limit 10 --json tagName,isPrerelease -q '.[] | select(.isPrerelease) | .tagName' 2>/dev/null | head -1 || echo "")
           if [ -n "$NIGHTLY_TAG" ]; then
             echo "No stable release found. Using nightly: $NIGHTLY_TAG"
             echo "release_tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
@@ -89,11 +88,12 @@ jobs:
       - name: Download Linux AMD64 Binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          TAG="${{ needs.resolve-release.outputs.release_tag }}"
-          echo "Downloading sp-service-linux-amd64-binary from release $TAG..."
-          gh release download "$TAG" \
-            --repo "${{ github.repository }}" \
+          echo "Downloading sp-service-linux-amd64-binary from release $RELEASE_TAG..."
+          gh release download "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
             --pattern "sp-service-linux-amd64-binary" \
             --output sovereign-daemon-amd64
           chmod +x sovereign-daemon-amd64
@@ -101,11 +101,12 @@ jobs:
       - name: Download Linux ARM64 Binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          TAG="${{ needs.resolve-release.outputs.release_tag }}"
-          echo "Downloading sp-service-linux-arm64-binary from release $TAG..."
-          gh release download "$TAG" \
-            --repo "${{ github.repository }}" \
+          echo "Downloading sp-service-linux-arm64-binary from release $RELEASE_TAG..."
+          gh release download "$RELEASE_TAG" \
+            --repo "$GH_REPO" \
             --pattern "sp-service-linux-arm64-binary" \
             --output sovereign-daemon-arm64
           chmod +x sovereign-daemon-arm64
@@ -224,12 +225,14 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM'
 
       - name: Print scan summary
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.release_tag }}
         run: |
           echo "============================================"
           echo "  Docker Image Security Scan Summary"
           echo "============================================"
           echo ""
-          echo "Release: ${{ needs.resolve-release.outputs.release_tag }}"
+          echo "Release: $RELEASE_TAG"
           echo "Scan Status: Complete"
           echo ""
           echo "Check the Security tab for detailed results."
