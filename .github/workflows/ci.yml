@@ -152,19 +152,19 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact_name: sp-service-linux-amd64
-            binary_name: sp-service
+            binary_name: sovereign-daemon
             target_triple: x86_64-unknown-linux-gnu
           - os: windows-latest
             artifact_name: sp-service-windows-amd64
-            binary_name: sp-service.exe
+            binary_name: sovereign-daemon.exe
             target_triple: x86_64-pc-windows-msvc
           - os: ubuntu-24.04-arm
             artifact_name: sp-service-linux-arm64
-            binary_name: sp-service
+            binary_name: sovereign-daemon
             target_triple: aarch64-unknown-linux-gnu
           - os: macos-latest
             artifact_name: sp-service-macos-arm64
-            binary_name: sp-service
+            binary_name: sovereign-daemon
             target_triple: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
@@ -213,6 +213,9 @@ jobs:
   build-docker:
     needs: [foss-enterprise-devsecops]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -281,10 +284,10 @@ jobs:
 
       - name: Rename Artifacts for Release
         run: |
-          mv sp-service-linux-amd64/sp-service sp-service-linux-amd64-binary
-          mv sp-service-linux-arm64/sp-service sp-service-linux-arm64-binary
-          mv sp-service-windows-amd64/sp-service.exe sp-service-windows-amd64-binary.exe
-          mv sp-service-macos-arm64/sp-service sp-service-macos-arm64-binary
+          mv sp-service-linux-amd64/sovereign-daemon sp-service-linux-amd64-binary
+          mv sp-service-linux-arm64/sovereign-daemon sp-service-linux-arm64-binary
+          mv sp-service-windows-amd64/sovereign-daemon.exe sp-service-windows-amd64-binary.exe
+          mv sp-service-macos-arm64/sovereign-daemon sp-service-macos-arm64-binary
 
       - name: Generate Nightly Pre-Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
@@ -317,10 +320,10 @@ jobs:
 
       - name: Rename Artifacts for Release
         run: |
-          mv sp-service-linux-amd64/sp-service sp-service-linux-amd64-binary
-          mv sp-service-linux-arm64/sp-service sp-service-linux-arm64-binary
-          mv sp-service-windows-amd64/sp-service.exe sp-service-windows-amd64-binary.exe
-          mv sp-service-macos-arm64/sp-service sp-service-macos-arm64-binary
+          mv sp-service-linux-amd64/sovereign-daemon sp-service-linux-amd64-binary
+          mv sp-service-linux-arm64/sovereign-daemon sp-service-linux-arm64-binary
+          mv sp-service-windows-amd64/sovereign-daemon.exe sp-service-windows-amd64-binary.exe
+          mv sp-service-macos-arm64/sovereign-daemon sp-service-macos-arm64-binary
 
       - name: Generate Stable Release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
