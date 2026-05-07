@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
+   
+### Fixed — CI/CD e Docker (Forensic Fixes)
+- **GLIBC Noble Migration:** Migrada imagem base do Docker de Debian Bookworm para Ubuntu 24.04 para compatibilidade com símbolos `__isoc23_strtoll` exigidos pelo `ort-sys`.
+- **UID 1000 Collision:** Implementada remoção automática do usuário padrão `ubuntu` nas imagens Ubuntu 24.04 para garantir que o usuário `sovereign` possa assumir o UID 1000.
+- **Binary Name Sync:** Corrigido erro de `COPY` no Dockerfile sincronizando o nome do artefato com o binário `sovereign-daemon` gerado pelo Cargo.
+- **GHCR Permissions:** Adicionada permissão explícita `packages:write` ao job `build-docker` para resolver falhas de push no GitHub Container Registry.
+- **Semgrep Security:** Corrigida vulnerabilidade de `run-shell-injection` no workflow Docker, migrando interpolações diretas `${{ }}` para variáveis de ambiente intermediárias.
+
+### Changed — Arquitetura de Build
+- **Docker Runtime-Only:** Refatorado Dockerfile para eliminar o stage de compilação redundante (~115min economizados no ARM64). A imagem agora consome binários pré-compilados injetados via build context.
+- **Decoupling CI/Docker:** O build de imagens Docker foi desacoplado do pipeline principal `ci.yml`. Agora é executado on-demand via `docker.yml`, consumindo artefatos de releases estáveis ou nightly.
+
+---
+
 ## [Unreleased] — Hotfix: CVE Patches + Clippy Gate
 
 ### Fixed — Seguranca (CVEs Trivy HIGH)
