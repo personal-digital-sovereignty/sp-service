@@ -208,21 +208,45 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.resolve-release.outputs.release_found == 'true'
     steps:
-      - name: Prepare Image Name
-        id: prep
-        env:
-          OWNER: ${{ github.repository_owner }}
-        run: |
-          IMG="ghcr.io/$OWNER/sp-service"
-          echo "image_name=$(echo "$IMG" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
 
-      - name: Run Trivy vulnerability scanner on image
+      - name: Download AMD64 Binary
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-binary-amd64
+          path: binaries/amd64
+
+      - name: Prepare Binary
+        run: |
+          mv binaries/amd64/sovereign-daemon-amd64 binaries/amd64/sovereign-daemon
+          chmod +x binaries/amd64/sovereign-daemon
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image (local, for scanning)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: sp-service:scan
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Export image to tarball for Trivy
+        run: docker save sp-service:scan -o sp-service-scan.tar
+
+      - name: Run Trivy vulnerability scanner on local image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
-          image-ref: ${{ steps.prep.outputs.image_name }}:${{ needs.resolve-release.outputs.release_tag }}
+          input: sp-service-scan.tar
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH,MEDIUM'
+          skip-version-check: true
 
       - name: Print scan summary
         env:
