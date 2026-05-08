@@ -198,6 +198,28 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ github.event.inputs.platforms || 'linux/amd64,linux/arm64' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=min
+
+      - name: Build local image for scan (amd64 only)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: sp-service:scan
+          platforms: linux/amd64
+          cache-from: type=gha
+
+      - name: Export image to tarball
+        run: docker save sp-service:scan -o sp-service-image.tar
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image-scan
+          path: sp-service-image.tar
+          retention-days: 1
 
   # ==========================================
   # Post-Build Security Scan
@@ -208,41 +230,15 @@ jobs:
     runs-on: ubuntu-latest
     if: needs.resolve-release.outputs.release_found == 'true'
     steps:
-      - name: Checkout Source Code
-        uses: actions/checkout@v4
-
-      - name: Download AMD64 Binary
+      - name: Download image artifact
         uses: actions/download-artifact@v4
         with:
-          name: docker-binary-amd64
-          path: binaries/amd64
-
-      - name: Prepare Binary
-        run: |
-          mv binaries/amd64/sovereign-daemon-amd64 binaries/amd64/sovereign-daemon
-          chmod +x binaries/amd64/sovereign-daemon
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker Image (local, for scanning)
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          load: true
-          tags: sp-service:scan
-          platforms: linux/amd64
-          cache-from: type=gha
-          cache-to: type=gha,mode=min
-
-      - name: Export image to tarball for Trivy
-        run: docker save sp-service:scan -o sp-service-scan.tar
+          name: docker-image-scan
 
       - name: Run Trivy vulnerability scanner on local image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
-          input: sp-service-scan.tar
+          input: sp-service-image.tar
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH,MEDIUM'
