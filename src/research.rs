@@ -82,7 +82,7 @@ impl DeepResearchEngine {
     }
 
     /// Extrai o domínio principal da URL para servir de chave primaria no Ledger.
-    fn extract_domain(url: &str) -> String {
+    pub(crate) fn extract_domain(url: &str) -> String {
         let no_protocol = url.trim_start_matches("https://").trim_start_matches("http://").trim_start_matches("www.");
         no_protocol.split('/').next().unwrap_or(url).to_string()
     }
@@ -271,7 +271,7 @@ impl DeepResearchEngine {
     }
 
     /// O Caçador de Hidratação (SSR Ghost)
-    fn extract_hydration_json(&self, html: &str) -> Option<String> {
+    pub(crate) fn extract_hydration_json(&self, html: &str) -> Option<String> {
         // 1. Next.js __NEXT_DATA__
         let next_re = Regex::new(r#"<script id="__NEXT_DATA__" type="application/json">(\{.*?\})</script>"#).unwrap();
         if let Some(cap) = next_re.captures(html) {
@@ -496,7 +496,7 @@ impl DeepResearchEngine {
     }
 
     /// Limpa o HTML ruidoso (scripts, estilos, anúncios) e extrai o texto principal em formato Semântico (Markdown-like).
-    fn sanitize_to_markdown(&self, html: &str) -> String {
+    pub(crate) fn sanitize_to_markdown(&self, html: &str) -> String {
         let document = Html::parse_document(html);
         
         // Remove tags ofensores (Anti-Junk)
@@ -793,7 +793,7 @@ impl DeepResearchEngine {
     }
 
     /// Rotacionador de Identidade (Sovereign Cloak)
-    fn get_random_user_agent() -> &'static str {
+    pub(crate) fn get_random_user_agent() -> &'static str {
         let uas = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3.1 Safari/605.1.15",

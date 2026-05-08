@@ -78,7 +78,7 @@ fn parse_ooxml_generic(path: &str, ext: &str) -> Result<String, String> {
     extract_text_from_xml(&xml_content, b"text:p") // ODF uses text:p for paragraphs
 }
 
-fn extract_text_from_xml(xml: &str, target_tag: &[u8]) -> Result<String, String> {
+pub(crate) fn extract_text_from_xml(xml: &str, target_tag: &[u8]) -> Result<String, String> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
 
@@ -240,14 +240,14 @@ fn extract_text_from_xml(xml: &str, target_tag: &[u8]) -> Result<String, String>
 }
 
 #[derive(Debug)]
-struct SubGrid {
-    row_start: usize,
-    row_end: usize,
-    col_start: usize,
-    col_end: usize,
+pub(crate) struct SubGrid {
+    pub(crate) row_start: usize,
+    pub(crate) row_end: usize,
+    pub(crate) col_start: usize,
+    pub(crate) col_end: usize,
 }
 
-fn find_chartable_subgrid(matrix: &[Vec<String>]) -> Option<SubGrid> {
+pub(crate) fn find_chartable_subgrid(matrix: &[Vec<String>]) -> Option<SubGrid> {
     if matrix.is_empty() { return None; }
     
     // Scan for the first row that looks like numbers preceded by a label
@@ -316,7 +316,7 @@ fn find_chartable_subgrid(matrix: &[Vec<String>]) -> Option<SubGrid> {
 
 
 
-fn generate_svg_bar_chart(matrix: &[Vec<String>], title: &str) -> String {
+pub(crate) fn generate_svg_bar_chart(matrix: &[Vec<String>], title: &str) -> String {
     let num_categories = matrix.len() - 1;
     let num_series = matrix[0].len() - 1;
     
@@ -400,7 +400,7 @@ fn generate_svg_bar_chart(matrix: &[Vec<String>], title: &str) -> String {
     svg
 }
 
-fn escape_xml(s: &str) -> String {
+pub(crate) fn escape_xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 

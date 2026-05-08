@@ -29,7 +29,7 @@ pub struct MidiResult {
 
 /// WIN-05/MacOS: Resolve python executável + path do node de forma robusta.
 /// Usa o venv hermético da Sandbox se disponível, senão fallback ao python do sistema.
-fn resolve_node_python() -> String {
+pub(crate) fn resolve_node_python() -> String {
     let hermetic = crate::sandbox::get_hermetic_python_bin();
     if hermetic.exists() {
         hermetic.to_string_lossy().to_string()
@@ -42,7 +42,7 @@ fn resolve_node_python() -> String {
 
 /// Resolve o caminho absoluto para um script `../nodes/<name>.py` de forma dinâmica.
 /// Funciona em dev (cargo workspace), MacOS App Bundle e Windows.
-fn resolve_node_script(name: &str) -> std::path::PathBuf {
+pub(crate) fn resolve_node_script(name: &str) -> std::path::PathBuf {
     let script_name = format!("{}.py", name);
 
     // Tentativa 1: junto ao python_workers (workspace raiz Cargo)

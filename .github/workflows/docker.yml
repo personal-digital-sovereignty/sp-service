@@ -242,7 +242,6 @@ jobs:
           format: 'table'
           exit-code: '0'
           severity: 'CRITICAL,HIGH,MEDIUM'
-          skip-version-check: true
 
       - name: Print scan summary
         env:
