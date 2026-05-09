@@ -18,3 +18,5 @@ pub mod memory_manager_tests;
 pub mod garbage_collector_tests;
 pub mod rag_tests;
 pub mod research_tests;
+pub mod network_tests;
+pub mod prompt_vault_tests;

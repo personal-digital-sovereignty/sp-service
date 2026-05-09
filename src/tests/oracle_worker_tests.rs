@@ -1,11 +1,11 @@
 //! ============================================================
 //! Sovereign Pair — Oracle Worker Tests
-//! Covers: config parsing, key resolution, routing logic
+//! Covers: config parsing, key resolution, routing logic, shell_escape
 //! ============================================================
 
 #[cfg(test)]
 mod oracle_worker_config {
-    use crate::oracle_worker::{OracleNodeConfig, WorkerSite};
+    use crate::oracle_worker::{OracleNodeConfig, WorkerSite, shell_escape, WorkerResult};
 
     fn make_config(enabled: bool, ip: &str) -> OracleNodeConfig {
         OracleNodeConfig {
@@ -109,5 +109,65 @@ mod oracle_worker_config {
         assert!(!config.is_ready(), "Default config should not be ready");
         assert_eq!(config.ollama_tunnel_port, 41434);
         assert_eq!(config.user, "ubuntu");
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // shell_escape Tests
+    // ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_shell_escape_simple() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_single_quotes() {
+        assert_eq!(shell_escape("it's a test"), "'it'\\''s a test'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_spaces() {
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_shell_escape_injection_attempt() {
+        assert_eq!(shell_escape("file; rm -rf /"), "'file; rm -rf /'");
+    }
+
+    #[test]
+    fn test_shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_shell_escape_with_dollar() {
+        assert_eq!(shell_escape("$HOME"), "'$HOME'");
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // WorkerResult Tests
+    // ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_worker_result_success_oracle() {
+        let result = WorkerResult {
+            stdout: "output".to_string(),
+            success: true,
+            execution_site: WorkerSite::Oracle,
+        };
+        assert!(result.success);
+        assert_eq!(result.execution_site, WorkerSite::Oracle);
+    }
+
+    #[test]
+    fn test_worker_result_failure_local() {
+        let result = WorkerResult {
+            stdout: String::new(),
+            success: false,
+            execution_site: WorkerSite::Local,
+        };
+        assert!(!result.success);
+        assert_eq!(result.execution_site, WorkerSite::Local);
     }
 }

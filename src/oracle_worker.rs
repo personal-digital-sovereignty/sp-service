@@ -147,7 +147,7 @@ impl std::fmt::Display for WorkerSite {
 }
 
 /// Escapa strings para uso seguro no Shell Bash remoto (Previne CWE-78)
-pub fn shell_escape(s: &str) -> String {
+pub(crate) fn shell_escape(s: &str) -> String {
     format!("'{}'", s.replace("'", "'\\''"))
 }
 
