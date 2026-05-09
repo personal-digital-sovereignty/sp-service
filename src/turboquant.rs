@@ -33,7 +33,7 @@ impl TurboState {
 
 /// QR decomposition via Modified Gram-Schmidt (pure Rust, zero BLAS/Fortran deps).
 /// Returns the orthogonal Q matrix from the decomposition of `a`.
-fn gram_schmidt_qr(a: &Array2<f64>) -> Array2<f64> {
+pub(crate) fn gram_schmidt_qr(a: &Array2<f64>) -> Array2<f64> {
     let (m, n) = a.dim();
     let mut q = Array2::<f64>::zeros((m, n));
     for j in 0..n {
@@ -172,7 +172,7 @@ pub fn dequantize_single(packed: &[u8], norm: f32, dim: usize, state: &TurboStat
 }
 
 // Utilitários de Bit-Packing
-fn pack_4bit(indices: &[u8]) -> Vec<u8> {
+pub(crate) fn pack_4bit(indices: &[u8]) -> Vec<u8> {
     indices.chunks(2)
         .map(|pair| {
             let high = pair[0] << 4;
@@ -182,7 +182,7 @@ fn pack_4bit(indices: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-fn unpack_4bit(packed: &[u8], dim: usize) -> Vec<u8> {
+pub(crate) fn unpack_4bit(packed: &[u8], dim: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(dim);
     for &byte in packed {
         out.push(byte >> 4);
