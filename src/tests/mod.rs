@@ -24,3 +24,4 @@ pub mod turboquant_tests;
 pub mod guardrails_tests;
 pub mod mcp_tests;
 pub mod hardware_tests;
+pub mod rewoo_tests;
