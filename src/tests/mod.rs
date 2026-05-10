@@ -21,3 +21,6 @@ pub mod research_tests;
 pub mod network_tests;
 pub mod prompt_vault_tests;
 pub mod turboquant_tests;
+pub mod guardrails_tests;
+pub mod mcp_tests;
+pub mod hardware_tests;

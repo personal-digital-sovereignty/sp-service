@@ -94,7 +94,7 @@ pub fn get_mcp_tools() -> Vec<serde_json::Value> {
 }
 
 /// A "Sandbox Layer": Garante que o Agente não tente escapar do /home/user/workspace especificado
-fn validate_safe_path(vault_root: &Path, target: &str) -> std::io::Result<PathBuf> {
+pub(crate) fn validate_safe_path(vault_root: &Path, target: &str) -> std::io::Result<PathBuf> {
     let mut resolved = vault_root.to_path_buf();
     let target_path = Path::new(target);
     
