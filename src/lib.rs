@@ -9,6 +9,7 @@
 
 pub mod common;
 pub mod turboquant;
+pub mod openapi;
 mod api;
 mod models;
 mod realtime;
@@ -502,6 +503,9 @@ pub async fn run() {
                 .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
         })
         .layer(axum::middleware::from_fn(network::lan_auth_guard))
+        // OpenAPI Swagger UI (must be before .with_state so both routers share state type)
+        .route("/api-docs/openapi.json", axum::routing::get(openapi::openapi_json))
+        .route("/swagger-ui", axum::routing::get(openapi::swagger_ui_html))
         // P3-05: Body limit global — previne DoS por upload sem limite (50 MB)
         .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024))
         .with_state(state);
