@@ -50,6 +50,7 @@ pub mod garbage_collector; // <-- Adicionado
 pub mod prompt_vault;
 pub mod health_gate;
 pub mod oracle_worker;
+pub mod events;
 
 #[cfg(test)]
 pub mod tests;
@@ -422,6 +423,8 @@ pub async fn run() {
         .route("/v1/system/available_models", axum::routing::get(api_settings::get_available_models_handler))
         .route("/v1/system/docs/user_guide", axum::routing::get(api_settings::get_user_guide_handler))
         .route("/v1/system/stream-logs", axum::routing::get(system_logs_sse_handler))
+        // WebSocket Event Bus — real-time broadcast to all micro-frontends
+        .route("/v1/events/ws", axum::routing::get(events::ws_handler))
         .route("/v1/settings/model_capabilities", axum::routing::get(api_settings::get_matrix_capabilities_handler))
         .route("/v1/settings/model_capabilities/toggles", axum::routing::post(api_settings::update_matrix_toggles_handler))
         .route("/v1/settings/model_capabilities/:model_name", axum::routing::delete(api_settings::delete_matrix_entry_handler))
@@ -486,7 +489,18 @@ pub async fn run() {
         // Emparelhamento Mágico de Rede (QR Code Endpoint)
         .route("/v1/network/pair", axum::routing::get(network::get_pairing_info_handler))
 
-        .layer(CorsLayer::permissive())
+        // P3-09: CORS restritivo — apenas origens locais dos micro-frontends
+        .layer({
+            let allowed_origins: Vec<axum::http::HeaderValue> = std::env::var("ALLOWED_ORIGINS")
+                .unwrap_or_else(|_| "http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://localhost:5178".to_string())
+                .split(',')
+                .filter_map(|s| s.trim().parse().ok())
+                .collect();
+            CorsLayer::new()
+                .allow_origin(allowed_origins)
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::PUT, axum::http::Method::DELETE, axum::http::Method::OPTIONS])
+                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
+        })
         .layer(axum::middleware::from_fn(network::lan_auth_guard))
         // P3-05: Body limit global — previne DoS por upload sem limite (50 MB)
         .layer(tower_http::limit::RequestBodyLimitLayer::new(50 * 1024 * 1024))
