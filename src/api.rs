@@ -1476,6 +1476,7 @@ let mut ollama_payload = json!({
     "model": ollama_model,
     "messages": purified_messages,
     "stream": true,
+    "keep_alive": "30m",
     "options": ollama_options
 });
 
@@ -1940,7 +1941,7 @@ let res = loop {
 // Variáveis locais puras para contabilização na Closure do Stream
 let tracking_telemetry = state.telemetry.clone();
 let tracking_db = state.db.clone();
-let tracking_session = active_session_id;
+let _tracking_session = active_session_id;
 let tracking_model = ollama_model.clone();
 
 let tracking_human_query = human_prompt.clone();
@@ -1951,9 +1952,20 @@ if tracking_rag_context.trim().is_empty() { tracking_rag_context = "Interação 
 
 let start_time = std::time::Instant::now();
 let mut session_tokens = 0;
-let mut accumulator = String::new(); // Memory Builder da Resposta do Agente
+let accumulator: Arc<std::sync::Mutex<String>> = Arc::new(std::sync::Mutex::new(String::new())); // Memory Builder da Resposta do Agente
 let tracking_log_sender = state.log_sender.clone();
 let tx_map_capture = tx_sse_clone.clone();
+let accumulator_clone = accumulator.clone();
+
+// Clones for use inside the map closure so originals remain available for retry logic
+let map_requested_model = requested_model.clone();
+let map_tracking_telemetry = tracking_telemetry.clone();
+let map_tracking_db = tracking_db.clone();
+let map_tracking_human_query = tracking_human_query.clone();
+let map_tracking_rag_context = tracking_rag_context.clone();
+let map_tracking_log_sender = tracking_log_sender.clone();
+let map_active_session = active_session_id;
+let map_ollama_model = tracking_model.clone();
 
 // Extraímos os Bytes Chunk a Chunk e mapeamos pro formato OpenAI SSE:
 let mut map_stream = res.bytes_stream().map(move |result| {
@@ -1982,7 +1994,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     if session_tokens % 5 == 0 {
                                         let live_duration_sec = start_time.elapsed().as_secs_f64();
                                         if live_duration_sec > 0.0 {
-                                            if let Ok(mut t) = tracking_telemetry.write() {
+                                            if let Ok(mut t) = map_tracking_telemetry.write() {
                                                 t.live_tps = (session_tokens as f64 / live_duration_sec * 100.0).round() / 100.0;
                                             }
                                         }
@@ -1992,7 +2004,9 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                     let mapped_content = content.replace("<think>", "\n<details class=\"mb-4 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-sm\"><summary class=\"cursor-pointer bg-zinc-900/50 px-4 py-2 text-sm font-semibold text-indigo-400 hover:bg-zinc-800/50 transition-colors select-none\">🧠 Pré-Raciocínio Dinâmico (Sovereign Expert)</summary><div class=\"border-l-2 border-indigo-500/50 p-4 text-sm italic text-zinc-400 bg-zinc-950/80 m-0 whitespace-pre-wrap\">\n")
                                         .replace("</think>", "\n</div></details>\n\n");
 
-                                    accumulator.push_str(&mapped_content);
+                                    if let Ok(mut acc) = accumulator_clone.lock() {
+                                        acc.push_str(&mapped_content);
+                                    }
                                     extracted_content = Some(mapped_content);
                                     has_content_or_tools = true;
                                 }
@@ -2043,7 +2057,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                                 if is_visual_artist && !visual_prompt.is_empty() {
                                     let tx_visual = tx_map_capture.clone();
                                     let p_clone = visual_prompt.clone();
-                                    let req_model = requested_model.clone();
+                                    let req_model = map_requested_model.clone();
                                     
                                     tokio::spawn(async move {
                                         let loading_msg = format!("\n\n🎨 **Sovereign Vision Engine**: Acionando SD.cpp no Bare-Metal para forjar imagem fotorealista Baseada em: *{}*. Aguarde...\n\n", p_clone);
@@ -2108,10 +2122,10 @@ let mut map_stream = res.bytes_stream().map(move |result| {
 
                     if has_content_or_tools {
                         let chunk_response = OpenAIChatChunkResponse {
-                            id: format!("session_{}", tracking_session),
+                            id: format!("session_{}", map_active_session),
                             object: "chat.completion.chunk".to_string(),
                             created: 1234567890,
-                            model: requested_model.clone(),
+                            model: map_requested_model.clone(),
                             choices: vec![OpenAIChatChunkChoice {
                                 index: 0,
                                 delta: OpenAIChatChunkDelta {
@@ -2140,13 +2154,13 @@ let mut map_stream = res.bytes_stream().map(move |result| {
 
                     // 🚩 Observabilidade: Fim de Interação -> Gravando Métricas Cíbridas!
                     let duration = start_time.elapsed().as_millis();
-                    if let Ok(mut t) = tracking_telemetry.write() {
-                        t.record_session(total_real_tokens, duration, &tracking_model);
+                    if let Ok(mut t) = map_tracking_telemetry.write() {
+                        t.record_session(total_real_tokens, duration, &map_ollama_model);
                     }
 
                     // 🗄️ Histórico Absoluto: Persistindo Tokens e Uptime no Ledger SQLite
-                    let sql_db = tracking_db.clone();
-                    let sql_model = tracking_model.clone();
+                    let sql_db = map_tracking_db.clone();
+                    let sql_model = map_ollama_model.clone();
                     let sql_tokens = total_real_tokens as i64;
                     let sql_dur = duration as i64;
                     tokio::spawn(async move {
@@ -2166,26 +2180,29 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                     });
 
                     let tps = if duration > 0 { (total_real_tokens as f64 / (duration as f64 / 1000.0)).round() } else { 0.0 };
-                    let _ = tracking_log_sender.send(crate::models::LogEntry {
+                    let _ = map_tracking_log_sender.send(crate::models::LogEntry {
                         timestamp: chrono::Local::now().to_rfc3339(),
                         level: "system".to_string(),
-                        message: format!("⚡ Geração de Conhecimento: {} tokens a {} T/s [{}]", total_real_tokens, tps, tracking_model),
+                        message: format!("⚡ Geração de Conhecimento: {} tokens a {} T/s [{}]", total_real_tokens, tps, map_ollama_model),
                     });
 
                     // 🗄️ Imortalidade de Diálogo: Insere via Spawn para não bloquear o Axum Stream
-                    let final_text = accumulator.clone();
-                    let db_clone = tracking_db.clone();
-                    let tr_q = tracking_human_query.clone();
-                    let tr_ctx = tracking_rag_context.clone();
+                    let final_text = {
+                        let acc = accumulator_clone.lock().unwrap_or_else(|e| e.into_inner());
+                        acc.clone()
+                    };
+                    let db_clone = map_tracking_db.clone();
+                    let tr_q = map_tracking_human_query.clone();
+                    let tr_ctx = map_tracking_rag_context.clone();
 
                     tokio::spawn(async move {
-                        crate::api_chat::save_message(&db_clone, tracking_session, "assistant", &final_text).await;
+                        crate::api_chat::save_message(&db_clone, map_active_session, "assistant", &final_text).await;
 
                         // Engatilha a Avaliação (Auto Evaluator / The Nurse) no Rastro
                         let eval_id = uuid::Uuid::new_v4().to_string();
                         let _ = sqlx::query("INSERT INTO evaluations (id, conversation_id, user_query, rag_context, ai_response, status) VALUES (?, ?, ?, ?, ?, 'pending')")
                             .bind(&eval_id)
-                            .bind(tracking_session.to_string())
+                            .bind(map_active_session.to_string())
                             .bind(&tr_q)
                             .bind(&tr_ctx)
                             .bind(&final_text)
@@ -2197,7 +2214,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                         id: "chatcmpl-end".to_string(),
                         object: "chat.completion.chunk".to_string(),
                         created: 1234567890,
-                        model: requested_model.clone(),
+                        model: map_requested_model.clone(),
                         choices: vec![OpenAIChatChunkChoice {
                             index: 0,
                             delta: OpenAIChatChunkDelta {
@@ -2234,6 +2251,193 @@ let mut map_stream = res.bytes_stream().map(move |result| {
 
 while let Some(Ok(event)) = futures_util::StreamExt::next(&mut map_stream).await {
     let _ = tx_sse_clone.send(event);
+}
+
+// [Empty Response Detection] If Ollama unloaded the model, the first request may return empty content.
+// Detect this and retry once with a model warmup.
+let is_empty_response = {
+    let accumulated_content = accumulator.lock().unwrap_or_else(|e| e.into_inner());
+    accumulated_content.trim().is_empty()
+};
+
+if is_empty_response {
+    tracing::warn!("⚠️ [Empty Response Guard] Ollama returned empty content — model likely unloaded. Attempting warmup retry...");
+
+    let warmup_endpoint = format!("{}/api/generate", ollama_base_url);
+    let warmup_payload = serde_json::json!({
+        "model": ollama_payload.get("model").unwrap_or(&serde_json::Value::Null),
+        "prompt": "ok",
+        "stream": false,
+        "keep_alive": "30m"
+    });
+
+    if let Ok(warmup_res) = state.http_client.post(&warmup_endpoint).json(&warmup_payload).timeout(std::time::Duration::from_secs(30)).send().await {
+        if warmup_res.status().is_success() {
+            // Wait for model to fully load into memory
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+            // Retry the original chat request
+            let retry_endpoint = format!("{}/api/chat", ollama_base_url);
+            let mut retry_payload = ollama_payload.clone();
+            // Ensure keep_alive is set on retry too
+            if let Some(obj) = retry_payload.as_object_mut() {
+                obj.insert("keep_alive".to_string(), serde_json::Value::String("30m".to_string()));
+            }
+
+            if let Ok(retry_res) = state.http_client.post(&retry_endpoint).json(&retry_payload).timeout(std::time::Duration::from_secs(300)).send().await {
+                if retry_res.status().is_success() {
+                    tracing::info!("✅ [Empty Response Guard] Warmup retry succeeded, streaming new response.");
+
+                    let mut retry_session_tokens = 0;
+                    let retry_start_time = std::time::Instant::now();
+                    let retry_model = requested_model.clone();
+                    let retry_session = active_session_id;
+                    let retry_telemetry = tracking_telemetry.clone();
+                    let retry_db = tracking_db.clone();
+                    let retry_human_query = tracking_human_query.clone();
+                    let retry_rag_context = tracking_rag_context.clone();
+                    let retry_log_sender = tracking_log_sender.clone();
+                    let mut retry_accumulator = String::new();
+
+                    let mut retry_map_stream = retry_res.bytes_stream().map(move |result| {
+                        match result {
+                            Ok(bytes) => {
+                                if let Ok(chunk_str) = String::from_utf8(bytes.to_vec()) {
+                                    for line in chunk_str.lines() {
+                                        let line = line.trim();
+                                        if line.is_empty() { continue; }
+                                        if let Ok(ollama_resp) = serde_json::from_str::<Value>(line) {
+                                            if let Some(msg_obj) = ollama_resp.get("message") {
+                                                let mut has_content_or_tools = false;
+                                                let mut extracted_content = None;
+                                                let mut extracted_tool_calls: Option<Vec<crate::models::ChunkToolCall>> = None;
+
+                                                if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
+                                                    if !content.is_empty() {
+                                                        retry_session_tokens += 1;
+                                                        let mapped_content = content.replace("<think>", "\n<details class=\"mb-4 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-sm\"><summary class=\"cursor-pointer bg-zinc-900/50 px-4 py-2 text-sm font-semibold text-indigo-400 hover:bg-zinc-800/50 transition-colors select-none\">🧠 Pré-Raciocínio Dinâmico (Sovereign Expert)</summary><div class=\"border-l-2 border-indigo-500/50 p-4 text-sm italic text-zinc-400 bg-zinc-950/80 m-0 whitespace-pre-wrap\">\n")
+                                                            .replace("</think>", "\n</div></details>\n\n");
+                                                        retry_accumulator.push_str(&mapped_content);
+                                                        extracted_content = Some(mapped_content);
+                                                        has_content_or_tools = true;
+                                                    }
+                                                }
+
+                                                if let Some(tool_calls_arr) = msg_obj.get("tool_calls").and_then(|tc| tc.as_array()) {
+                                                    let mut tcs = Vec::new();
+                                                    for (i, tc) in tool_calls_arr.iter().enumerate() {
+                                                        let mut new_tc = crate::models::ChunkToolCall {
+                                                            index: Some(i as i32),
+                                                            id: Some(format!("call_{}", uuid::Uuid::new_v4().to_string().replace("-", "").chars().take(8).collect::<String>())),
+                                                            r#type: Some("function".to_string()),
+                                                            function: None,
+                                                        };
+                                                        if let Some(func) = tc.get("function") {
+                                                            let name = func.get("name").and_then(|n| n.as_str()).map(|n| n.to_string());
+                                                            let args = func.get("arguments").map(|a| {
+                                                                if a.is_string() { a.as_str().unwrap().to_string() }
+                                                                else { serde_json::to_string(a).unwrap_or_default() }
+                                                            });
+                                                            new_tc.function = Some(crate::models::ChunkFunctionCall { name, arguments: args });
+                                                        }
+                                                        tcs.push(new_tc);
+                                                    }
+                                                    if !tcs.is_empty() {
+                                                        extracted_tool_calls = Some(tcs);
+                                                        has_content_or_tools = true;
+                                                    }
+                                                }
+
+                                                if has_content_or_tools {
+                                                    let chunk_response = OpenAIChatChunkResponse {
+                                                        id: format!("session_{}", retry_session),
+                                                        object: "chat.completion.chunk".to_string(),
+                                                        created: 1234567890,
+                                                        model: retry_model.clone(),
+                                                        choices: vec![OpenAIChatChunkChoice {
+                                                            index: 0,
+                                                            delta: OpenAIChatChunkDelta {
+                                                                role: Some("assistant".to_string()),
+                                                                content: extracted_content,
+                                                                tool_calls: extracted_tool_calls,
+                                                            },
+                                                            finish_reason: None,
+                                                        }],
+                                                        usage: None,
+                                                    };
+                                                    if let Ok(json_str) = serde_json::to_string(&chunk_response) {
+                                                        return Ok::<Event, Infallible>(Event::default().data(json_str));
+                                                    }
+                                                }
+                                            }
+
+                                            if let Some(done) = ollama_resp.get("done").and_then(|d| d.as_bool()) {
+                                                if done {
+                                                    let llm_gen_tokens = ollama_resp.get("eval_count").and_then(|e| e.as_u64()).unwrap_or(retry_session_tokens as u64) as usize;
+                                                    let llm_prompt_tokens = ollama_resp.get("prompt_eval_count").and_then(|e| e.as_u64()).unwrap_or(0) as usize;
+                                                    let total_real_tokens = llm_gen_tokens + llm_prompt_tokens;
+                                                    let duration = retry_start_time.elapsed().as_millis();
+                                                    if let Ok(mut t) = retry_telemetry.write() {
+                                                        t.record_session(total_real_tokens, duration, &retry_model);
+                                                    }
+                                                    let _ = retry_log_sender.send(crate::models::LogEntry {
+                                                        timestamp: chrono::Local::now().to_rfc3339(),
+                                                        level: "system".to_string(),
+                                                        message: format!("⚡ Geração de Conhecimento (Retry): {} tokens a {} T/s [{}]", total_real_tokens, if duration > 0 { (total_real_tokens as f64 / (duration as f64 / 1000.0)).round() } else { 0.0 }, retry_model),
+                                                    });
+                                                    let final_text = retry_accumulator.clone();
+                                                    let db_clone = retry_db.clone();
+                                                    let tr_q = retry_human_query.clone();
+                                                    let tr_ctx = retry_rag_context.clone();
+                                                    tokio::spawn(async move {
+                                                        crate::api_chat::save_message(&db_clone, retry_session, "assistant", &final_text).await;
+                                                        let eval_id = uuid::Uuid::new_v4().to_string();
+                                                        let _ = sqlx::query("INSERT INTO evaluations (id, conversation_id, user_query, rag_context, ai_response, status) VALUES (?, ?, ?, ?, ?, 'pending')")
+                                                            .bind(&eval_id).bind(retry_session.to_string()).bind(&tr_q).bind(&tr_ctx).bind(&final_text)
+                                                            .execute(&db_clone).await;
+                                                    });
+                                                    let finish_response = OpenAIChatChunkResponse {
+                                                        id: "chatcmpl-end".to_string(),
+                                                        object: "chat.completion.chunk".to_string(),
+                                                        created: 1234567890,
+                                                        model: retry_model.clone(),
+                                                        choices: vec![OpenAIChatChunkChoice {
+                                                            index: 0,
+                                                            delta: OpenAIChatChunkDelta { role: None, content: None, tool_calls: None },
+                                                            finish_reason: Some("stop".to_string()),
+                                                        }],
+                                                        usage: Some(crate::models::OpenAITokenUsage {
+                                                            prompt_tokens: llm_prompt_tokens as i32,
+                                                            completion_tokens: llm_gen_tokens as i32,
+                                                            total_tokens: total_real_tokens as i32,
+                                                        }),
+                                                    };
+                                                    if let Ok(json_str) = serde_json::to_string(&finish_response) {
+                                                        return Ok::<Event, Infallible>(Event::default().data(json_str));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Ok::<Event, Infallible>(Event::default())
+                            }
+                            Err(e) => {
+                                error!("Erro no retry stream: {}", e);
+                                Ok::<Event, Infallible>(Event::default())
+                            }
+                        }
+                    });
+
+                    while let Some(Ok(event)) = futures_util::StreamExt::next(&mut retry_map_stream).await {
+                        let _ = tx_sse_clone.send(event);
+                    }
+                } else {
+                    tracing::error!("❌ [Empty Response Guard] Retry request failed with status: {}", retry_res.status());
+                }
+            }
+        }
+    }
 }
 }); // Fim do tokio::spawn principal
 

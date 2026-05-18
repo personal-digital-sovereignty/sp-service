@@ -2,6 +2,27 @@ use crate::models::{LogEntry, PlanExecuteBlueprint};
 use serde_json::json;
 use tracing::error;
 
+async fn call_ollama_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    payload: &serde_json::Value,
+) -> Option<reqwest::Response> {
+    for attempt in 0..2 {
+        match client.post(url).json(payload).send().await {
+            Ok(res) if res.status().is_success() => {
+                return Some(res);
+            }
+            _ => {
+                if attempt == 0 {
+                    error!("⚠️ Ollama call failed, retrying in 3s...");
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                }
+            }
+        }
+    }
+    None
+}
+
 pub async fn start_plan_and_execute(
     query: String,
     state: std::sync::Arc<crate::AppState>,
@@ -38,6 +59,7 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
             { "role": "user", "content": format!("Desmanche a seguinte meta em no máximo 3 etapas: {}", query) }
         ],
         "format": "json", // Strict JSON Chaining
+        "keep_alive": "30m",
         "stream": false,
         "options": {
             "temperature": 0.1 // Determinismo
@@ -50,9 +72,9 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
         message: "⏳ Solicitando ao LLM a quebra da tarefa raiz em Grafo JSON (Strict Pattern)...".to_string(),
     });
 
-    let plan_response = match client.post(&ollama_url).json(&plan_payload).send().await {
-        Ok(res) if res.status().is_success() => res,
-        _ => {
+    let plan_response = match call_ollama_with_retry(&client, &ollama_url, &plan_payload).await {
+        Some(res) => res,
+        None => {
             error!("🚨 Falha ao contactar Ollama na fase de Planejamento");
             return;
         }
@@ -89,10 +111,11 @@ VOCÊ NÃO PODE RESPONDER NADA ALÉM DO JSON.
                                 { "role": "user", "content": format!("Contexto Anterior Acumulado:\n{}\n\nAção a tomar AGORA: ({}) -> {}", aggregated_results, step.action, step.task) }
                             ],
                             "tools": crate::mcp::get_mcp_tools(),
+                            "keep_alive": "30m",
                             "stream": false
                         });
 
-                        if let Ok(exec_res) = client.post(&ollama_url).json(&executor_payload).send().await {
+                        if let Some(exec_res) = call_ollama_with_retry(&client, &ollama_url, &executor_payload).await {
                             if let Ok(exec_json) = exec_res.json::<serde_json::Value>().await {
                                 if let Some(message) = exec_json.get("message") {
                                     // Se o LLM Cuspiu uma ToolCall MCP Autônoma:
