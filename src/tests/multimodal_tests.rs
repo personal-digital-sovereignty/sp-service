@@ -155,7 +155,7 @@ mod tests {
             text: Some("Hello world".to_string()),
             error: None,
         };
-        let json = serde_json::to_string(&result).unwrap();
+        let json = serde_json::to_string(&result).expect("test assertion failed — review test setup");
         assert!(json.contains("success"));
         assert!(json.contains("language"));
         assert!(json.contains("Hello world"));
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn test_whisper_result_deserialize() {
         let json = r#"{"success":true,"language":"fr","language_probability":0.92,"text":"Bonjour","error":null}"#;
-        let result: WhisperResult = serde_json::from_str(json).unwrap();
+        let result: WhisperResult = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert!(result.success);
         assert_eq!(result.language, Some("fr".to_string()));
         assert_eq!(result.text, Some("Bonjour".to_string()));
@@ -177,7 +177,7 @@ mod tests {
             text: Some("OCR text".to_string()),
             error: None,
         };
-        let json = serde_json::to_string(&result).unwrap();
+        let json = serde_json::to_string(&result).expect("test assertion failed — review test setup");
         assert!(json.contains("OCR text"));
     }
 
@@ -189,7 +189,7 @@ mod tests {
             message: Some("Done".to_string()),
             error: None,
         };
-        let json = serde_json::to_string(&result).unwrap();
+        let json = serde_json::to_string(&result).expect("test assertion failed — review test setup");
         assert!(json.contains("/tmp/output"));
         assert!(json.contains("Done"));
     }

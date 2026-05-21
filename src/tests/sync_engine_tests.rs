@@ -84,7 +84,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_engine_new() {
         // Criar banco de dados temporário
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("test assertion failed — review test setup");
         let db_path = temp_dir.path().join("test.db");
 
         let options = SqliteConnectOptions::new()
@@ -95,7 +95,7 @@ mod tests {
             .max_connections(1)
             .connect_with(options)
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
 
         let _engine = SyncEngine::new(pool);
 
@@ -106,7 +106,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_engine_with_multiple_connections() {
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("test assertion failed — review test setup");
         let db_path = temp_dir.path().join("test_multi.db");
 
         let options = SqliteConnectOptions::new()
@@ -117,7 +117,7 @@ mod tests {
             .max_connections(5)
             .connect_with(options)
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
 
         let _engine = SyncEngine::new(pool);
 
@@ -374,7 +374,7 @@ mod tests {
     #[tokio::test]
     async fn test_full_sync_flow() {
         // Testar fluxo completo de sincronização
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("test assertion failed — review test setup");
         let db_path = temp_dir.path().join("sync_test.db");
 
         let options = SqliteConnectOptions::new()
@@ -385,7 +385,7 @@ mod tests {
             .max_connections(1)
             .connect_with(options)
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
 
         let _engine = SyncEngine::new(pool);
 

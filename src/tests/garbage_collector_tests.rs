@@ -7,7 +7,7 @@ mod tests {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
 
         // Spawns the task, it will sleep for 3600 seconds.
         spawn_ephemeral_garbage_collector(pool.clone()).await;

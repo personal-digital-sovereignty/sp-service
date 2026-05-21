@@ -49,8 +49,8 @@ mod tests {
     #[test]
     fn test_encrypt_produces_different_output() {
         // Same input should produce different ciphertext each time (random IV/nonce)
-        let e1 = encrypt_vault_secret("same").unwrap();
-        let e2 = encrypt_vault_secret("same").unwrap();
+        let e1 = encrypt_vault_secret("same").expect("test assertion failed — review test setup");
+        let e2 = encrypt_vault_secret("same").expect("test assertion failed — review test setup");
         // AES-GCM with random nonce should produce different ciphertext
         // (unless extremely unlikely collision)
         assert!(e1 != e2, "Encryption should use random nonce");

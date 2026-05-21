@@ -28,9 +28,9 @@ mod tests {
         let jwt_secret = "test-secret-key-for-jwt";
         let claims = TestClaims {
             sub: "sovereign_pairing".to_owned(),
-            exp: (chrono::Local::now() + chrono::Duration::try_days(30).unwrap()).timestamp() as usize,
+            exp: (chrono::Local::now() + chrono::Duration::try_days(30).expect("test assertion failed — review test setup")).timestamp() as usize,
         };
-        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).unwrap();
+        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).expect("test assertion failed — review test setup");
         assert!(!token.is_empty());
         assert!(token.contains('.'));
     }
@@ -40,15 +40,15 @@ mod tests {
         let jwt_secret = "test-secret-key-for-jwt";
         let claims = TestClaims {
             sub: "sovereign_pairing".to_owned(),
-            exp: (chrono::Local::now() + chrono::Duration::try_days(30).unwrap()).timestamp() as usize,
+            exp: (chrono::Local::now() + chrono::Duration::try_days(30).expect("test assertion failed — review test setup")).timestamp() as usize,
         };
-        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).unwrap();
+        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(jwt_secret.as_bytes())).expect("test assertion failed — review test setup");
 
         let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.validate_exp = true;
         let decoded = decode::<TestClaims>(&token, &DecodingKey::from_secret(jwt_secret.as_bytes()), &validation);
         assert!(decoded.is_ok());
-        assert_eq!(decoded.unwrap().claims.sub, "sovereign_pairing");
+        assert_eq!(decoded.expect("test assertion failed — review test setup").claims.sub, "sovereign_pairing");
     }
 
     #[test]

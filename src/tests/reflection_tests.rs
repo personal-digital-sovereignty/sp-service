@@ -12,7 +12,7 @@ mod reflection_payload {
     #[test]
     fn test_dataset_payload_with_model_tag() {
         let json = r#"{"model_tag": "qwen2.5:7b", "payload_json": "{\"key\": \"val\"}"}"#;
-        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert_eq!(parsed.model_tag, Some("qwen2.5:7b".to_string()));
         assert!(parsed.payload_json.contains("key"));
     }
@@ -21,7 +21,7 @@ mod reflection_payload {
     #[test]
     fn test_dataset_payload_without_model_tag() {
         let json = r#"{"payload_json": "{}"}"#;
-        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert!(parsed.model_tag.is_none(), "model_tag should be None when absent from JSON");
     }
 
@@ -29,7 +29,7 @@ mod reflection_payload {
     #[test]
     fn test_dataset_payload_empty_json_string() {
         let json = r#"{"payload_json": ""}"#;
-        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionDatasetPayload = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert_eq!(parsed.payload_json, "");
     }
 
@@ -37,7 +37,7 @@ mod reflection_payload {
     #[test]
     fn test_settings_payload_deserialization() {
         let json = r#"{"reasoning_depth": 75, "audit_intensity": 90, "internal_monologue": true}"#;
-        let parsed: ReflectionSettingsPayload = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionSettingsPayload = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert_eq!(parsed.reasoning_depth, 75);
         assert_eq!(parsed.audit_intensity, 90);
         assert!(parsed.internal_monologue);
@@ -47,7 +47,7 @@ mod reflection_payload {
     #[test]
     fn test_settings_payload_extreme_values() {
         let json = r#"{"reasoning_depth": -999, "audit_intensity": 99999, "internal_monologue": false}"#;
-        let parsed: ReflectionSettingsPayload = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionSettingsPayload = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert_eq!(parsed.reasoning_depth, -999);
         assert_eq!(parsed.audit_intensity, 99999);
         // Verify clamp logic matches handler behavior
@@ -59,7 +59,7 @@ mod reflection_payload {
     #[test]
     fn test_sim_req_deserialization() {
         let json = r#"{"model_name": "deepseek-r1:14b"}"#;
-        let parsed: ReflectionSimReq = serde_json::from_str(json).unwrap();
+        let parsed: ReflectionSimReq = serde_json::from_str(json).expect("test assertion failed — review test setup");
         assert_eq!(parsed.model_name, "deepseek-r1:14b");
     }
 
@@ -86,7 +86,7 @@ mod reflection_broadcast {
         
         let received = rx.try_recv();
         assert!(received.is_ok(), "Subscriber should receive the sent message");
-        assert_eq!(received.unwrap(), msg);
+        assert_eq!(received.expect("test assertion failed — review test setup"), msg);
     }
 
     /// EOF signal format matches frontend expectations
@@ -100,7 +100,7 @@ mod reflection_broadcast {
             "desc": "Reflection pipeline finished.",
             "time": "Just now"
         });
-        let parsed: serde_json::Value = serde_json::from_str(&eof.to_string()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&eof.to_string()).expect("test assertion failed — review test setup");
         assert_eq!(parsed["type"], "EOF", "EOF signal must have type='EOF'");
         assert!(parsed["title"].is_string(), "EOF must have a title");
         assert!(parsed["icon"].is_string(), "EOF must have an icon");
@@ -118,7 +118,7 @@ mod reflection_broadcast {
             "time": "Just now"
         });
         let serialized = log.to_string();
-        let deserialized: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+        let deserialized: serde_json::Value = serde_json::from_str(&serialized).expect("test assertion failed — review test setup");
         assert_eq!(deserialized["title"], log["title"], "Unicode roundtrip must be lossless");
     }
 }
@@ -147,9 +147,9 @@ mod reflection_settings_persistence {
             "internal_monologue": true
         });
         let serialized = input.to_string();
-        let val: serde_json::Value = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(val["reasoning_depth"].as_i64().unwrap(), 42);
-        assert_eq!(val["audit_intensity"].as_i64().unwrap(), 88);
-        assert!(val["internal_monologue"].as_bool().unwrap());
+        let val: serde_json::Value = serde_json::from_str(&serialized).expect("test assertion failed — review test setup");
+        assert_eq!(val["reasoning_depth"].as_i64().expect("test assertion failed — review test setup"), 42);
+        assert_eq!(val["audit_intensity"].as_i64().expect("test assertion failed — review test setup"), 88);
+        assert!(val["internal_monologue"].as_bool().expect("test assertion failed — review test setup"));
     }
 }

@@ -13,7 +13,7 @@ mod health_gate_parsing {
             {"name": "SELIC", "type": "BCB_SGS", "status": "HEALTHY", "critical": false, "description": "Juros", "latency_ms": 180},
             {"name": "BRENT", "type": "Yahoo_Finance", "status": "DEAD", "critical": true, "description": "Petróleo", "latency_ms": 5000, "error": "timeout"},
             {"name": "PETROBRAS", "type": "Yahoo_Finance", "status": "SKIP", "critical": false, "description": "Ações", "latency_ms": 0, "error": "yfinance not installed"}
-        ]"#).unwrap()
+        ]"#).expect("test assertion failed — review test setup")
     }
 
     /// Verify JSON deserialization matches Python health_check_apis.py output
@@ -46,7 +46,7 @@ mod health_gate_parsing {
         let entries: Vec<ApiHealthEntry> = serde_json::from_str(r#"[
             {"name": "A", "type": "BCB", "status": "HEALTHY", "critical": true, "description": "", "latency_ms": 100},
             {"name": "B", "type": "BCB", "status": "HEALTHY", "critical": false, "description": "", "latency_ms": 50}
-        ]"#).unwrap();
+        ]"#).expect("test assertion failed — review test setup");
         
         let summary = build_summary(entries);
         assert_eq!(summary.degraded, 0);
@@ -67,7 +67,7 @@ mod health_gate_parsing {
     fn test_non_critical_failure_not_flagged() {
         let entries: Vec<ApiHealthEntry> = serde_json::from_str(r#"[
             {"name": "SELIC", "type": "BCB", "status": "DEAD", "critical": false, "description": "", "latency_ms": 0, "error": "timeout"}
-        ]"#).unwrap();
+        ]"#).expect("test assertion failed — review test setup");
         
         let summary = build_summary(entries);
         assert_eq!(summary.degraded, 1);
@@ -79,7 +79,7 @@ mod health_gate_parsing {
     fn test_optional_fields_default() {
         let entries: Vec<ApiHealthEntry> = serde_json::from_str(r#"[
             {"name": "TEST", "type": "BCB", "status": "HEALTHY"}
-        ]"#).unwrap();
+        ]"#).expect("test assertion failed — review test setup");
         
         assert_eq!(entries[0].latency_ms, 0);
         assert!(!entries[0].critical);

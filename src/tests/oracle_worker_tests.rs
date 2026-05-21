@@ -92,8 +92,8 @@ mod oracle_worker_config {
     #[test]
     fn test_config_json_roundtrip() {
         let config = make_config(true, "129.80.244.152");
-        let json = serde_json::to_string(&config).unwrap();
-        let restored: OracleNodeConfig = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&config).expect("test assertion failed — review test setup");
+        let restored: OracleNodeConfig = serde_json::from_str(&json).expect("test assertion failed — review test setup");
         assert_eq!(restored.ip, "129.80.244.152");
         assert!(restored.enabled);
         assert_eq!(restored.ollama_tunnel_port, 41434);

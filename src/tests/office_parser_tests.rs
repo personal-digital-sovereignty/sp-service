@@ -18,26 +18,26 @@ mod tests {
 
     #[test]
     fn test_parse_file_csv_basic() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "nome,idade,cidade").unwrap();
-        writeln!(temp_file, "João,30,SP").unwrap();
-        writeln!(temp_file, "Maria,25,RJ").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "nome,idade,cidade").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "João,30,SP").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Maria,25,RJ").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("João") || text.contains("30") || text.contains("Maria"));
     }
 
     #[test]
     fn test_parse_file_csv_empty() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         // Empty CSV should return empty or error gracefully
         assert!(result.is_ok());
@@ -45,12 +45,12 @@ mod tests {
 
     #[test]
     fn test_parse_file_csv_with_quotes() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "nome,descricao").unwrap();
-        writeln!(temp_file, r#""João","Descrição com ""aspas"""#).unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "nome,descricao").expect("test assertion failed — review test setup");
+        writeln!(temp_file, r#""João","Descrição com ""aspas"""#).expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
@@ -63,37 +63,37 @@ mod tests {
 
     #[test]
     fn test_parse_file_csv_single_column() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "nome").unwrap();
-        writeln!(temp_file, "João").unwrap();
-        writeln!(temp_file, "Maria").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "nome").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "João").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Maria").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_parse_file_csv_single_row() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "João,30,SP").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "João,30,SP").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_parse_file_csv_special_characters() {
-        let mut temp_file = NamedTempFile::with_suffix(".csv").unwrap();
-        writeln!(temp_file, "símbolo,emoji").unwrap();
-        writeln!(temp_file, "©,®").unwrap();
-        writeln!(temp_file, "😀,🎉").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "símbolo,emoji").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "©,®").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "😀,🎉").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
@@ -104,61 +104,61 @@ mod tests {
 
     #[test]
     fn test_parse_file_unknown_extension() {
-        let mut temp_file = NamedTempFile::with_suffix(".xyz").unwrap();
-        writeln!(temp_file, "Conteúdo de teste").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".xyz").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Conteúdo de teste").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         // Unknown extension should fallback to text read
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("Conteúdo"));
+        assert!(result.expect("test assertion failed — review test setup").contains("Conteúdo"));
     }
 
     #[test]
     fn test_parse_file_txt_extension() {
-        let mut temp_file = NamedTempFile::with_suffix(".txt").unwrap();
-        writeln!(temp_file, "Arquivo texto simples").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".txt").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Arquivo texto simples").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("texto"));
+        assert!(result.expect("test assertion failed — review test setup").contains("texto"));
     }
 
     #[test]
     fn test_parse_file_md_extension() {
-        let mut temp_file = NamedTempFile::with_suffix(".md").unwrap();
-        writeln!(temp_file, "# Markdown").unwrap();
-        writeln!(temp_file, "Conteúdo **markdown**").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".md").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "# Markdown").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Conteúdo **markdown**").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("Markdown"));
+        assert!(result.expect("test assertion failed — review test setup").contains("Markdown"));
     }
 
     #[test]
     fn test_parse_file_json_extension() {
-        let mut temp_file = NamedTempFile::with_suffix(".json").unwrap();
-        writeln!(temp_file, r#"{{"key": "value"}}"#).unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".json").expect("test assertion failed — review test setup");
+        writeln!(temp_file, r#"{{"key": "value"}}"#).expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_parse_file_xml_extension() {
-        let mut temp_file = NamedTempFile::with_suffix(".xml").unwrap();
-        writeln!(temp_file, r#"<?xml version="1.0"?>"#).unwrap();
-        writeln!(temp_file, r#"<root><item>Test</item></root>"#).unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".xml").expect("test assertion failed — review test setup");
+        writeln!(temp_file, r#"<?xml version="1.0"?>"#).expect("test assertion failed — review test setup");
+        writeln!(temp_file, r#"<root><item>Test</item></root>"#).expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
     }
@@ -170,11 +170,11 @@ mod tests {
     #[test]
     fn test_parse_file_invalid_docx() {
         // Criar arquivo .docx inválido (na verdade é texto)
-        let mut temp_file = NamedTempFile::with_suffix(".docx").unwrap();
-        writeln!(temp_file, "Isto não é um DOCX válido").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".docx").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Isto não é um DOCX válido").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         // Deve falhar pois não é um ZIP/DOCX válido
         assert!(result.is_err());
@@ -186,12 +186,12 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let file_path = temp_dir.join("arquivo com espaços.csv");
         
-        let mut file = std::fs::File::create(&file_path).unwrap();
-        writeln!(file, "nome,valor").unwrap();
-        writeln!(file, "teste,123").unwrap();
-        file.flush().unwrap();
+        let mut file = std::fs::File::create(&file_path).expect("test assertion failed — review test setup");
+        writeln!(file, "nome,valor").expect("test assertion failed — review test setup");
+        writeln!(file, "teste,123").expect("test assertion failed — review test setup");
+        file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(file_path.to_str().unwrap());
+        let result = parse_file(file_path.to_str().expect("test assertion failed — review test setup"));
         
         // Cleanup
         let _ = std::fs::remove_file(&file_path);
@@ -201,33 +201,33 @@ mod tests {
 
     #[test]
     fn test_parse_file_unicode_content() {
-        let mut temp_file = NamedTempFile::with_suffix(".txt").unwrap();
-        writeln!(temp_file, "Português: João, São Paulo").unwrap();
-        writeln!(temp_file, "Inglês: naïve, résumé").unwrap();
-        writeln!(temp_file, "Espanhol: niño, año").unwrap();
-        temp_file.flush().unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".txt").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Português: João, São Paulo").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Inglês: naïve, résumé").expect("test assertion failed — review test setup");
+        writeln!(temp_file, "Espanhol: niño, año").expect("test assertion failed — review test setup");
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
         
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("João") || text.contains("São Paulo"));
     }
 
     #[test]
     fn test_parse_file_large_content() {
-        let mut temp_file = NamedTempFile::with_suffix(".txt").unwrap();
+        let mut temp_file = NamedTempFile::with_suffix(".txt").expect("test assertion failed — review test setup");
 
         // Escrever conteúdo grande (~10KB)
         for i in 0..1000 {
-            writeln!(temp_file, "Linha {}: Conteúdo de teste para performance", i).unwrap();
+            writeln!(temp_file, "Linha {}: Conteúdo de teste para performance", i).expect("test assertion failed — review test setup");
         }
-        temp_file.flush().unwrap();
+        temp_file.flush().expect("test assertion failed — review test setup");
 
-        let result = parse_file(temp_file.path().to_str().unwrap());
+        let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
 
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("Linha 500"));
         assert!(text.contains("Linha 999"));
     }
@@ -246,7 +246,7 @@ mod tests {
 
         let result = extract_text_from_xml(xml, b"w:t");
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("Hello World"));
         assert!(text.contains("Second paragraph"));
     }
@@ -263,7 +263,7 @@ mod tests {
         let xml = r#"<root><w:t>One</w:t><w:t>Two</w:t><w:t>Three</w:t></root>"#;
         let result = extract_text_from_xml(xml, b"w:t");
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("One"));
         assert!(text.contains("Two"));
         assert!(text.contains("Three"));
@@ -279,7 +279,7 @@ mod tests {
 
         let result = extract_text_from_xml(xml, b"w:t");
         assert!(result.is_ok());
-        let text = result.unwrap();
+        let text = result.expect("test assertion failed — review test setup");
         assert!(text.contains("Bold text"));
     }
 
@@ -298,7 +298,7 @@ mod tests {
 
         let result = find_chartable_subgrid(&matrix);
         assert!(result.is_some());
-        let sub = result.unwrap();
+        let sub = result.expect("test assertion failed — review test setup");
         assert_eq!(sub.col_start, 0);
         assert_eq!(sub.row_start, 0);
     }
@@ -327,7 +327,7 @@ mod tests {
         let matrix = vec![vec!["A".into(), "B".into(), "C".into()]];
         let result = find_chartable_subgrid(&matrix);
         // Single row sem dados numéricos abaixo não gera subgrid válido
-        assert!(result.is_none() || result.unwrap().row_start == 0);
+        assert!(result.is_none() || result.expect("test assertion failed — review test setup").row_start == 0);
     }
 
     // ─────────────────────────────────────────────────────────

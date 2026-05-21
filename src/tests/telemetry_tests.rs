@@ -25,7 +25,7 @@ mod tests {
         
         assert_eq!(state.total_tokens, 1000);
         assert!(state.estimated_cost > 0.0); // Should use avg_cloud_cost_per_1k
-        assert_eq!(*state.models_usage.get("qwen2.5:latest").unwrap(), 1000);
+        assert_eq!(*state.models_usage.get("qwen2.5:latest").expect("test assertion failed — review test setup"), 1000);
         
         let snapshot = state.get_snapshot();
         assert_eq!(snapshot.total_tokens, 1000);

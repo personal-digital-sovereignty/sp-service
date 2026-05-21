@@ -84,7 +84,7 @@ mod tests {
         let html = r#"<html><head><script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"title":"Hello"}}}</script></head></html>"#;
         let result = engine.extract_hydration_json(html);
         assert!(result.is_some());
-        let json = result.unwrap();
+        let json = result.expect("test assertion failed — review test setup");
         assert!(json.contains("Hello"));
         assert!(json.contains("```json"));
     }
@@ -98,7 +98,7 @@ mod tests {
         </head></html>"#;
         let result = engine.extract_hydration_json(html);
         assert!(result.is_some());
-        let json = result.unwrap();
+        let json = result.expect("test assertion failed — review test setup");
         assert!(json.contains("Breaking News"));
     }
 
@@ -139,7 +139,7 @@ mod tests {
         </head></html>"#;
         let result = engine.extract_hydration_json(html);
         assert!(result.is_some());
-        let json = result.unwrap();
+        let json = result.expect("test assertion failed — review test setup");
         // Deve conter ambos os stories
         assert!(json.contains("Story One") || json.contains("Story Two"));
     }

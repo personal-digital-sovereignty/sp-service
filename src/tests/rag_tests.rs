@@ -30,7 +30,7 @@ mod tests {
     fn test_init_vault_creates_dir() {
         let temp = std::env::temp_dir();
         let test_path = temp.join("sp-rag-test-vault");
-        env::set_var("SOVEREIGN_VAULT_PATH", test_path.to_str().unwrap());
+        env::set_var("SOVEREIGN_VAULT_PATH", test_path.to_str().expect("test assertion failed — review test setup"));
         let vault = init_vault();
         assert!(vault.exists());
         let _ = std::fs::remove_dir_all(&test_path);

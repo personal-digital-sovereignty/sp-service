@@ -38,7 +38,7 @@ mod tests {
                 }
             ],
         };
-        let json = serde_json::to_string(&plan).unwrap();
+        let json = serde_json::to_string(&plan).expect("test assertion failed — review test setup");
         assert!(json.contains("E1"));
         assert!(json.contains("TestWorker"));
     }

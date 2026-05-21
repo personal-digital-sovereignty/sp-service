@@ -68,7 +68,7 @@ mod tests {
     #[test]
     fn test_get_mcp_tools_serialization() {
         let tools = get_mcp_tools();
-        let json = serde_json::to_string(&tools).unwrap();
+        let json = serde_json::to_string(&tools).expect("test assertion failed — review test setup");
         assert!(json.contains("mcp_read_file"));
         assert!(json.contains("mcp_write_file"));
     }
@@ -79,26 +79,26 @@ mod tests {
 
     #[test]
     fn test_validate_safe_path_within_root() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().expect("test assertion failed — review test setup");
         let root = temp.path();
         let result = validate_safe_path(root, "file.txt");
         assert!(result.is_ok());
-        assert!(result.unwrap().starts_with(root));
+        assert!(result.expect("test assertion failed — review test setup").starts_with(root));
     }
 
     #[test]
     fn test_validate_safe_path_subdirectory() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().expect("test assertion failed — review test setup");
         let root = temp.path();
         // Create subdir
-        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::create_dir_all(root.join("src")).expect("test assertion failed — review test setup");
         let result = validate_safe_path(root, "src/main.rs");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_validate_safe_path_dotdot_blocked() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().expect("test assertion failed — review test setup");
         let root = temp.path();
         // Path traversal attempt
         let result = validate_safe_path(root, "../../../etc/passwd");
@@ -115,10 +115,10 @@ mod tests {
 
     #[test]
     fn test_validate_safe_path_absolute_within_root() {
-        let temp = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().expect("test assertion failed — review test setup");
         let root = temp.path();
         let abs_path = root.join("file.txt");
-        let result = validate_safe_path(root, abs_path.to_str().unwrap());
+        let result = validate_safe_path(root, abs_path.to_str().expect("test assertion failed — review test setup"));
         assert!(result.is_ok());
     }
 }

@@ -110,7 +110,7 @@ mod tests {
             message: "Test event".to_string(),
             source: "Test".to_string(),
         };
-        let json = serde_json::to_string(&event).unwrap();
+        let json = serde_json::to_string(&event).expect("test assertion failed — review test setup");
         assert!(json.contains("Test"));
         assert!(json.contains("High"));
     }

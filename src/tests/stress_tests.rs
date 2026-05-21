@@ -18,17 +18,17 @@ mod database_stress {
     async fn test_sqlite_wal_contention() {
         // Usar um banco temporário em memória para o teste de estresse
         let options = SqliteConnectOptions::from_str("sqlite::memory:")
-            .unwrap()
+            .expect("test assertion failed — review test setup")
             .journal_mode(SqliteJournalMode::Wal)
             .create_if_missing(true);
         
-        let pool = SqlitePool::connect_with(options).await.unwrap();
+        let pool = SqlitePool::connect_with(options).await.expect("test assertion failed — review test setup");
 
         // Criar tabela de teste
         sqlx::query("CREATE TABLE IF NOT EXISTS stress_test (id INTEGER PRIMARY KEY, val TEXT)")
             .execute(&pool)
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
 
         let mut handles = vec![];
         for i in 0..50 {
@@ -39,20 +39,20 @@ mod database_stress {
                         .bind(format!("thread-{}-msg-{}", i, j))
                         .execute(&pool_clone)
                         .await
-                        .unwrap();
+                        .expect("test assertion failed — review test setup");
                 }
             });
             handles.push(handle);
         }
 
         for handle in handles {
-            handle.await.unwrap();
+            handle.await.expect("test assertion failed — review test setup");
         }
 
         let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM stress_test")
             .fetch_one(&pool)
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup");
         
         assert_eq!(count.0, 500, "Deve haver exatamente 500 registros após o estresse");
     }
@@ -97,7 +97,7 @@ mod log_channel_stress {
             }
         }).await;
 
-        handle.await.unwrap();
+        handle.await.expect("test assertion failed — review test setup");
         
         println!("🚀 Receiver 1 processed: {} logs", count1);
         println!("🚀 Receiver 2 processed: {} logs", count2);
@@ -125,7 +125,7 @@ mod guard_stress {
         
         let start = std::time::Instant::now();
         for pattern in patterns {
-            let re = regex::Regex::new(pattern).unwrap();
+            let re = regex::Regex::new(pattern).expect("test assertion failed — review test setup");
             let _ = re.is_match(&large_payload);
         }
         let elapsed = start.elapsed();

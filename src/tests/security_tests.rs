@@ -18,9 +18,9 @@ mod jwt_security {
     fn valid_token(secret: &str) -> String {
         let claims = Claims {
             sub: "sovereign_pairing".to_string(),
-            exp: (chrono::Utc::now() + chrono::Duration::try_days(1).unwrap()).timestamp() as usize,
+            exp: (chrono::Utc::now() + chrono::Duration::try_days(1).expect("test assertion failed — review test setup")).timestamp() as usize,
         };
-        encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).unwrap()
+        encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).expect("test assertion failed — review test setup")
     }
 
     /// P3-02: HS256 algorithm guard — 'none' token deve ser rejeitado
@@ -82,7 +82,7 @@ mod jwt_security {
             sub: "sovereign_pairing".to_string(),
             exp: 1_000_000, // Epoch 1970 — expirado há 50+ anos
         };
-        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).unwrap();
+        let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes())).expect("test assertion failed — review test setup");
         let mut validation = Validation::new(Algorithm::HS256);
         validation.validate_exp = true;
         let result = decode::<Claims>(&token, &DecodingKey::from_secret(secret.as_bytes()), &validation);
@@ -172,8 +172,8 @@ mod kms_security {
         // SAFETY: testes single-threaded; set_var é seguro aqui
         unsafe { std::env::set_var("SOVEREIGN_MASTER_KEK", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="); }
         let plaintext = "same_secret";
-        let enc1 = encrypt_vault_secret(plaintext).unwrap();
-        let enc2 = encrypt_vault_secret(plaintext).unwrap();
+        let enc1 = encrypt_vault_secret(plaintext).expect("test assertion failed — review test setup");
+        let enc2 = encrypt_vault_secret(plaintext).expect("test assertion failed — review test setup");
         assert_ne!(enc1, enc2, "SECURITY: IV deve ser único por operação — ciphertexts iguais indicam IV fixo");
     }
 
