@@ -4,12 +4,8 @@
 
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use futures::{SinkExt, StreamExt};
 use std::sync::Arc;
-use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
 
-use crate::models;
 use crate::AppState;
 
 /// WebSocket upgrade handler for `/v1/events/ws`
@@ -29,7 +25,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
         "event": "connected",
         "message": "WebSocket event bus connected"
     });
-    if socket.send(axum::extract::ws::Message::Text(welcome.to_string().into())).await.is_err() {
+    if socket.send(axum::extract::ws::Message::Text(welcome.to_string())).await.is_err() {
         return;
     }
 
@@ -43,7 +39,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                     "level": log_entry.level,
                     "message": log_entry.message
                 });
-                if socket.send(axum::extract::ws::Message::Text(event.to_string().into())).await.is_err() {
+                if socket.send(axum::extract::ws::Message::Text(event.to_string())).await.is_err() {
                     break;
                 }
             }
@@ -63,7 +59,7 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
                             if v.get("action").and_then(|a| a.as_str()) == Some("ping") {
                                 let pong = serde_json::json!({ "type": "pong", "ts": chrono::Utc::now().to_rfc3339() });
-                                if socket.send(axum::extract::ws::Message::Text(pong.to_string().into())).await.is_err() {
+                                if socket.send(axum::extract::ws::Message::Text(pong.to_string())).await.is_err() {
                                     break;
                                 }
                             }

@@ -15,7 +15,6 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::AsyncReadExt;
-use tokio::sync::Mutex;
 
 use crate::AppState;
 
@@ -295,7 +294,7 @@ pub async fn coding_terminal_ws_handler(
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        if ws_tx.send(axum::extract::ws::Message::Text(text.into())).await.is_err()
+                        if ws_tx.send(axum::extract::ws::Message::Text(text)).await.is_err()
                         {
                             break;
                         }
