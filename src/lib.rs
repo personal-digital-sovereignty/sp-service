@@ -41,6 +41,7 @@ pub mod mesh_installer;
 pub mod mesh_router;
 pub mod os_installer;
 pub mod api_coding;
+pub mod api_models;
 pub mod guardrails;
 pub mod research;
 pub mod adblocker;
@@ -487,16 +488,8 @@ pub async fn run() {
         .route("/v1/coding/completions", axum::routing::post(api_coding::coding_completions_handler))
         .route("/v1/coding/terminal/ws", axum::routing::get(api_coding::coding_terminal_ws_handler))
         .route("/v1/multimodal/audio/transcribe", axum::routing::post(api_multimodal::audio_transcribe_handler))
-        // Bypass pacificador para TUI que tenta carregar modelos disponíveis antes da call
-        .route("/v1/models", axum::routing::get(|| async {
-            axum::Json(serde_json::json!({
-                "object": "list",
-                "data": [
-                    {"id": "gpt-4", "object": "model", "owned_by": "openai"},
-                    {"id": "gpt-3.5-turbo", "object": "model", "owned_by": "openai"}
-                ]
-            }))
-        }))
+        // Dynamic Model Discovery — aggregates Ollama + OpenRouter models
+        .route("/v1/models", axum::routing::get(api_models::get_models_handler))
         // Emparelhamento Mágico de Rede (QR Code Endpoint)
         .route("/v1/network/pair", axum::routing::get(network::get_pairing_info_handler))
 
