@@ -40,6 +40,7 @@ pub mod ssh_mesh_connector;
 pub mod mesh_installer;
 pub mod mesh_router;
 pub mod os_installer;
+pub mod api_coding;
 pub mod guardrails;
 pub mod research;
 pub mod adblocker;
@@ -476,6 +477,15 @@ pub async fn run() {
         // ------------------ Master Control Program (MCP Server) -------
         .route("/v1/mcp/sse", axum::routing::get(api_mcp::mcp_sse_handler))
         .route("/v1/mcp/message", axum::routing::post(api_mcp::mcp_message_handler))
+
+        // ------------------ Coding Module (File System + Terminal + Completions) ----
+        .route("/v1/coding/fs/tree", axum::routing::get(api_coding::coding_tree_handler))
+        .route("/v1/coding/fs/read", axum::routing::get(api_coding::coding_read_handler))
+        .route("/v1/coding/fs/write", axum::routing::post(api_coding::coding_write_handler))
+        .route("/v1/coding/fs/delete", axum::routing::delete(api_coding::coding_delete_handler))
+        .route("/v1/coding/fs/rename", axum::routing::put(api_coding::coding_rename_handler))
+        .route("/v1/coding/completions", axum::routing::post(api_coding::coding_completions_handler))
+        .route("/v1/coding/terminal/ws", axum::routing::get(api_coding::coding_terminal_ws_handler))
         .route("/v1/multimodal/audio/transcribe", axum::routing::post(api_multimodal::audio_transcribe_handler))
         // Bypass pacificador para TUI que tenta carregar modelos disponíveis antes da call
         .route("/v1/models", axum::routing::get(|| async {
