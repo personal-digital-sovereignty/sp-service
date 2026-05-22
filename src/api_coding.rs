@@ -10,10 +10,12 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
+#[cfg(unix)]
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+#[cfg(unix)]
 use tokio::io::AsyncReadExt;
 
 use crate::AppState;
@@ -326,10 +328,8 @@ pub async fn coding_terminal_ws_handler(
     _ws: WebSocketUpgrade,
     State(_state): State<Arc<AppState>>,
 ) -> axum::response::Response {
-    // On non-unix, return a close frame with error
-    let mut resp = axum::response::Response::new();
-    *resp.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
-    resp
+    // Terminal PTY is only supported on Unix (Linux/macOS)
+    StatusCode::SERVICE_UNAVAILABLE.into_response()
 }
 
 // ============================================================================
