@@ -8,7 +8,7 @@
 use axum::{
     extract::{Query, State, WebSocketUpgrade},
     http::StatusCode,
-    response::Json,
+    response::{IntoResponse, Json},
 };
 #[cfg(unix)]
 use futures::{SinkExt, StreamExt};
