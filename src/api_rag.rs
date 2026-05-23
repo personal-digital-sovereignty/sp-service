@@ -233,3 +233,90 @@ pub async fn get_radar_metrics_handler(State(state): State<Arc<AppState>>) -> Js
         precision: p,
     })
 }
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RagGraphNode {
+    pub id: String,
+    pub name: String,
+    pub val: f64,
+    pub r#type: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RagGraphLink {
+    pub source: String,
+    pub target: String,
+    pub r#type: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct RagGraphResponse {
+    pub nodes: Vec<RagGraphNode>,
+    pub links: Vec<RagGraphLink>,
+}
+
+pub async fn rag_graph_handler(
+    State(state): State<Arc<AppState>>,
+) -> Json<RagGraphResponse> {
+    let docs = sqlx::query("SELECT id, file_path FROM sensus_documents LIMIT 50")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+    let mut nodes = Vec::new();
+    let mut links = Vec::new();
+
+    nodes.push(RagGraphNode {
+        id: "core_brain".to_string(),
+        name: "Sovereign Cognitive Core".to_string(),
+        val: 18.0,
+        r#type: "core".to_string(),
+    });
+
+    for doc in &docs {
+        let doc_id: String = doc.get("id");
+        let doc_path: String = doc.get("file_path");
+        let filename = doc_path.split('/').next_back().unwrap_or(&doc_path).to_string();
+        let node_id = format!("doc_{}", doc_id);
+        
+        nodes.push(RagGraphNode {
+            id: node_id.clone(),
+            name: filename,
+            val: 5.0,
+            r#type: "document".to_string(),
+        });
+
+        links.push(RagGraphLink {
+            source: "core_brain".to_string(),
+            target: node_id,
+            r#type: "synapse".to_string(),
+        });
+    }
+
+    let gaps = sqlx::query("SELECT id, query FROM knowledge_gaps LIMIT 5")
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+    for gap in &gaps {
+        let gap_id: String = gap.get("id");
+        let query: String = gap.get("query");
+        let node_id = format!("gap_{}", gap_id);
+        
+        nodes.push(RagGraphNode {
+            id: node_id.clone(),
+            name: format!("Gap: {}", query),
+            val: 8.0,
+            r#type: "gap".to_string(),
+        });
+
+        links.push(RagGraphLink {
+            source: "core_brain".to_string(),
+            target: node_id,
+            r#type: "unresolved_gap".to_string(),
+        });
+    }
+
+    Json(RagGraphResponse { nodes, links })
+}
+

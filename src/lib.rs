@@ -446,6 +446,7 @@ pub async fn run() {
         .route("/v1/engineer/rag/gaps", axum::routing::get(api_rag::get_knowledge_gaps_handler))
         .route("/v1/engineer/rag/gaps/:id", axum::routing::delete(api_rag::delete_knowledge_gap_handler).put(api_rag::resolve_knowledge_gap_handler))
         .route("/v1/engineer/rag/radar", axum::routing::get(api_rag::get_radar_metrics_handler))
+        .route("/v1/rag/graph", axum::routing::get(api_rag::rag_graph_handler))
         // ------------------ Model Trainer Engine ----------------
         .route("/v1/engineer/trainer/stats", axum::routing::get(api_trainer::trainer_stats_handler))
         .route("/v1/engineer/trainer/control", axum::routing::post(api_trainer::trainer_control_handler))
