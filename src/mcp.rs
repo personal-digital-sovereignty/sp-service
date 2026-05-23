@@ -238,21 +238,21 @@ mod tests {
 
     #[test]
     fn test_sandbox_allows_valid_paths() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("test assertion failed — review test setup in mcp.rs:line 241");
         let root = dir.path();
         
         // Create a dummy file inside the pseudo-vault
         let file_path = root.join("allow_me.txt");
-        File::create(&file_path).unwrap();
+        File::create(&file_path).expect("test assertion failed — review test setup in mcp.rs:line 246");
 
         let result = validate_safe_path(root, "allow_me.txt");
         assert!(result.is_ok(), "Sandbox should allow direct files inside the root");
-        assert_eq!(result.unwrap(), fs::canonicalize(&file_path).unwrap());
+        assert_eq!(result.expect("test assertion failed — review test setup in mcp.rs:line 250"), fs::canonicalize(&file_path).expect("test assertion failed — review test setup in mcp.rs:line 250"));
     }
 
     #[test]
     fn test_sandbox_blocks_directory_traversal() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("test assertion failed — review test setup in mcp.rs:line 255");
         let root = dir.path();
         
         let result = validate_safe_path(root, "../../../../etc/passwd");
@@ -264,11 +264,11 @@ mod tests {
 
     #[test]
     fn test_sandbox_allows_new_nested_file_creation() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("test assertion failed — review test setup in mcp.rs:line 267");
         let root = dir.path();
         
         let nested_dir = root.join("src").join("internal");
-        fs::create_dir_all(&nested_dir).unwrap();
+        fs::create_dir_all(&nested_dir).expect("test assertion failed — review test setup in mcp.rs:line 271");
         
         // Target is a file that doesn't exist yet, but in an allowed folder.
         let target = "src/internal/new_file.rs";

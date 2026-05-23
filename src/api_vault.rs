@@ -837,7 +837,7 @@ mod tests {
         let pool = SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
-            .unwrap();
+            .expect("test assertion failed — review test setup in api_vault.rs:line 840");
 
         sqlx::query("
             CREATE TABLE IF NOT EXISTS workspaces (
@@ -846,12 +846,12 @@ mod tests {
                 path TEXT NOT NULL UNIQUE,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-        ").execute(&pool).await.unwrap();
+        ").execute(&pool).await.expect("test assertion failed — review test setup in api_vault.rs:line 849");
 
         sqlx::query("
             INSERT INTO workspaces (id, name, path)
             SELECT 1, 'Origin Vault', '/mock/origin'
-        ").execute(&pool).await.unwrap();
+        ").execute(&pool).await.expect("test assertion failed — review test setup in api_vault.rs:line 854");
 
         pool
     }
@@ -930,9 +930,9 @@ mod tests {
                     .uri("/v1/workspaces")
                     .method("GET")
                     .body(Body::empty())
-                    .unwrap();
+                    .expect("test assertion failed — review test setup in api_vault.rs:line 933");
 
-                let response: axum::response::Response = app_clone.oneshot(request).await.unwrap();
+                let response: axum::response::Response = app_clone.oneshot(request).await.expect("test assertion failed — review test setup in api_vault.rs:line 935");
                 assert_eq!(response.status(), StatusCode::OK);
             });
 
