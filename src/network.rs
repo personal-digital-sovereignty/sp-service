@@ -104,11 +104,30 @@ pub async fn lan_auth_guard(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "));
         
+    // Epic P4: Support token via query parameter (Signed URLs) or Cookie for media tags <img>
+    let query_token = req.uri().query().and_then(|q| {
+        q.split('&').find_map(|kv| {
+            let mut parts = kv.split('=');
+            if parts.next() == Some("token") {
+                parts.next().map(|v| v.to_string())
+            } else {
+                None
+            }
+        })
+    });
+    
+    let cookie_token = req.headers().get(axum::http::header::COOKIE)
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.split(';').find(|c| c.trim().starts_with("sovereign_token=")))
+        .map(|c| c.trim()["sovereign_token=".len()..].to_string());
+
+    let token = auth_header.or(query_token.as_deref()).or(cookie_token.as_deref());
+        
     let Some(identity) = NETWORK_IDENTITY.get() else {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     };
     
-    if let Some(token) = auth_header {
+    if let Some(token) = token {
         // P3-02: Algoritmo explícito HS256 — previne JWT algorithm confusion attack (none/RS256)
         let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
         validation.validate_exp = true;
