@@ -26,3 +26,4 @@ pub mod mcp_tests;
 pub mod hardware_tests;
 pub mod rewoo_tests;
 pub mod kms_tests;
+pub mod coding_tests;

@@ -480,6 +480,7 @@ pub async fn run() {
         .route("/v1/mcp/message", axum::routing::post(api_mcp::mcp_message_handler))
 
         // ------------------ Coding Module (File System + Terminal + Completions) ----
+        .route("/v1/coding/workspace", axum::routing::get(api_coding::coding_tree_handler))
         .route("/v1/coding/fs/tree", axum::routing::get(api_coding::coding_tree_handler))
         .route("/v1/coding/fs/read", axum::routing::get(api_coding::coding_read_handler))
         .route("/v1/coding/fs/write", axum::routing::post(api_coding::coding_write_handler))
