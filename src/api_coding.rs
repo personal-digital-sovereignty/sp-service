@@ -15,8 +15,6 @@ use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-#[cfg(unix)]
-use tokio::io::AsyncReadExt;
 
 use crate::AppState;
 
@@ -264,40 +262,52 @@ pub async fn coding_terminal_ws_handler(
         let workspace = resolve_coding_workspace();
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
 
-        // Spawn PTY using script command (portable approach)
-        let mut child = match tokio::process::Command::new(&shell)
-            .current_dir(&workspace)
-            .env("TERM", "xterm-256color")
-            .env("COLORTERM", "truecolor")
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-        {
+        use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+
+        let pty_system = NativePtySystem::default();
+        let pty_pair = match pty_system.openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("Failed to open PTY: {}", e);
+                return;
+            }
+        };
+
+        let mut cmd = CommandBuilder::new(&shell);
+        cmd.cwd(&workspace);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+
+        let _child = match pty_pair.slave.spawn_command(cmd) {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!("Failed to spawn shell: {}", e);
                 return;
             }
         };
+        // Important: close the slave handle in the parent process
+        drop(pty_pair.slave);
 
-        let mut stdin = child.stdin.take().expect("stdin");
-        let mut stdout = tokio::io::BufReader::new(
-            child.stdout.take().expect("stdout"),
-        );
+        let mut master = pty_pair.master; // to handle resize
+        let mut reader = master.try_clone_reader().unwrap();
+        let mut writer = master.take_writer().unwrap();
 
         let (mut ws_tx, mut ws_rx) = socket.split();
 
-        // PTY → WebSocket
-        let write_task = tokio::spawn(async move {
-            let mut buf = vec![0u8; 4096];
+        // PTY -> WebSocket (using blocking thread with tokio channel)
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
             loop {
-                match stdout.read(&mut buf).await {
-                    Ok(0) => break, // EOF
+                match reader.read(&mut buf) {
+                    Ok(0) => break,
                     Ok(n) => {
-                        let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                        if ws_tx.send(axum::extract::ws::Message::Text(text)).await.is_err()
-                        {
+                        if tx.send(buf[..n].to_vec()).is_err() {
                             break;
                         }
                     }
@@ -306,19 +316,57 @@ pub async fn coding_terminal_ws_handler(
             }
         });
 
-        // WebSocket → PTY
+        let write_task = tokio::spawn(async move {
+            while let Some(bytes) = rx.recv().await {
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                if ws_tx.send(axum::extract::ws::Message::Text(text)).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        // WebSocket -> PTY
         let read_task = tokio::spawn(async move {
             while let Some(Ok(msg)) = ws_rx.next().await {
                 if let axum::extract::ws::Message::Text(input) = msg {
-                    use tokio::io::AsyncWriteExt;
-                    let _ = stdin.write_all(input.as_bytes()).await;
-                    let _ = stdin.flush().await;
+                    // Try to parse JSON
+                    #[derive(serde::Deserialize)]
+                    struct TermMsg {
+                        #[serde(rename = "type")]
+                        msg_type: String,
+                        data: Option<String>,
+                        cols: Option<u16>,
+                        rows: Option<u16>,
+                    }
+                    
+                    if let Ok(m) = serde_json::from_str::<TermMsg>(&input) {
+                        if m.msg_type == "input" {
+                            if let Some(data) = m.data {
+                                use std::io::Write;
+                                let _ = writer.write_all(data.as_bytes());
+                                let _ = writer.flush();
+                            }
+                        } else if m.msg_type == "resize" {
+                            if let (Some(cols), Some(rows)) = (m.cols, m.rows) {
+                                let _ = master.resize(PtySize {
+                                    rows,
+                                    cols,
+                                    pixel_width: 0,
+                                    pixel_height: 0,
+                                });
+                            }
+                        }
+                    } else {
+                        // Fallback to raw text
+                        use std::io::Write;
+                        let _ = writer.write_all(input.as_bytes());
+                        let _ = writer.flush();
+                    }
                 }
             }
         });
 
         let _ = tokio::join!(write_task, read_task);
-        let _ = child.kill().await;
         tracing::info!("🖥️  [Coding Terminal] WebSocket disconnected");
     })
 }
