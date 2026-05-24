@@ -2867,3 +2867,181 @@ pub async fn vault_graph_handler(
         "links": links
     }))).into_response()
 }
+
+/// 💬 **WebSocket Chat Completions Handler (Epic P6)**
+///
+/// Transiciona o fluxo de inferência agêntica para WebSockets bidirecionais de ultra-baixa latência.
+pub async fn chat_ws_handler(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_chat_ws(socket, state))
+}
+
+async fn handle_chat_ws(mut socket: axum::extract::ws::WebSocket, state: Arc<AppState>) {
+    use axum::extract::ws::Message;
+    use futures_util::StreamExt;
+    
+    tracing::info!("💬 [Chat WS] WebSocket connection established");
+    
+    while let Some(Ok(msg)) = socket.next().await {
+        match msg {
+            Message::Text(text) => {
+                let payload: crate::models::OpenAIChatRequest = match serde_json::from_str(&text) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = socket.send(Message::Text(serde_json::json!({"error": format!("Invalid JSON payload: {}", e)}).to_string())).await;
+                        continue;
+                    }
+                };
+
+                let requested_model = payload.model.clone();
+                let mut resolved_model = requested_model.clone();
+                
+                // Route commercially named models to dynamic local master
+                if resolved_model.to_lowercase().contains("gpt") || resolved_model.to_lowercase().contains("claude") {
+                    if let Ok(Some(row)) = sqlx::query("SELECT model_name FROM model_capabilities WHERE is_master = 1 AND is_installed = 1 ORDER BY parameter_size DESC LIMIT 1")
+                        .fetch_optional(&state.db).await
+                    {
+                        if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+                            resolved_model = name;
+                        }
+                    } else {
+                        resolved_model = "qwen2.5:latest".to_string();
+                    }
+                }
+
+                // Try to resolve static settings model
+                if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'system_settings'").fetch_optional(&state.db).await {
+                    let val: String = sqlx::Row::get(&row, "value_json");
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
+                        if let Some(m) = parsed.get("llm_model").and_then(|v| v.as_str()) {
+                            if !m.is_empty() {
+                                resolved_model = m.to_string();
+                            }
+                        }
+                    }
+                }
+
+                let human_prompt = payload.messages.last()
+                    .map(|msg| match &msg.content {
+                        Some(crate::models::MessageContent::Text(t)) => t.clone(),
+                        Some(crate::models::MessageContent::Multimodal(parts)) => {
+                            let mut full = String::new();
+                            for part in parts {
+                                if let Some(txt) = part.get("text").and_then(|t| t.as_str()) {
+                                    full.push_str(txt);
+                                }
+                            }
+                            full
+                        },
+                        None => "".to_string(),
+                    })
+                    .unwrap_or_else(|| "Interação O.S".to_string());
+
+                let workspace_id = payload.workspace_id.clone().unwrap_or_else(|| "default".to_string());
+                let active_session_id = crate::api_chat::get_or_create_session(&state.db, payload.session_id, &human_prompt, &workspace_id).await;
+                crate::api_chat::save_message(&state.db, active_session_id, "user", &human_prompt).await;
+
+                // Build context
+                let mut purified_messages: Vec<serde_json::Value> = Vec::new();
+                if let Some(rag_cortex) = crate::rag::build_rag_context_message(&workspace_id, &state.db).await {
+                    purified_messages.push(rag_cortex);
+                }
+
+                purified_messages.extend(payload.messages.iter().map(|msg| {
+                    let content_str = match &msg.content {
+                        Some(crate::models::MessageContent::Text(t)) => t.clone(),
+                        Some(crate::models::MessageContent::Multimodal(parts)) => {
+                            parts.iter().filter_map(|p| p.get("text").and_then(|t| t.as_str())).collect::<String>()
+                        },
+                        None => "".to_string(),
+                    };
+                    serde_json::json!({"role": msg.role, "content": content_str})
+                }));
+
+                let mut ollama_base_url = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string());
+                if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'ollama_clusters'").fetch_optional(&state.db).await {
+                    let val: String = sqlx::Row::get(&row, "value_json");
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
+                        let active_id = parsed.get("active_cluster_id").and_then(|v| v.as_str()).unwrap_or("");
+                        if let Some(clusters) = parsed.get("clusters").and_then(|v| v.as_array()) {
+                            for c in clusters {
+                                if c.get("id").and_then(|v| v.as_str()).unwrap_or("") == active_id {
+                                    if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                                        ollama_base_url = url.trim_end_matches('/').to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let ollama_payload = serde_json::json!({
+                    "model": resolved_model,
+                    "messages": purified_messages,
+                    "stream": true,
+                    "options": {
+                        "num_ctx": 8192
+                    }
+                });
+
+                let endpoint = format!("{}/api/chat", ollama_base_url);
+                let res = match state.http_client.post(&endpoint).json(&ollama_payload).send().await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = socket.send(Message::Text(serde_json::json!({"error": format!("IA Offline: {}", e)}).to_string())).await;
+                        continue;
+                    }
+                };
+
+                let mut bytes_stream = res.bytes_stream();
+                let mut assistant_response = String::new();
+
+                while let Some(Ok(bytes)) = bytes_stream.next().await {
+                    if let Ok(chunk_str) = String::from_utf8(bytes.to_vec()) {
+                        for line in chunk_str.lines() {
+                            let line = line.trim();
+                            if line.is_empty() { continue; }
+                            if let Ok(ollama_resp) = serde_json::from_str::<serde_json::Value>(line) {
+                                if let Some(msg_obj) = ollama_resp.get("message") {
+                                    if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
+                                        assistant_response.push_str(content);
+                                        let chunk = serde_json::json!({
+                                            "id": format!("chatcmpl-ws-{}", active_session_id),
+                                            "object": "chat.completion.chunk",
+                                            "created": chrono::Local::now().timestamp(),
+                                            "model": resolved_model.clone(),
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {
+                                                    "content": content
+                                                }
+                                            }]
+                                        });
+                                        let _ = socket.send(Message::Text(chunk.to_string())).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Persiste a resposta do Assistente no SQLite local
+                crate::api_chat::save_message(&state.db, active_session_id, "assistant", &assistant_response).await;
+
+                // Envia sinal final [DONE] estruturado com activeSessionId para sincronização automática
+                let done_msg = serde_json::json!({
+                    "id": format!("session_{}", active_session_id),
+                    "done": true
+                });
+                let _ = socket.send(Message::Text(done_msg.to_string())).await;
+            }
+            Message::Close(_) => {
+                tracing::info!("💬 [Chat WS] WebSocket connection closed by client");
+                break;
+            }
+            _ => {}
+        }
+    }
+}

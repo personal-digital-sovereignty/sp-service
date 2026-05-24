@@ -6,8 +6,32 @@ use axum::{
 };
 use utoipa::OpenApi;
 
+#[utoipa::path(
+    get,
+    path = "/v1/chat/ws",
+    responses(
+        (status = 101, description = "Switching protocols to WebSocket for chat completions streaming")
+    ),
+    tag = "chat"
+)]
+pub async fn chat_ws_doc() {}
+
+#[utoipa::path(
+    get,
+    path = "/v1/coding/fs/tree",
+    responses(
+        (status = 200, description = "Retrieves the local workspace directory structure")
+    ),
+    tag = "vault"
+)]
+pub async fn vault_read_doc() {}
+
 #[derive(OpenApi)]
 #[openapi(
+    paths(
+        chat_ws_doc,
+        vault_read_doc,
+    ),
     info(
         title = "Sovereign Pair API",
         description = "REST API for the Sovereign Pair platform — chat, vault, projects, settings, telemetry, and AI training",

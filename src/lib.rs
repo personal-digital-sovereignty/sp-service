@@ -467,6 +467,7 @@ pub async fn run() {
         // ------------------ Multimodal Endpoints ------------------
         .route("/v1/images/generations", post(api_multimodal::generate_image_handler))
         // ------------------ Chat Endpoints ------------------
+        .route("/v1/chat/ws", axum::routing::get(api::chat_ws_handler))
         .route("/opencode/v1/chat/completions", post(api::chat_completions_handler))
         .route("/v1/chat/completions", post(api::chat_completions_handler))
         .route("/v1/chat/completions/openrouter", post(api::openrouter_chat_handler))
