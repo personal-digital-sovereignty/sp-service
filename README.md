@@ -1,414 +1,209 @@
-# sp-service 🦀
+# sp-service
 
-**Service/API/Backend** — O motor de Inferência e RAG Cíbrido para o ecossistema Sovereign Pair.
+**Sovereign Pair — Backend Daemon**
 
-[![Version](https://img.shields.io/badge/version-1.4.0--dev-blue.svg)](https://github.com/Personal-Digital-Sovereignty/sp-service)
+The core inference engine and REST API for the Sovereign OS ecosystem. Built with Rust, Axum, and Tokio for high-throughput, low-latency AI orchestration.
+
+[![Version](https://img.shields.io/badge/version-1.6.0-blue.svg)](https://github.com/Personal-Digital-Sovereignty/sp-service)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/license-PolyForm--Noncommercial-red.svg)](LICENSE)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Personal-Digital-Sovereignty/sp-service/ci.yml?branch=main)](https://github.com/Personal-Digital-Sovereignty/sp-service/actions)
-[![Rust Tests](https://img.shields.io/badge/rust%20tests-136%20passing-brightgreen.svg)]()
-[![Python Tests](https://img.shields.io/badge/python%20tests-108%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-283%20passing-brightgreen.svg)]()
 
 ---
 
-## 📋 Visão Geral
+## Overview
 
-**sp-service** é o **novo core backend** do ecossistema Sovereign Pair, focado exclusivamente em:
+`sp-service` is the standalone backend daemon for the Sovereign OS platform. It acts as a local AI proxy, routing inference requests to local Ollama models or cloud providers, while maintaining a SQLite-backed persistence layer for sessions, vault documents, and system configuration.
 
-- ✅ **API REST/GraphQL** de alta performance (Axum + Tokio)
-- ✅ **RAG Pipeline** com Tool Calling nativo
-- ✅ **Deep Research** com análise de correlação (Pandas)
-- ✅ **Multi-Provider LLM** (Ollama, Qwen, NVIDIA, OpenRouter)
-- ✅ **Sensus Sync Engine** (Dual-Truth: SQLite + Markdown)
-- ✅ **Zero-Trust Security** (KMS, SecOps Vault, SSH Mesh)
+The service exposes a superset of the OpenAI Chat Completions API, making it compatible with any OpenAI-compatible client.
 
-### 🏗️ Arquitetura Desacoplada
+### Core Capabilities
 
-Este repositório é **backend-only**. Frontends vivem em repositórios separados:
+- OpenAI-compatible REST API (POST /v1/chat/completions) and WebSocket streaming (/v1/chat/ws)
+- Multi-provider LLM routing: Ollama (local), OpenRouter, NVIDIA, Qwen (DashScope)
+- Retrieval-Augmented Generation (RAG) with FastEmbed vector search
+- Deep Research with multi-hop web scraping and semantic reranking
+- ReWOO (Reasoning Without Observation) agentic planning loop
+- MLA (Multi-Latent Attention) context compression for long conversations
+- Sensus Sync Engine: dual-truth persistence via SQLite and Markdown vault
+- Sovereign KMS: AES-256-GCM encryption for all stored credentials
+- WebSocket PTY terminal via portable-pty
+- OpenAPI specification at /api-docs/openapi.json with Swagger UI at /swagger-ui
+
+---
+
+## Architecture
 
 ```
 sp-platform/
-├── sp-service/          ← ESTE REPOSITÓRIO (Backend Rust + Python)
-├── sovereign-pair/      ← Legado (consulta histórica)
-├── sp-ui-chat/          ← Frontend Chat (futuro)
-├── sp-ui-rag/           ← Frontend RAG Pipeline (futuro)
-├── sp-ui-coding/        ← Frontend Coder Ecosystem (futuro)
-├── sp-ui-projects/      ← Frontend Projects (futuro)
-└── sp-ui-vault/         ← Frontend Vault Explorer (futuro)
+├── sp-service/          <- This repository (Rust backend daemon)
+├── sp-ui-shell/         <- Desktop host (SvelteKit + Tauri)
+├── sp-ui-core/          <- Shared state and components
+├── sp-ui-chat/          <- Chat micro-frontend
+├── sp-ui-vault/         <- Vault explorer micro-frontend
+├── sp-ui-projects/      <- Kanban projects micro-frontend
+├── sp-ui-rag/           <- RAG pipeline micro-frontend
+└── sp-ui-coding/        <- Coding studio micro-frontend
 ```
 
-** Migração:** Este repositório substitui `sovereign-pair/` para todo desenvolvimento backend ativo. Consulte [`_strategy/MIGRACAO_SOVEREIGN_PAIR_PARA_SP_SERVICE.md`](../_strategy/MIGRACAO_SOVEREIGN_PAIR_PARA_SP_SERVICE.md) para detalhes.
+The daemon binds to `127.0.0.1:38001` by default with automatic port escalation (38001–38010) to avoid collisions in desktop environments running multiple instances.
 
 ---
 
-## 🚀 Quick Start
+## Requirements
 
-### Pré-requisitos
+- Rust 1.75 or newer
+- Ollama (optional, for local LLM inference)
+- SQLite (bundled via sqlx — no system install required)
 
-- **Rust 1.75+** ([instalação](https://www.rust-lang.org/tools/install))
-- **Python 3.11+** (para workers de dados)
-- **Ollama** (opcional, para inferência local)
-- **SQLite** (compilado com `sqlite-vec` support)
+---
 
-### Instalação Rápida
+## Quick Start
 
 ```bash
-# 1. Clone o repositório
+# Clone the monorepo
 git clone https://github.com/Personal-Digital-Sovereignty/sp-platform.git
 cd sp-platform/sp-service
 
-# 2. Build de desenvolvimento
-cargo build --dev
-
-# 3. Rodar o servidor
+# Development build and run
 cargo run
 
-# 4. Build de produção (binário otimizado)
+# Production build
 cargo build --release
-./target/release/sp-service
-```
-
-### Docker (Em Implementação)
-
-```bash
-# Build da imagem
-docker build -t sp-service:latest .
-
-# Rodar container
-docker run -d \
-  -p 8080:8080 \
-  -v ./data:/app/data \
-  -v ./models:/app/models \
-  --name sp-service \
-  sp-service:latest
+./target/release/sovereign-daemon
 ```
 
 ---
 
-## 🔧 Configuração
+## Configuration
 
-### Variáveis de Ambiente
+Create a `.env` file in the `sp-service` directory:
 
-Crie um arquivo `.env` na raiz:
+```env
+# Local inference
+OLLAMA_BASE_URL=http://127.0.0.1:11434
 
-```bash
-# Ollama Local
-OLLAMA_HOST=127.0.0.1:11434
+# CORS — comma-separated list of allowed frontend origins
+ALLOWED_ORIGINS=http://localhost:5173,http://localhost:1420
 
-# Cloud Providers (opcionais)
-QWEN_API_KEY=sk-...
-NVIDIA_API_KEY=nvapi-...
+# Vault path (Markdown document storage)
+VAULT_PATH=/home/user/.sovereign/vault
+
+# Database path
+DATABASE_URL=sqlite:/home/user/.sovereign/sensus_nexus.db
+
+# Runtime environment (native or docker)
+SOVEREIGN_RUN_ENV=native
+
+# Cloud providers (optional — can also be set via the UI SecOps Vault)
 OPENROUTER_API_KEY=sk-or-...
-
-# KMS Master Key (gerada automaticamente se ausente)
-KMS_MASTER_KEY=...
-
-# Database Path
-DATABASE_PATH=./data/sensus_nexus.db
-
-# Workspace (Markdown Vault)
-WORKSPACE_PATH=./data/vault
+NVIDIA_API_KEY=nvapi-...
 ```
 
-### Primeiros Passos
-
-1. **Inicializar Database:**
-   ```bash
-   ./sp-service --init-db
-   ```
-
-2. **Configurar API Keys:**
-   ```bash
-   curl -X POST http://localhost:8080/v1/settings/kms \
-     -H "Content-Type: application/json" \
-     -d '{"provider": "qwen", "api_key": "sk-..."}'
-   ```
-
-3. **Health Check:**
-   ```bash
-   curl http://localhost:8080/health
-   # {"status": "healthy", "version": "1.4.0-dev"}
-   ```
-
 ---
 
-## 📚 Documentação
+## API Reference
 
-### Guias Principais
+The full interactive API reference is available at `http://localhost:38001/swagger-ui` when the daemon is running.
 
-- **[Guia de Instalação](docs/install_guide.md)** — Instalação detalhada por plataforma
-- **[API Reference](docs/api/)** — OpenAPI/Swagger specs
-- **[RAG Mechanics](docs/rag_mechanics.md)** — Como funciona o RAG pipeline
-- **[Security](docs/security.md)** — KMS, SecOps Vault, Zero-Trust
+### Chat Completions (HTTP SSE)
 
-### Estratégia e Arquitetura
-
-- **[BLUEPRINT.md](docs/engineering/BLUEPRINT.md)** — Manifesto técnico completo
-- **[MIGRACAO.md](../_strategy/MIGRACAO_SOVEREIGN_PAIR_PARA_SP_SERVICE.md)** — Guia de migração do legado
-- **[ROADMAP.md](ROADMAP.md)** — Próximos passos e épicos
-
----
-
-## 🧠 Componentes Principais
-
-### Backend Rust (Core)
-
-| Módulo | Descrição |
-|--------|-----------|
-| `api.rs` | Hub agêntico e roteamento de requests |
-| `api_rag.rs` | Pipeline RAG e vector search |
-| `api_trainer.rs` | Sandbox de Python Workers |
-| `sync_engine.rs` | Sensus Dual-Truth Sync |
-| `kms.rs` | Key Management Service (AES-256-GCM) |
-| `memory_manager.rs` | Sovereign Swap (VRAM GC) |
-| `ssh_mesh_connector.rs` | Oracle Cloud Mesh Tunneling |
-
-### Python Workers
-
-| Worker | Descrição |
-|--------|-----------|
-| `sovereign_matrix.py` | Buscador financeiro e macroeconomia |
-| `analyze_and_join_time_series.py` | Pandas Joiner + Pearson Correlation |
-| `academic_matrix.py` | PubMed, NASA, arXiv extraction |
-| `culture_matrix.py` | TMDb, IGDB, MusicBrainz |
-| `empirical_verifier.py` | Advogado do Diabo (anti-alucinação) |
-
----
-
-## 🔌 API Endpoints (Principais)
-
-### Chat & Inference
-
-```bash
-# Chat com streaming SSE
+```http
 POST /v1/chat/completions
 Content-Type: application/json
+Authorization: Bearer <token>
 
 {
   "model": "qwen3:8b",
-  "messages": [{"role": "user", "content": "Olá"}],
-  "stream": true
-}
-
-# Deep Research (Web-Augmented)
-POST /v1/research/deep
-Content-Type: application/json
-
-{
-  "query": "Análise macroeconômica Brasil 2025",
-  "agentic_mode": true
+  "messages": [{"role": "user", "content": "Hello"}],
+  "stream": true,
+  "workspace_id": "default",
+  "deep_research": false,
+  "rewoo_enabled": false
 }
 ```
 
-### RAG Pipeline
+### Chat Completions (WebSocket)
 
-```bash
-# Upload de documentos
-POST /v1/rag/ingest
-Content-Type: multipart/form-data
+Connect to `ws://localhost:38001/v1/chat/ws` and send the same JSON payload as a text frame. The server streams back OpenAI-compatible chunk frames and closes the connection with a final `{"done": true, "id": "session_<id>"}` frame.
 
-# Vector search
-GET /v1/rag/search?q=inflação+IPCA&limit=5
+### Key Endpoints
 
-# RAG chat
-POST /v1/rag/chat
-Content-Type: application/json
-
-{
-  "query": "Qual a inflação acumulada?",
-  "use_rag": true
-}
-```
-
-### Tools & Workers
-
-```bash
-# Executar tool financeira
-POST /v1/tools/fetch_financial_ticker
-Content-Type: application/json
-
-{
-  "ticker": "PETR4.SA",
-  "metrics": ["close", "volume"]
-}
-
-# Executar tool macroeconômica
-POST /v1/tools/fetch_macroeconomy
-Content-Type: application/json
-
-{
-  "indicators": ["IPCA", "SELIC"],
-  "period": "12M"
-}
-```
-
-### System & Telemetry
-
-```bash
-# Health check
-GET /health
-
-# Telemetria (VRAM, RAM, CPU)
-GET /v1/telemetry
-
-# Modelos instalados (Ollama)
-GET /v1/models/local
-
-# Configurações
-GET /v1/settings
-PUT /v1/settings
-```
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /v1/chat/completions | Streaming chat inference (SSE) |
+| GET | /v1/chat/ws | Bidirectional chat streaming (WebSocket) |
+| GET | /v1/sessions | List chat sessions |
+| GET | /v1/sessions/:id | Load session history |
+| GET/POST | /v1/vault/fs | Vault file system operations |
+| GET | /v1/rag/graph | Cognitive graph nodes and edges |
+| GET | /v1/models | Aggregated model list (Ollama + OpenRouter) |
+| GET | /v1/analytics/api_health | Hardware telemetry and OOM guard status |
+| GET | /v1/coding/workspace | Real workspace file tree |
+| GET | /v1/coding/terminal/ws | PTY terminal WebSocket |
+| GET | /swagger-ui | Interactive Swagger UI |
+| GET | /api-docs/openapi.json | OpenAPI 3.0 specification |
 
 ---
 
-## 🛡️ Security
+## Security Model
 
-### Zero-Trust Architecture
-
-- **KMS Local:** Chaves mestras em `OnceLock` com `zeroize()`
-- **SecOps Vault:** Credenciais criptografadas (AES-256-GCM)
-- **SSH Mesh:** Túneis reversos sem portas expostas
-- **Body Limits:** 50 MB global, 5 MB por endpoint crítico
-- **JWT HS256:** Algoritmo fixo, sem `none` ou `RS256`
-- **DOMPurify:** XSS prevention em todo conteúdo LLM
-
-### Security Audit
-
-Auditado em **Pass 3** (v1.2.9):
-- ✅ JWT Algorithm Confusion (P3-02)
-- ✅ Token Exposure LAN (P3-01)
-- ✅ XSS via LLM Content (P3-04)
-- ✅ DoS Body Limit (P3-03, P3-05)
-- ✅ Command Injection SSH (CWE-78)
+- **Zero-Trust LAN Guard:** Every request passes through `lan_auth_guard` before reaching handlers.
+- **JWT Authentication:** HS256 algorithm enforced; `none` and asymmetric algorithms rejected.
+- **Media Authentication:** Vault media files accept JWT via `Authorization` header, `?token=` query parameter, or `sovereign_token` cookie.
+- **KMS Encryption:** All API keys stored in `secops_vault` are encrypted with AES-256-GCM. Keys are decrypted in-memory only at request time and zeroed after use.
+- **CORS Hardening:** Origins loaded dynamically from `ALLOWED_ORIGINS` environment variable; no wildcard policy in production.
+- **Body Limit:** 50 MB global request body limit to prevent DoS.
+- **SSRF Guard:** Outbound HTTP requests validated against private IP ranges (RFC 1918, loopback, link-local).
+- **Path Traversal:** File system endpoints validate all paths against the configured workspace root.
 
 ---
 
-## 🧪 Testes
+## Testing
 
 ```bash
-# Testes unitarios Rust (136 tests)
-cargo test --lib
+# Run all 283 tests
+cargo test -p sp-service
 
-# Todos os testes Rust
-cargo test
-
-# Testes Python (108 tests)
-cd python_workers && python3 -m pytest tests/ -v
-
-# Testes de seguranca
+# Run security tests only
 cargo test security
 
-# Coverage (requer cargo-tarpaulin)
-cargo tarpaulin --out Html
+# Run with output
+cargo test -- --nocapture
 ```
 
-> **Status Atual (2026-05-06):**
-> - Rust: **136 tests** — 0 failed ✅
-> - Python: **108 tests** — 0 failed ✅
-> - Compilação: **0 erros, 0 let-chains** ✅
+Test coverage spans: JWT security, KMS encrypt/decrypt roundtrips, path traversal guards, SSRF guards, body limits, SQLite WAL contention stress tests, telemetry, ReWOO planning, sync engine debounce, sandbox execution, and quantization utilities.
 
 ---
 
-## 📦 Deploy
-
-### Binário Standalone
-
-```bash
-# Linux
-./target/release/sp-service
-
-# macOS
-./target/release/sp-service
-
-# Windows
-.\target\release\sp-service.exe
-```
-
-### Systemd Service (Linux)
+## Systemd Service (Linux)
 
 ```ini
 [Unit]
-Description=Sovereign Pair Service
+Description=Sovereign OS Backend Daemon
 After=network.target
 
 [Service]
 Type=simple
-User=sovereign
-WorkingDirectory=/opt/sp-service
-ExecStart=/opt/sp-service/sp-service
-Restart=always
+WorkingDirectory=/opt/sovereign
+ExecStart=/opt/sovereign/sovereign-daemon
+EnvironmentFile=/opt/sovereign/.env
+Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-### Kubernetes (Em Implementação)
+---
 
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: sp-service
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: sp-service
-  template:
-    spec:
-      containers:
-      - name: sp-service
-        image: sp-service:latest
-        ports:
-        - containerPort: 8080
-```
+## License
+
+PolyForm Noncommercial 1.0.0. See [LICENSE](LICENSE).  
+For commercial deployments, contact: personal-digitalsovereignty@proton.me
 
 ---
 
-## 🤝 Contribuindo
-
-### Como Contribuir
-
-1. **Fork** o repositório
-2. **Crie uma branch** para sua feature (`git checkout -b feature/amazing-feature`)
-3. **Commit** suas mudanças (`git commit -m 'Add amazing feature'`)
-4. **Push** para a branch (`git push origin feature/amazing-feature`)
-5. **Pull Request** no GitHub
-
-### Padrões de Código
-
-- **Rust:** `rustfmt` (auto-format), `clippy` (lints)
-- **Python:** `black` (format), `flake8` (lints)
-- **Commits:** [Conventional Commits](https://www.conventionalcommits.org/)
-
-### Code Review
-
-Todo PR requer:
-- ✅ Builds passing (Linux, macOS, Windows)
-- ✅ Testes passando
-- ✅ Zero warnings do Clippy
-- ✅ Documentação atualizada
-
----
-
-## 📄 Licenciamento
-
-Este projeto está sob licença **PolyForm Noncommercial 1.0.0**. Veja [LICENSE](LICENSE) para detalhes.
-
-**Uso Comercial:** Restrito. Para implantações empresariais, contate: [personal-digitalsovereignty@proton.me]
-
----
-
-## 📞 Contato
-
-- **Repositório:** [GitHub](https://github.com/Personal-Digital-Sovereignty/sp-platform)
-- **Issues:** [GitHub Issues](https://github.com/Personal-Digital-Sovereignty/sp-platform/issues)
-- **Email:** [personal-digitalsovereignty@proton.me]
-
----
-
-**Histórico:** Este repositório (`sp-service/`) é o sucessor de `sovereign-pair/` para desenvolvimento backend ativo.  
-**Versão Atual:** 1.4.0-dev  
-**Última Atualização:** 2026-05-06  
-**Status de Compilação:** ✅ cargo check OK (Rust 2021 edition — 0 erros, 0 let-chains)
-
+**Version:** 1.6.0  
+**Last updated:** 2026-05-24  
+**Test status:** 283 passing, 0 failed
