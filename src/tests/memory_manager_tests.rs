@@ -14,6 +14,5 @@ mod tests {
         
         // If it panics, the test will fail. 
         // We can't easily intercept the tokio::spawn without major refactoring.
-        assert!(true);
     }
 }

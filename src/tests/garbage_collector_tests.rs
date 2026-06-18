@@ -13,6 +13,5 @@ mod tests {
         spawn_ephemeral_garbage_collector(pool.clone()).await;
         
         // We just let the test end, dropping the runtime and the spawned task.
-        assert!(true);
     }
 }

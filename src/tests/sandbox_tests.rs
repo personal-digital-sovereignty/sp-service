@@ -232,9 +232,6 @@ except ImportError:
                 python_bin.exists(),
                 "If setup succeeded, python bin should exist"
             );
-        } else {
-            // If failed, that's OK - user may need to install Python manually
-            assert!(true, "Setup failed gracefully (Python may not be available)");
         }
     }
 

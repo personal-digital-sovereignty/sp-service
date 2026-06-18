@@ -65,6 +65,6 @@ mod tests {
         
         let snapshot = state.get_snapshot();
         assert!(snapshot.hardware.ram_total_gb > 0.0);
-        assert!(snapshot.hardware.cpu_cores.len() > 0);
+        assert!(!snapshot.hardware.cpu_cores.is_empty());
     }
 }

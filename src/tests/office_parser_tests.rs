@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_parse_file_csv_empty() {
         let mut temp_file = NamedTempFile::with_suffix(".csv").expect("test assertion failed — review test setup");
-        writeln!(temp_file, "").expect("test assertion failed — review test setup");
+        writeln!(temp_file).expect("test assertion failed — review test setup");
         temp_file.flush().expect("test assertion failed — review test setup");
 
         let result = parse_file(temp_file.path().to_str().expect("test assertion failed — review test setup"));
