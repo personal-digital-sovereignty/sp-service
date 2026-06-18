@@ -173,11 +173,11 @@ mod tests {
 
     #[test]
     fn test_ignored_patterns() {
-        let ignored_patterns = vec![
-            "node_modules".to_string(),
-            ".git".to_string(),
-            ".venv".to_string(),
-            "target".to_string(),
+        let ignored_patterns = [
+            "node_modules",
+            ".git",
+            ".venv",
+            "target",
         ];
 
         let test_paths = vec![

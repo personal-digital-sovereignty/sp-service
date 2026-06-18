@@ -8,8 +8,10 @@
 use axum::{
     extract::{Query, State, WebSocketUpgrade},
     http::StatusCode,
-    response::{IntoResponse, Json},
+    response::Json,
 };
+#[cfg(not(unix))]
+use axum::response::IntoResponse;
 #[cfg(unix)]
 use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -293,7 +295,7 @@ pub async fn coding_terminal_ws_handler(
         // Important: close the slave handle in the parent process
         drop(pty_pair.slave);
 
-        let mut master = pty_pair.master; // to handle resize
+        let master = pty_pair.master; // to handle resize
         let mut reader = master.try_clone_reader().unwrap();
         let mut writer = master.take_writer().unwrap();
 

@@ -6,7 +6,6 @@
 #[cfg(test)]
 mod tests {
     use crate::mcp::{get_mcp_tools, validate_safe_path};
-    use std::path::Path;
 
     // ─────────────────────────────────────────────────────────
     // get_mcp_tools Tests
