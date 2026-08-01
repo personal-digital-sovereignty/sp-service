@@ -92,13 +92,14 @@ def check_yahoo(name: str, ticker: str, timeout: int = 15) -> dict:
     """Test a Yahoo Finance ticker with a 1-month window."""
     result = {"name": name, "type": "Yahoo_Finance", "ticker": ticker}
     t0 = time.time()
-    
+
     try:
         import yfinance as yf
+        import requests.exceptions
         tk = yf.Ticker(ticker)
-        data = tk.history(period="1mo")
+        data = tk.history(period="1mo", timeout=timeout)
         latency_ms = int((time.time() - t0) * 1000)
-        
+
         if data is not None and len(data) > 0:
             result.update({
                 "status": "HEALTHY",
@@ -114,9 +115,12 @@ def check_yahoo(name: str, ticker: str, timeout: int = 15) -> dict:
             })
     except ImportError:
         result.update({"status": "SKIP", "error": "yfinance not installed", "latency_ms": 0})
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+        # GAP-RS-02: rede indisponível (DNS, conexão recusada, timeout) — distinto de falha HTTP/schema
+        result.update({"status": "UNREACHABLE", "error": str(e), "latency_ms": int((time.time() - t0) * 1000)})
     except Exception as e:
         result.update({"status": "DEAD", "error": str(e), "latency_ms": int((time.time() - t0) * 1000)})
-    
+
     return result
 
 

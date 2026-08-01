@@ -41,6 +41,11 @@ pub struct ApiHealthSummary {
     pub total_apis: usize,
     pub healthy: usize,
     pub degraded: usize,
+    // GAP-RS-02: preserva a distinção UNREACHABLE (rede) vs DEAD (HTTP/schema) vs EMPTY
+    // que antes era perdida ao colapsar tudo em `degraded`.
+    pub dead: usize,
+    pub unreachable: usize,
+    pub empty: usize,
     pub critical_failures: Vec<String>,
     pub last_checked: String,
     pub entries: Vec<ApiHealthEntry>,
@@ -52,6 +57,9 @@ impl Default for ApiHealthSummary {
             total_apis: 0,
             healthy: 0,
             degraded: 0,
+            dead: 0,
+            unreachable: 0,
+            empty: 0,
             critical_failures: vec![],
             last_checked: "Never".to_string(),
             entries: vec![],
@@ -128,6 +136,9 @@ pub async fn persist_health_results(db: &SqlitePool, entries: &[ApiHealthEntry])
 pub fn build_summary(entries: Vec<ApiHealthEntry>) -> ApiHealthSummary {
     let healthy = entries.iter().filter(|e| e.status == "HEALTHY" || e.status == "SKIP").count();
     let degraded = entries.iter().filter(|e| e.status != "HEALTHY" && e.status != "SKIP").count();
+    let dead = entries.iter().filter(|e| e.status == "DEAD").count();
+    let unreachable = entries.iter().filter(|e| e.status == "UNREACHABLE").count();
+    let empty = entries.iter().filter(|e| e.status == "EMPTY").count();
     let critical_failures: Vec<String> = entries.iter()
         .filter(|e| e.critical && e.status != "HEALTHY")
         .map(|e| e.name.clone())
@@ -145,6 +156,9 @@ pub fn build_summary(entries: Vec<ApiHealthEntry>) -> ApiHealthSummary {
         total_apis: entries.len(),
         healthy,
         degraded,
+        dead,
+        unreachable,
+        empty,
         critical_failures,
         last_checked: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         entries,
@@ -226,6 +240,9 @@ pub async fn api_health_handler(
         "total_apis": health.total_apis,
         "healthy": health.healthy,
         "degraded": health.degraded,
+        "dead": health.dead,
+        "unreachable": health.unreachable,
+        "empty": health.empty,
         "critical_failures": health.critical_failures,
         "last_checked": health.last_checked,
         "entries": health.entries,
