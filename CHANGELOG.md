@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
 
 ### Added
+- **TTFT Metric & Observability**: Adicionado rastreamento de TTFT (Time To First Token) no backend de telemetria para maior observabilidade do LLMOps (Item 6 do Roadmap).
 - **Sovereign Fast-Router (`qwen3:0.6b`)**: Roteador dinâmico SLM que analisa a complexidade (P, M, G) e roteia para modelos maiores localmente baseando-se na memória disponível.
 - **Cold-Boot Guard**: Sistema de retries (3 tentativas de 5s) no `reqwest::post` quando o Ollama retorna 500 ou Connection Reset, protegendo contra OOM/Timeout no carregamento da VRAM.
 - **Auto-Eviction (10-Minute Eviction)**: `schedule_model_unload` implementado no `memory_manager.rs` para liberar modelos pesados da memória após o uso.

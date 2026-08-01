@@ -21,7 +21,7 @@ mod tests {
         let mut state = TelemetryState::new();
         
         // Simulating a local model (generates savings based on cloud fallback)
-        state.record_session(1000, 500, "qwen2.5:latest");
+        state.record_session(1000, 500, 150, "qwen2.5:latest");
         
         assert_eq!(state.total_tokens, 1000);
         assert!(state.estimated_cost > 0.0); // Should use avg_cloud_cost_per_1k
@@ -39,16 +39,16 @@ mod tests {
         let mut state = TelemetryState::new();
         
         // Simulating GPT-4
-        state.record_session(1000, 1000, "gpt-4-turbo");
+        state.record_session(1000, 1000, 0, "gpt-4-turbo");
         assert_eq!(state.estimated_cost, 0.0300);
         
         // Simulating Claude
-        state.record_session(2000, 1000, "claude-3-opus");
+        state.record_session(2000, 1000, 0, "claude-3-opus");
         // Previous 0.03 + (2 * 0.0150) = 0.0600
         assert_eq!(state.estimated_cost, 0.0600);
         
-        // Simulating OpenRouter
-        state.record_session(1000, 1000, "openrouter/mistral");
+        // Simulating OpenRouter Fallback
+        state.record_session(1000, 1000, 0, "openrouter/mistral");
         // Previous 0.06 + (1 * 0.0020) = 0.0620
         // Rounding issues might occur, we use epsilon check
         assert!((state.estimated_cost - 0.0620).abs() < f64::EPSILON);

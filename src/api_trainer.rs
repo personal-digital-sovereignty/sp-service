@@ -2064,7 +2064,7 @@ pub async fn run_deep_research_handler(
                             ) {
                                 let duration_ms = (eval_duration / 1_000_000) as u128;
                                 if let Ok(mut tel) = telemetry_ptr.write() {
-                                    tel.record_session(eval_count as usize, duration_ms, &target_model_name);
+                                    tel.record_session(eval_count as usize, duration_ms, 0, &target_model_name);
                                 }
                                 
                                 if let Some(pool) = &engine_arc.db_pool {

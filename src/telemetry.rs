@@ -20,6 +20,7 @@ pub struct TelemetrySnapshot {
     pub total_tokens: usize,
     pub avg_tps: f64,
     pub avg_latency_ms: u128,
+    pub avg_ttft_ms: u128,
     pub estimated_cost: f64,
     pub avg_cloud_cost_per_1k: f64,
     pub models_usage: HashMap<String, usize>,
@@ -29,8 +30,8 @@ pub struct TelemetrySnapshot {
 pub struct TelemetryState {
     pub total_tokens: usize,
     pub estimated_cost: f64,
-    // Buffer para armazenar as ultimas N sessoes (tokens, millis)
-    recent_sessions: VecDeque<(usize, u128)>,
+    // Buffer para armazenar as ultimas N sessoes (tokens, millis, ttft_ms)
+    recent_sessions: VecDeque<(usize, u128, u128)>,
     pub models_usage: HashMap<String, usize>,
     pub live_tps: f64,
     
@@ -74,7 +75,7 @@ impl TelemetryState {
     }
 
     #[allow(unused_assignments)]
-    pub fn record_session(&mut self, tokens: usize, duration_ms: u128, model: &str) {
+    pub fn record_session(&mut self, tokens: usize, duration_ms: u128, ttft_ms: u128, model: &str) {
         self.total_tokens += tokens;
         
         // Simula A Economia Diária: Se é modelo Local (livre de taxas), o custo que EXISTIRIA na Cloud 
@@ -96,11 +97,11 @@ impl TelemetryState {
 
         *self.models_usage.entry(model.to_string()).or_insert(0) += tokens;
         
-        // Mantém apenas as ultimas 10 interacoes para média móvel TPS
+        // Mantém apenas as ultimas 10 interacoes para média móvel TPS e TTFT
         if self.recent_sessions.len() >= 10 {
             self.recent_sessions.pop_front();
         }
-        self.recent_sessions.push_back((tokens, duration_ms));
+        self.recent_sessions.push_back((tokens, duration_ms, ttft_ms));
         
         self.live_tps = 0.0;
     }
@@ -121,21 +122,25 @@ impl TelemetryState {
     pub fn get_snapshot(&self) -> TelemetrySnapshot {
         let mut tps = 0.0;
         let mut avg_latency = 0;
+        let mut avg_ttft = 0;
         if !self.recent_sessions.is_empty() {
             let mut sum_tps = 0.0;
             let mut sum_lat = 0;
+            let mut sum_ttft = 0;
             let mut count = 0;
-            for (t, d) in &self.recent_sessions {
+            for (t, d, ttft) in &self.recent_sessions {
                 if *d > 0 {
                     let sec = *d as f64 / 1000.0;
                     sum_tps += *t as f64 / sec;
                     sum_lat += *d;
+                    sum_ttft += *ttft;
                     count += 1;
                 }
             }
             if count > 0 {
                 tps = sum_tps / count as f64;
                 avg_latency = sum_lat / count as u128;
+                avg_ttft = sum_ttft / count as u128;
             }
         }
         
@@ -165,6 +170,7 @@ impl TelemetryState {
             total_tokens: self.total_tokens,
             avg_tps: (tps * 100.0).round() / 100.0, // Arredonda 2 casas
             avg_latency_ms: avg_latency,
+            avg_ttft_ms: avg_ttft,
             estimated_cost: (self.estimated_cost * 10000.0).round() / 10000.0,
             avg_cloud_cost_per_1k: self.avg_cloud_cost_per_1k,
             models_usage: self.models_usage.clone(),

@@ -69,6 +69,26 @@ pub async fn discover_best_model_from_matrix(pool: &sqlx::SqlitePool, min_size: 
     fallback.to_string()
 }
 
+pub async fn discover_evaluator_model(pool: &sqlx::SqlitePool, fallback: &str) -> String {
+    if let Ok(Some(row)) = sqlx::query(
+        "SELECT model_name FROM model_capabilities \
+         WHERE is_installed = 1 \
+         AND parameter_size >= 0.5 AND parameter_size <= 1.5 \
+         AND model_name NOT LIKE '%embed%' \
+         AND model_name NOT LIKE '%bge-m3%' \
+         AND model_name NOT LIKE '%nomic%' \
+         ORDER BY parameter_size DESC LIMIT 1"
+    ).fetch_optional(pool).await
+    {
+        if let Ok(name) = sqlx::Row::try_get::<String, _>(&row, "model_name") {
+            tracing::info!("✨ [Dynamic Discovery] Judge Evaluator Elegida (Auto): {}", name);
+            return name;
+        }
+    }
+    tracing::warn!("⚠️ [Dynamic Discovery] Judge Matrix vazia. Usando fallback: {}", fallback);
+    fallback.to_string()
+}
+
 
 pub async fn discover_cognitive_model_by_tier(tier: &str) -> String {
     let client = reqwest::Client::builder()
@@ -1669,12 +1689,18 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                 let tracking_model = ollama_model.clone();
 
                 tokio::spawn(async move {
+                    let mut first_token_emitted = false;
+                    let mut ttft_ms = 0u128;
                     while let Some(event_res) = q_stream.next().await {
                         match event_res {
                             Ok(event) => {
                                 if let Some(chunk) = qwen_client.transform_event(event) {
                                     if let Some(choice) = chunk.choices.first() {
                                         if let Some(content) = &choice.delta.content {
+                                            if !first_token_emitted && !content.is_empty() {
+                                                first_token_emitted = true;
+                                                ttft_ms = start_time.elapsed().as_millis();
+                                            }
                                             accumulator.push_str(content);
                                         }
                                     }
@@ -1696,7 +1722,7 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                     let total_tokens = accumulator.split_whitespace().count(); // Heurística
 
                     if let Ok(mut t) = tracking_telemetry.write() {
-                        t.record_session(total_tokens, duration_ms, &tracking_model);
+                        t.record_session(total_tokens, duration_ms, ttft_ms, &tracking_model);
                     }
                     
                     crate::api_chat::save_message(&tracking_db, active_session_id, "assistant", &accumulator).await;
@@ -1727,6 +1753,8 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                 let tracking_model = ollama_model.clone();
 
                 tokio::spawn(async move {
+                    let mut first_token_emitted = false;
+                    let mut ttft_ms = 0u128;
                     while let Some(event_res) = n_stream.next().await {
                         match event_res {
                             Ok(reqwest_eventsource::Event::Message(msg)) => {
@@ -1734,6 +1762,10 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                                 if let Ok(chunk) = serde_json::from_str::<crate::models::OpenAIChatChunkResponse>(&msg.data) {
                                     if let Some(choice) = chunk.choices.first() {
                                         if let Some(content) = &choice.delta.content {
+                                            if !first_token_emitted && !content.is_empty() {
+                                                first_token_emitted = true;
+                                                ttft_ms = start_time.elapsed().as_millis();
+                                            }
                                             accumulator.push_str(content);
                                         }
                                     }
@@ -1752,7 +1784,7 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                     let total_tokens = accumulator.split_whitespace().count();
 
                     if let Ok(mut t) = tracking_telemetry.write() {
-                        t.record_session(total_tokens, duration_ms, &tracking_model);
+                        t.record_session(total_tokens, duration_ms, ttft_ms, &tracking_model);
                     }
                     
                     crate::api_chat::save_message(&tracking_db, active_session_id, "assistant", &accumulator).await;
@@ -1788,6 +1820,8 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
             if !sys_context.is_empty() { tracking_rag_context.push('\n'); tracking_rag_context.push_str(&sys_context); }
 
             tokio::spawn(async move {
+                let mut first_token_emitted = false;
+                let mut ttft_ms = 0u128;
                 while let Some(event_res) = or_stream.next().await {
                     match event_res {
                         Ok(reqwest_eventsource::Event::Message(msg)) => {
@@ -1796,6 +1830,10 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                             if let Ok(chunk) = serde_json::from_str::<crate::models::OpenAIChatChunkResponse>(&msg.data) {
                                 if let Some(choice) = chunk.choices.first() {
                                     if let Some(content) = &choice.delta.content {
+                                        if !first_token_emitted && !content.is_empty() {
+                                            first_token_emitted = true;
+                                            ttft_ms = start_time.elapsed().as_millis();
+                                        }
                                         accumulator.push_str(content);
                                     }
                                 }
@@ -1815,7 +1853,7 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
                 let total_tokens = accumulator.split_whitespace().count(); // Heurística se OpenRouter não mandar usage
                 
                 if let Ok(mut t) = tracking_telemetry.write() {
-                    t.record_session(total_tokens, duration, &tracking_model);
+                    t.record_session(total_tokens, duration, ttft_ms, &tracking_model);
                 }
                 
                 let _ = tracking_log_sender.send(crate::models::LogEntry {
@@ -2017,6 +2055,8 @@ let map_active_session = active_session_id;
 let map_ollama_model = tracking_model.clone();
 
 // Extraímos os Bytes Chunk a Chunk e mapeamos pro formato OpenAI SSE:
+let mut first_token_emitted = false;
+let mut ttft_ms = 0u128;
 let mut map_stream = res.bytes_stream().map(move |result| {
     match result {
         Ok(bytes) => {
@@ -2037,6 +2077,10 @@ let mut map_stream = res.bytes_stream().map(move |result| {
 
                             if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
                                 if !content.is_empty() {
+                                    if !first_token_emitted {
+                                        first_token_emitted = true;
+                                        ttft_ms = start_time.elapsed().as_millis();
+                                    }
                                     session_tokens += 1;
 
                                     // Live TPS Broadcast: Atualiza a métrica em tempo real se a engine de telemetria estiver operando
@@ -2204,7 +2248,7 @@ let mut map_stream = res.bytes_stream().map(move |result| {
                     // 🚩 Observabilidade: Fim de Interação -> Gravando Métricas Cíbridas!
                     let duration = start_time.elapsed().as_millis();
                     if let Ok(mut t) = map_tracking_telemetry.write() {
-                        t.record_session(total_real_tokens, duration, &map_ollama_model);
+                        t.record_session(total_real_tokens, duration, ttft_ms, &map_ollama_model);
                     }
 
                     // 🗄️ Histórico Absoluto: Persistindo Tokens e Uptime no Ledger SQLite
@@ -2348,6 +2392,8 @@ if is_empty_response {
                     let retry_log_sender = tracking_log_sender.clone();
                     let mut retry_accumulator = String::new();
 
+                    let mut first_token_emitted = false;
+                    let mut ttft_ms = 0u128;
                     let mut retry_map_stream = retry_res.bytes_stream().map(move |result| {
                         match result {
                             Ok(bytes) => {
@@ -2363,6 +2409,10 @@ if is_empty_response {
 
                                                 if let Some(content) = msg_obj.get("content").and_then(|c| c.as_str()) {
                                                     if !content.is_empty() {
+                                                        if !first_token_emitted {
+                                                            first_token_emitted = true;
+                                                            ttft_ms = retry_start_time.elapsed().as_millis();
+                                                        }
                                                         retry_session_tokens += 1;
                                                         let mapped_content = content.replace("<think>", "\n<details class=\"mb-4 overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 shadow-sm\"><summary class=\"cursor-pointer bg-zinc-900/50 px-4 py-2 text-sm font-semibold text-indigo-400 hover:bg-zinc-800/50 transition-colors select-none\">🧠 Pré-Raciocínio Dinâmico (Sovereign Expert)</summary><div class=\"border-l-2 border-indigo-500/50 p-4 text-sm italic text-zinc-400 bg-zinc-950/80 m-0 whitespace-pre-wrap\">\n")
                                                             .replace("</think>", "\n</div></details>\n\n");
@@ -2427,7 +2477,7 @@ if is_empty_response {
                                                     let total_real_tokens = llm_gen_tokens + llm_prompt_tokens;
                                                     let duration = retry_start_time.elapsed().as_millis();
                                                     if let Ok(mut t) = retry_telemetry.write() {
-                                                        t.record_session(total_real_tokens, duration, &retry_model);
+                                                        t.record_session(total_real_tokens, duration, ttft_ms, &retry_model);
                                                     }
                                                     let _ = retry_log_sender.send(crate::models::LogEntry {
                                                         timestamp: chrono::Local::now().to_rfc3339(),

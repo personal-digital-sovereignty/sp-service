@@ -129,7 +129,7 @@ pub async fn get_models_handler(State(state): State<Arc<AppState>>) -> Json<Mode
     })
 }
 
-async fn resolve_ollama_url(state: &AppState) -> String {
+pub async fn resolve_ollama_url(state: &AppState) -> String {
     // Check ollama_clusters config first
     if let Ok(Some(row)) = sqlx::query(
         "SELECT value_json FROM global_settings WHERE id = 'ollama_clusters'",
