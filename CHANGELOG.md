@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sovereign Fast-Router (`qwen3:0.6b`)**: Roteador dinâmico SLM que analisa a complexidade (P, M, G) e roteia para modelos maiores localmente baseando-se na memória disponível.
 - **Cold-Boot Guard**: Sistema de retries (3 tentativas de 5s) no `reqwest::post` quando o Ollama retorna 500 ou Connection Reset, protegendo contra OOM/Timeout no carregamento da VRAM.
 - **Auto-Eviction (10-Minute Eviction)**: `schedule_model_unload` implementado no `memory_manager.rs` para liberar modelos pesados da memória após o uso.
+
+### Fixed — Distinção Financeira PTAX vs CAMBIO/USD (Item 3 do Roadmap)
+- **Investigação**: o bug descrito no roadmap (PTAX fundido com BRL=X na dedup) **não existia mais em código** — o rename `DOLAR`→`DOLAR_SPOT` antes do passo de dedup por correlação Pearson (FIX-13) já impedia a colisão, mas sem nenhum teste provando isso.
+- **Bug real encontrado no mesmo território**: `CAMBIO` e o indicador macro `USD` resolvem, por padrão, para a mesma série BCB SGS 10813 que `DOLAR_PTAX` (`FALLBACK_CHAINS` em `sovereign_matrix.py`), mas o `SEMANTIC_MAP` de `analyze_and_join_time_series.py` dava a cada um sua própria chave — duplicando a mesma série sob três nomes de coluna diferentes em vez de fundir.
+- **Fix**: `CAMBIO` e `"INDICADOR USD"` (match específico, não `"USD"` solto — colide com o aviso `(USD/BRL)` de tickers convertidos) agora são aliases de `DOLAR_PTAX` no `SEMANTIC_MAP`, mergeando via o `combine_first` do FIX-13 em vez de duplicar.
+- **Testes**: 6 testes novos em `test_time_series.py` — trava o cenário raiz (`PTAX` + `BRL=X` nunca fundem, mesmo com alta correlação real) e o bug do `CAMBIO`/`USD` (mergeiam com `DOLAR_PTAX`, sem colidir com o aviso de conversão). 114/114 testes passando (`pytest tests/`).
 ## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
    
 ### Fixed — CI/CD e Docker (Forensic Fixes)

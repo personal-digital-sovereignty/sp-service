@@ -20,10 +20,17 @@ except ImportError:
 SEMANTIC_MAP = [
     ("BZ=F", "BRENT"), ("BRENT", "BRENT"), ("PETROLEO", "BRENT"), ("PETRÓLEO", "BRENT"),
     ("DOLAR_PTAX", "DOLAR_PTAX"),  # Antes de DOLAR!
+    # GAP Item 3: "CAMBIO" e o indicador macro "USD" resolvem, por padrão, para a MESMA série
+    # BCB SGS 10813 (PTAX Venda Média) que "DOLAR_PTAX" — ver FALLBACK_CHAINS em sovereign_matrix.py.
+    # São aliases do mesmo dado (não fontes distintas como PTAX vs BRL=X), e por isso DEVEM cair
+    # na mesma coluna e mergear via FIX-13 (combine_first), em vez de duplicar a mesma série sob
+    # três nomes de coluna diferentes. "INDICADOR USD" (não "USD" solto) porque "USD" sozinho
+    # colide com o aviso "(USD/BRL)" de tickers convertidos — ver `brl_warning` em sovereign_matrix.py.
+    ("CAMBIO", "DOLAR_PTAX"),
+    ("INDICADOR USD", "DOLAR_PTAX"),
     ("BRL=X", "DOLAR"), ("DÓLAR", "DOLAR"),
     ("GASOLINA", "GASOLINA"), ("DIESEL", "DIESEL"),
     ("IPCA", "IPCA"), ("SELIC", "SELIC"), ("DESEMPREGO", "DESEMPREGO"),
-    ("CAMBIO", "CAMBIO"),
 ]
 
 def parse_markdown_blocks(raw_blocks):

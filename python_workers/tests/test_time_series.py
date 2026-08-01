@@ -62,6 +62,44 @@ DOLAR_PTAX_BLOCK = """[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO IND
 2024-05-15 | 5.13
 """
 
+# GAP Item 3 — PTAX (BCB, oficial) e BRL=X (Yahoo, spot) são fontes DISTINTAS e
+# não podem nunca ser fundidas, mesmo com valores próximos (correlação alta é esperada
+# entre as duas séries no mundo real — não pode ser usada como sinal de duplicata).
+BRL_X_BLOCK = """[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO ATIVO BRL=X (Dólar/BRL)]
+2024-01-15 | 4.95
+2024-02-15 | 5.01
+2024-03-15 | 5.02
+2024-04-15 | 5.18
+2024-05-15 | 5.15
+"""
+
+# GAP Item 3 — "CAMBIO" é um ALIAS do indicador macro DOLAR_PTAX (mesma série BCB SGS 10813
+# por padrão em FALLBACK_CHAINS) e por isso DEVE mergear na mesma coluna, ao contrário de
+# BRL_X_BLOCK acima que é uma fonte genuinamente diferente.
+CAMBIO_BLOCK = """[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO INDICADOR CAMBIO]
+2024-01-15 | 4.91
+2024-02-15 | 4.96
+2024-03-15 | 4.98
+2024-04-15 | 5.13
+2024-05-15 | 5.13
+"""
+
+INDICADOR_USD_BLOCK = """[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO MACRO INDICADOR USD]
+2024-01-15 | 4.91
+2024-02-15 | 4.96
+2024-03-15 | 4.98
+2024-04-15 | 5.13
+2024-05-15 | 5.13
+"""
+
+# Ticker convertido para BRL cujo cabeçalho inclui o aviso "(USD/BRL)" — usado para provar
+# que o alias específico "INDICADOR USD" não colide com esse texto (que contém "USD" solto).
+BRENT_CONVERTED_BLOCK = (
+    "[CONTEXT: DADOS HISTÓRICOS BRUTOS REFERENTES AO ATIVO BZ=F (Petróleo Brent)"
+    " - ATENÇÃO: VALORES CÂMBIO DUPLO EXPOSTO NO RAW (USD/BRL)]\n"
+    "2024-01-15 | USD 79.20 | BRL 388.91\n"
+)
+
 
 # ── parse_markdown_blocks ──────────────────────────────────────
 class TestParseMarkdownBlocks:
@@ -114,6 +152,40 @@ class TestDeduplication:
         keys = list(ds.keys())
         assert len([k for k in keys if "DOLAR_PTAX" in k]) == 1
 
+    def test_cambio_is_alias_of_dolar_ptax_and_merges(self):
+        """GAP Item 3: CAMBIO resolves to the same BCB series as DOLAR_PTAX (SGS 10813)
+        by default — they must merge into ONE column, not create a duplicate."""
+        ds = parse_markdown_blocks([DOLAR_PTAX_BLOCK, CAMBIO_BLOCK])
+        keys = list(ds.keys())
+        assert "DOLAR_PTAX" in keys
+        assert "CAMBIO" not in keys
+        assert len([k for k in keys if "DOLAR_PTAX" in k]) == 1
+
+    def test_macro_usd_is_alias_of_dolar_ptax_and_merges(self):
+        """GAP Item 3: fetch_macroeconomy('USD') also resolves to SGS 10813 by default —
+        must merge with DOLAR_PTAX, not create a third duplicate column."""
+        ds = parse_markdown_blocks([DOLAR_PTAX_BLOCK, INDICADOR_USD_BLOCK])
+        keys = list(ds.keys())
+        assert "DOLAR_PTAX" in keys
+        assert "USD" not in keys
+        assert len([k for k in keys if "DOLAR_PTAX" in k]) == 1
+
+    def test_usd_alias_does_not_collide_with_brl_conversion_warning(self):
+        """The specific 'INDICADOR USD' alias must NOT falsely match a finance ticker whose
+        header merely contains 'USD' inside the BRL-conversion warning text."""
+        ds = parse_markdown_blocks([BRENT_CONVERTED_BLOCK])
+        assert "BRENT" in ds
+        assert "DOLAR_PTAX" not in ds
+
+    def test_ptax_and_brl_x_never_merge(self):
+        """GAP Item 3 (o item raiz): PTAX (BCB, oficial) e BRL=X (Yahoo, spot) são fontes
+        DISTINTAS e NUNCA podem ser fundidas em uma coluna, mesmo com valores próximos."""
+        ds = parse_markdown_blocks([DOLAR_PTAX_BLOCK, BRL_X_BLOCK])
+        keys = list(ds.keys())
+        assert "DOLAR_PTAX" in keys
+        assert "DOLAR" in keys  # BRL=X normaliza para "DOLAR" nesta etapa (renomeado depois no join)
+        assert len(keys) == 2
+
 
 # ── join_and_extract ───────────────────────────────────────────
 class TestJoinAndExtract:
@@ -142,6 +214,26 @@ class TestJoinAndExtract:
     def test_empty_input_returns_error(self):
         result = json.loads(join_and_extract([]))
         assert "error" in result
+
+    def test_ptax_and_brl_x_both_survive_join(self):
+        """GAP Item 3, ponta a ponta: mesmo após o merge outer-join e a dedup por
+        correlação Pearson (FIX-13), DOLAR_PTAX (oficial) e DOLAR_SPOT (BRL=X, ex-DOLAR)
+        têm que aparecer os DOIS na tabela final — mesmo com valores altamente
+        correlacionados, como é o caso real entre as duas séries."""
+        result = json.loads(join_and_extract([DOLAR_PTAX_BLOCK, BRL_X_BLOCK]))
+        assert result["status"] == "success"
+        md = result["markdown"]
+        assert "DOLAR_PTAX" in md
+        assert "DOLAR_SPOT" in md
+
+    def test_cambio_merges_with_ptax_in_final_join(self):
+        """GAP Item 3: no join final, CAMBIO não deve sobreviver como coluna própria —
+        tem que ter mergeado dentro de DOLAR_PTAX antes mesmo do outer-join acontecer."""
+        result = json.loads(join_and_extract([DOLAR_PTAX_BLOCK, CAMBIO_BLOCK, IPCA_BLOCK]))
+        assert result["status"] == "success"
+        md = result["markdown"]
+        assert "DOLAR_PTAX" in md
+        assert "CAMBIO" not in md
 
     def test_pearson_values_valid(self):
         """Pearson r values should be between -1 and 1."""
