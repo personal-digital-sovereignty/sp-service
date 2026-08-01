@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
+
+### Added
+- **Sovereign Fast-Router (`qwen3:0.6b`)**: Roteador dinâmico SLM que analisa a complexidade (P, M, G) e roteia para modelos maiores localmente baseando-se na memória disponível.
+- **Cold-Boot Guard**: Sistema de retries (3 tentativas de 5s) no `reqwest::post` quando o Ollama retorna 500 ou Connection Reset, protegendo contra OOM/Timeout no carregamento da VRAM.
+- **Auto-Eviction (10-Minute Eviction)**: `schedule_model_unload` implementado no `memory_manager.rs` para liberar modelos pesados da memória após o uso.
 ## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
    
 ### Fixed — CI/CD e Docker (Forensic Fixes)
@@ -23,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased] — Hotfix: CVE Patches + Clippy Gate
+
+### Fixed — Resilience Shield: GAP-RS-02 (UNREACHABLE vs DEAD)
+- **`health_check_apis.py` (`check_yahoo`):** falhas de rede (conexão recusada, timeout, DNS) agora emitem `UNREACHABLE` em vez de serem sempre reportadas como `DEAD`. Também passou a propagar o `timeout` configurado para `yfinance.Ticker.history()`, que antes era ignorado — sem isso, uma falha de rede nunca gerava exceção a tempo de ser classificada.
+- **`health_gate.rs` (`ApiHealthSummary`/`build_summary`):** o agregado antes colapsava `DEAD`, `UNREACHABLE` e `EMPTY` em um único contador `degraded`, perdendo a distinção já presente nos `entries` brutos. Adicionados contadores `dead`, `unreachable`, `empty` preservados até o handler `GET /v1/analytics/api_health`.
+- **`telemetry.svelte.ts` + `engineer/analytics/+page.svelte`:** o dado de saúde por API era buscado e armazenado em `telemetryState.apiEntries`, mas nenhum componente da UI o renderizava. Adicionado painel "Resilience Shield" com badge e ícone distintos por status (`HEALTHY`/`UNREACHABLE`/`DEAD`/`EMPTY`/`SKIP`).
 
 ### Fixed — Seguranca (CVEs Trivy HIGH)
 - **CVE-2026-42327** (`openssl 0.10.78`): Undefined Behavior em `X509Ref::ocsp_responders` para certificados com OCSP URLs nao-UTF-8. Bumped para `0.10.79` no `Cargo.toml` + `cargo update` atualizou o `Cargo.lock`.

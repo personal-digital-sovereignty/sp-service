@@ -501,7 +501,7 @@ pub async fn chat_completions_handler(
 ) -> Response {
     // Fallback/Extrator: Se 'stream' não vier especificado, assumimos True em respeito aos IDs nativos
     let is_stream = payload.stream.unwrap_or(true);
-let requested_model = payload.model.clone();
+let mut requested_model = payload.model.clone();
 let is_qwen_model = requested_model.starts_with("qwen/");
 let mut qwen_settings = QwenSettings::default();
 
@@ -572,6 +572,38 @@ let human_prompt = payload.messages.last()
     })
     .unwrap_or_else(|| "Interação O.S".to_string());
 
+// 🧠 **Sovereign Fast-Router (Dynamic Local SLM)**
+if requested_model == "auto" || requested_model.is_empty() || requested_model == "sovereign-auto" {
+    let _ = state.log_sender.send(crate::models::LogEntry {
+        timestamp: chrono::Local::now().to_rfc3339(),
+        level: "agent".to_string(),
+        message: "🧠 Fast-Router: Analisando complexidade da query (P, M, G)...".to_string(),
+    });
+    
+    let complexity = crate::fast_router::evaluate_complexity(&human_prompt, &state).await;
+    let map = crate::fast_router::discover_local_routing_map(&state).await;
+    
+    requested_model = match complexity.as_str() {
+        "G" => map.g_model,
+        "M" => map.m_model,
+        _ => map.p_model.clone(), // "P"
+    };
+    
+    let _ = state.log_sender.send(crate::models::LogEntry {
+        timestamp: chrono::Local::now().to_rfc3339(),
+        level: "agent".to_string(),
+        message: format!("🧭 Fast-Router: Classificação [{}] -> Modelo designado: {}", complexity, requested_model),
+    });
+
+    if requested_model != map.p_model {
+        crate::memory_manager::schedule_model_unload(requested_model.clone()).await;
+    }
+} else {
+    let router = crate::fast_router::get_router_model(&state.db).await;
+    if requested_model != router {
+        crate::memory_manager::schedule_model_unload(requested_model.clone()).await;
+    }
+}
 
 // 🎨 **Visual Artist Hard-Bypass (G.1 Palette Tool)**
 // 
@@ -1808,6 +1840,7 @@ if use_openrouter { if let Some(settings) = openrouter_settings {
 let endpoint = format!("{}/api/chat", ollama_base_url);
 
 let mut retry_count = 0;
+let mut cold_boot_retries = 0;
 let res = loop {
     let response_result = state
         .http_client
@@ -1821,6 +1854,14 @@ let res = loop {
         Ok(r) => {
             let status = r.status();
             let err_body = r.text().await.unwrap_or_default();
+
+            // 🛡️ Cold-Boot Guard (Model Recovery from VRAM)
+            if status == reqwest::StatusCode::INTERNAL_SERVER_ERROR && cold_boot_retries < 3 {
+                tracing::warn!("❄️ [Cold-Boot Guard] Ollama retornou 500 ({}). Modelo possivelmente carregando na VRAM. Tentativa {}/3", err_body, cold_boot_retries + 1);
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                cold_boot_retries += 1;
+                continue;
+            }
 
             // Interceptador de Auto-Cura para modelos alheios a Tool-Calling via API
             if retry_count == 0 && status == reqwest::StatusCode::BAD_REQUEST && (err_body.contains("does not support") || err_body.contains("tools")) {
@@ -1867,6 +1908,14 @@ let res = loop {
         return;
     },
     Err(e) => {
+        // 🛡️ Cold-Boot Guard (Model Recovery from VRAM / Connection Reset)
+        if cold_boot_retries < 3 && !is_custom_cluster {
+            tracing::warn!("❄️ [Cold-Boot Guard] Falha de conexão Ollama (Timeout/Reset). Modelo possivelmente carregando. Tentativa {}/3. Erro: {}", cold_boot_retries + 1, e);
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            cold_boot_retries += 1;
+            continue;
+        }
+
             if is_custom_cluster {
                 tracing::warn!("🔄 OCI/Mesh Node Offline ({}). Iniciando Autonomia de Fallback para Localhost (127.0.0.1:11434)...", e);
                 let local_endpoint = format!("{}{}", std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://127.0.0.1:11434".to_string()), "/api/chat");

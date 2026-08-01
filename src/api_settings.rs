@@ -1209,3 +1209,31 @@ pub async fn set_cloud_target_handler(
 
     Json(serde_json::json!({"status": "ok"})).into_response()
 }
+
+pub async fn get_sovereign_router_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Ok(Some(row)) = sqlx::query("SELECT value_json FROM global_settings WHERE id = 'sovereign_router'").fetch_optional(&state.db).await {
+        let val: String = sqlx::Row::get(&row, "value_json");
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&val) {
+            return Json(parsed).into_response();
+        }
+    }
+    Json(serde_json::json!({"model": "qwen3:0.6b"})).into_response()
+}
+
+pub async fn set_sovereign_router_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let json_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{\"model\": \"qwen3:0.6b\"}".to_string());
+    
+    let res = sqlx::query("INSERT INTO global_settings (id, value_json) VALUES ('sovereign_router', ?) ON CONFLICT(id) DO UPDATE SET value_json = excluded.value_json")
+        .bind(json_str)
+        .execute(&state.db)
+        .await;
+
+    if res.is_err() {
+        return (axum::http::StatusCode::INTERNAL_SERVER_ERROR, "Database Error").into_response();
+    }
+    
+    Json(serde_json::json!({"status": "ok"})).into_response()
+}

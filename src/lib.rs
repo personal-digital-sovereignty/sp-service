@@ -54,6 +54,7 @@ pub mod prompt_vault;
 pub mod health_gate;
 pub mod oracle_worker;
 pub mod events;
+pub mod fast_router;
 
 #[cfg(test)]
 pub mod tests;
@@ -324,6 +325,12 @@ pub async fn run() {
     });
     health_gate::spawn_periodic_watchdog(db_pool.clone(), health_state).await;
 
+    // 🧠 Sovereign Fast-Router (qwen3:0.6b): Download on first use
+    let router_state = state.clone();
+    tokio::spawn(async move {
+        fast_router::verify_and_pull_router(router_state).await;
+    });
+
     // ☁️ Oracle Cloud: Auto-connect SSH tunnel for Ollama offload (non-blocking)
     ssh_mesh_connector::auto_connect_oracle_node(db_pool.clone()).await;
 
@@ -411,6 +418,7 @@ pub async fn run() {
             .post(api_settings::set_p2p_mesh_handler))
         .route("/v1/settings/cloud_target", axum::routing::get(api_settings::get_cloud_target_handler)
             .post(api_settings::set_cloud_target_handler))
+        .route("/v1/settings/sovereign_router", axum::routing::get(api_settings::get_sovereign_router_handler).post(api_settings::set_sovereign_router_handler))
         .route("/v1/settings/openrouter", axum::routing::get(api_settings::get_openrouter_settings_handler).post(api_settings::set_openrouter_settings_handler))
         .route("/v1/settings/qwen", axum::routing::get(api_settings::get_qwen_settings_handler).post(api_settings::set_qwen_settings_handler))
         .route("/v1/settings/nvidia", axum::routing::get(api_settings::get_nvidia_settings_handler).post(api_settings::set_nvidia_settings_handler))
