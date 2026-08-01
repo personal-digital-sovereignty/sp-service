@@ -55,6 +55,7 @@ pub mod health_gate;
 pub mod oracle_worker;
 pub mod events;
 pub mod fast_router;
+pub mod cron_agents;
 
 #[cfg(test)]
 pub mod tests;
@@ -337,30 +338,8 @@ pub async fn run() {
     // Boot the Auto-Evaluator (LLM-as-a-Judge Mesh Loop)
     auto_evaluator::start_evaluator_loop(state.clone()).await;
 
-    // Booting autonomous python worker for Cloud Savings Economy
-    let db_pool_pricing = state.db.clone();
-    let telemetry_ref = state.telemetry.clone();
-    tokio::spawn(async move {
-        tracing::info!("☁️ [Sovereign Hub] Spawning Python worker: market_pricing_matrix.py...");
-        let workers_dir = crate::api_trainer::resolve_python_workers_dir();
-        let script_path = workers_dir.join("market_pricing_matrix.py");
-        let python_bin = crate::sandbox::get_hermetic_python_bin();
-        let _ = std::process::Command::new(&python_bin)
-            .arg(&script_path)
-            .output();
-
-        let avg_cost = sqlx::query_scalar::<_, String>("SELECT value_json FROM global_settings WHERE id = 'avg_cloud_token_cost_1k'")
-            .fetch_one(&db_pool_pricing)
-            .await
-            .unwrap_or_else(|_| "0.00625".to_string())
-            .parse::<f64>()
-            .unwrap_or(0.00625);
-
-        if let Ok(mut t) = telemetry_ref.write() {
-            t.avg_cloud_cost_per_1k = avg_cost;
-            tracing::info!("☁️ [Sovereign Hub] Live Market Pricing Set to: ${:.5}/1k tokens", avg_cost);
-        }
-    });
+    // 🤖 Booting Autonomous Background Cron-Agents
+    cron_agents::start_cron_agents(state.clone()).await;
 
     let app = Router::new()
         // ------------------ System Actions & Launchers ---------------
