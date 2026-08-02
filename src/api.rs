@@ -2808,6 +2808,25 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
     top_topics.sort_by(|a, b| b["count"].as_i64().unwrap_or(0).cmp(&a["count"].as_i64().unwrap_or(0)));
     top_topics.truncate(5);
 
+    let evaluations = sqlx::query("SELECT id, user_query, rag_context, ai_response, faithfulness_score, precision_score, status, strftime('%Y-%m-%d %H:%M:%S', created_at) as created_at FROM evaluations WHERE status = 'completed' ORDER BY created_at DESC LIMIT 15")
+        .fetch_all(&state.db)
+        .await
+        .map(|rows| {
+            rows.into_iter().map(|row| {
+                serde_json::json!({
+                    "id": sqlx::Row::get::<String, _>(&row, "id"),
+                    "user_query": sqlx::Row::get::<String, _>(&row, "user_query"),
+                    "rag_context": sqlx::Row::get::<String, _>(&row, "rag_context"),
+                    "ai_response": sqlx::Row::get::<String, _>(&row, "ai_response"),
+                    "faithfulness_score": sqlx::Row::get::<i32, _>(&row, "faithfulness_score"),
+                    "precision_score": sqlx::Row::get::<i32, _>(&row, "precision_score"),
+                    "status": sqlx::Row::get::<String, _>(&row, "status"),
+                    "created_at": sqlx::Row::get::<String, _>(&row, "created_at"),
+                })
+            }).collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     // Devolve formatado para o Dashboard Svelte
     Json(serde_json::json!({
         "total_tokens": snapshot.total_tokens,
@@ -2822,6 +2841,7 @@ pub async fn telemetry_snapshot_handler(State(state): State<Arc<AppState>>) -> i
         "security_blocks": security_blocks_count,
         "trackers_blocked": trackers_blocked_count,
         "security_logs": security_logs,
+        "evaluations": evaluations,
         "hardware": {
             "cpu_cores": snapshot.hardware.cpu_cores,
             "ram": snapshot.hardware.ram_usage_mb,

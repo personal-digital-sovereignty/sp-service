@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.5.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
 
 ### Added
+- **LLM Judge & Observability**: Rota de telemetria agora expõe os 15 relatórios mais recentes de auditoria do LLM Judge (scores de fidelidade e precisão) vindos da tabela `evaluations` (Item 6 do Roadmap).
 - **Background Cron-Agents (Autonomia)**: Implementado o módulo `cron_agents.rs` com agentes independentes rodando em background (Market Pricing 12h, Gap Solver 24h, SQLite Backup 24h, RAG Reindex 7d) via `tokio::time::interval` (Item 8 do Roadmap).
 - **TTFT Metric & Observability**: Adicionado rastreamento de TTFT (Time To First Token) no backend de telemetria para maior observabilidade do LLMOps (Item 6 do Roadmap).
 - **Sovereign Fast-Router (`qwen3:0.6b`)**: Roteador dinâmico SLM que analisa a complexidade (P, M, G) e roteia para modelos maiores localmente baseando-se na memória disponível.
