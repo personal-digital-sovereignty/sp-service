@@ -4601,7 +4601,7 @@ dependencies = [
 
 [[package]]
 name = "sp-service"
-version = "1.4.0-dev"
+version = "1.5.0-dev"
 dependencies = [
  "adblock",
  "aes-gcm",
