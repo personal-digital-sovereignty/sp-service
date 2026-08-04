@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.5.0-rc.1] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
+## [1.7.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
 
-*Tag `v1.5.0-rc.1` cortada em 2026-08-02 (`fa9677d`) sobre este mesmo trabalho — o rótulo `[1.5.0-dev]` original não refletia a versão real do `Cargo.toml` após o bump.*
+*Tag `v1.5.0-rc.1` cortada em 2026-08-02 (`fa9677d`) sobre este mesmo trabalho, depois renomeada para `v1.7.0-dev` em 2026-08-04 para alinhar com a numeração real da suite (ver `sp-ui-shell/CHANGELOG.md`) — o rótulo `[1.5.0-dev]` original também não refletia a versão do `Cargo.toml` após o bump.*
 
 ### Security (2026-08-04)
 - **Semgrep (SAST)**: `Gate 1: Semgrep (SAST)` bloqueava toda a pipeline (39 findings da regra `github-actions-mutable-action-tag`) nos 5 workflows (`ci.yml`, `deploy-oci.yml`, `devsecops.yml`, `docker.yml`, `release_notes.yml`) — nenhuma action estava pinada em SHA neste repo. Corrigido: `actions/checkout`, `actions/setup-python`, `actions/{upload,download}-artifact`, `Swatinem/rust-cache`, `docker/{setup-qemu,setup-buildx,login,metadata,build-push}-action` e `softprops/action-gh-release` agora pinados em SHA de commit real (verificado via GitHub API). `dtolnay/rust-toolchain@stable` também pinado — a resolução da versão do Rust é dinâmica em runtime, independente do SHA da action, então pinar o wrapper não congela o compilador. Validado localmente: `semgrep scan` 0 findings (era 39).
