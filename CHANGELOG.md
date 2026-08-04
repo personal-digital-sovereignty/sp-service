@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.5.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
+## [1.5.0-rc.1] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
+
+*Tag `v1.5.0-rc.1` cortada em 2026-08-02 (`fa9677d`) sobre este mesmo trabalho — o rótulo `[1.5.0-dev]` original não refletia a versão real do `Cargo.toml` após o bump.*
 
 ### Added
 - **LLM Judge & Observability**: Rota de telemetria agora expõe os 15 relatórios mais recentes de auditoria do LLM Judge (scores de fidelidade e precisão) vindos da tabela `evaluations` (Item 6 do Roadmap).
