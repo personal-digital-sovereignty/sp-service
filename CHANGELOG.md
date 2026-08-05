@@ -52,9 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed — Seguranca (CVEs Trivy HIGH)
 - **CVE-2026-42327** (`openssl 0.10.78`): Undefined Behavior em `X509Ref::ocsp_responders` para certificados com OCSP URLs nao-UTF-8. Bumped para `0.10.79` no `Cargo.toml` + `cargo update` atualizou o `Cargo.lock`.
 - **GHSA-82j2-j2ch-gfr8** (`rustls-webpki 0.103.10`): Denial of Service via panic em CRL BIT STRING malformado. Bumped para `0.103.13` via `cargo update rustls-webpki`.
+- **GHSA-4w2j-m93h-cj5j** (`quinn-proto 0.11.14`, dependencia transitiva de `reqwest 0.12` via `quinn`): exaustao remota de memoria por reassembly ilimitado de streams fora de ordem. Corrigido via `cargo update -p quinn-proto --precise 0.11.15` (compativel com o range `^0.11` exigido por `quinn 0.11.9`, sem bump de dependencia direta). Achado no run `30962743616` do `ci.yml` (Gate 2: Trivy).
 
 ### Fixed — Clippy Gate (`-D warnings`)
 - **`clippy::manual_flatten`** (`api.rs:1069`): Substituiu `for res in join_all(...).await { if let Ok((link, md)) = res { ... } }` por `for (link, md) in join_all(...).await.into_iter().flatten() { ... }` conforme sugerido pelo Clippy.
+- **`clippy::op_ref`** (`fast_router.rs:56`): `name == &base_name` comparava `&str` contra uma referencia desnecessaria de `String` (`&base_name`); Clippy exige o valor direto (`name == base_name`), ja coberto por `PartialEq<String> for str`. Introduzido junto com o Sovereign Fast-Router (`v1.7.0-dev`) e nunca pego antes porque nenhum `cargo clippy -D warnings` rodou sobre o arquivo desde entao. Achado no mesmo run `30962743616` (Gate 3: Rust Clippy + Tests).
 
 ---
 

@@ -53,7 +53,7 @@ pub async fn verify_and_pull_router(state: Arc<AppState>) {
                         } else {
                             format!("{}:latest", router_model)
                         };
-                        if name == router_model || name == &base_name {
+                        if name == router_model || name == base_name {
                             exists = true;
                             break;
                         }
