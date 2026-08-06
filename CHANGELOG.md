@@ -58,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`clippy::manual_flatten`** (`api.rs:1069`): Substituiu `for res in join_all(...).await { if let Ok((link, md)) = res { ... } }` por `for (link, md) in join_all(...).await.into_iter().flatten() { ... }` conforme sugerido pelo Clippy.
 - **`clippy::op_ref`** (`fast_router.rs:56`): `name == &base_name` comparava `&str` contra uma referencia desnecessaria de `String` (`&base_name`); Clippy exige o valor direto (`name == base_name`), ja coberto por `PartialEq<String> for str`. Introduzido junto com o Sovereign Fast-Router (`v1.7.0-dev`) e nunca pego antes porque nenhum `cargo clippy -D warnings` rodou sobre o arquivo desde entao. Achado no mesmo run `30962743616` (Gate 3: Rust Clippy + Tests).
 
+### Added — Empacotamento Nativo (.deb/.rpm/.pkg)
+- **Gap**: `build-core`/`publish-nightly`/`publish-stable` só anexavam o binário `sovereign-daemon` solto por plataforma na release — sem `.deb`/`.rpm` no Linux nem `.pkg` no macOS, mesmo com o `ci.yml` já buildando os 4 targets.
+- **Linux (`cargo-deb` + `cargo-generate-rpm`)**: novos steps no job `build-core` (matriz `ubuntu-latest`/`ubuntu-24.04-arm`) geram `.deb` e `.rpm` a partir do binário já compilado (`--no-build`/`--target`, sem rebuild). Metadata (`description`, `maintainer`, `license-file`, `depends = "$auto"`) adicionada em `[package.metadata.deb]`/`[package.metadata.generate-rpm]` no `Cargo.toml`. `cargo-deb` resolveu `Depends: libc6, libssl3t64, libstdc++6` automaticamente. RPM não aceita `-` no campo `version` (só `[A-Za-z0-9._+%{}~^]`) — `1.7.0-dev` é sanitizado em runtime para `1.7.0~dev` via `--set-metadata` (tilde ordena como pre-release, igual à convenção `dpkg`).
+- **macOS (`pkgbuild`)**: novo step gera `.pkg` (instala em `/usr/local/bin/sovereign-daemon`) usando a ferramenta nativa do runner `macos-latest`, sem dependência externa.
+- **Sem assinatura/notarização**: o projeto não tem certificado Apple Developer nem chave de assinatura Authenticode/GPG ainda. Pacotes publicados sem assinar — release notes avisam que o usuário precisa liberar manualmente (Gatekeeper no macOS, `dpkg -i`/`rpm -i` direto no Linux, sem repo APT/YUM próprio). Decisão registrada aqui para não ser confundida com omissão.
+- **Docker (`docker.yml`)**: permanece manual (`workflow_dispatch`), sem mudança — decisão de desacoplamento já registrada anteriormente neste changelog.
+- Validado localmente (ambiente Linux amd64): `cargo deb --no-build` gerou `.deb` instalável com deps corretas; `cargo generate-rpm` gerou `.rpm` válido (`file` reconhece como `RPM v3.0 bin`).
+
 ---
 
 ## [1.4.0-dev] - 2026-05-06 — Estabilizacao Estrutural Critica

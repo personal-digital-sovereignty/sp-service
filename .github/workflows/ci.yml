@@ -207,6 +207,68 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: target/${{ matrix.target_triple }}/release/${{ matrix.binary_name }}
 
+      # --------------------------------------------------
+      # Pacotes nativos (sem assinatura/notarização ainda —
+      # ver aviso no release: instalação exige liberação manual
+      # do Gatekeeper/dpkg local, não há repo APT/RPM próprio)
+      # --------------------------------------------------
+      - name: Install cargo-deb + cargo-binstall (Linux Only)
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@cb33e69fad06166ca28a42b2575e4dadabf62ee8 # v2.85.8
+        with:
+          tool: cargo-deb,cargo-binstall
+
+      - name: Install cargo-generate-rpm (Linux Only)
+        if: runner.os == 'Linux'
+        run: cargo binstall cargo-generate-rpm --no-confirm --locked
+
+      - name: Build .deb Package (Linux Only)
+        if: runner.os == 'Linux'
+        run: cargo deb --no-build --target ${{ matrix.target_triple }}
+
+      - name: Build .rpm Package (Linux Only)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # RPM não aceita '-' no campo version (só alphanumeric/./_/+/%/{}/~/^) —
+          # "1.7.0-dev" vira "1.7.0~dev" (tilde ordena como pre-release, igual ao dpkg).
+          RPM_VERSION="$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2 | tr '-' '~')"
+          cargo generate-rpm --target ${{ matrix.target_triple }} --set-metadata "version=\"$RPM_VERSION\""
+
+      - name: Upload .deb Artifact (Linux Only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}-deb
+          path: target/${{ matrix.target_triple }}/debian/*.deb
+
+      - name: Upload .rpm Artifact (Linux Only)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}-rpm
+          path: target/${{ matrix.target_triple }}/generate-rpm/*.rpm
+
+      - name: Build .pkg Installer (macOS Only)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          PKG_VERSION="$(grep -m1 '^version' Cargo.toml | cut -d '"' -f2)"
+          mkdir -p pkgroot/usr/local/bin
+          cp target/${{ matrix.target_triple }}/release/${{ matrix.binary_name }} pkgroot/usr/local/bin/
+          pkgbuild \
+            --root pkgroot \
+            --identifier org.sovereignpair.sp-service \
+            --version "$PKG_VERSION" \
+            --install-location / \
+            sp-service-macos-arm64.pkg
+
+      - name: Upload .pkg Artifact (macOS Only)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.artifact_name }}-pkg
+          path: sp-service-macos-arm64.pkg
 
   # ==========================================
   # Release Distribution
@@ -248,11 +310,18 @@ jobs:
             Builds automatizados (Nightly) do sp-service.
 
             **Aviso:** Estes binarios sao compilados progressivamente (Continuous Deployment) no ultimo commit da branch `main` e nao refletem garantias de estabilidade.
+
+            **Pacotes nativos (.deb/.rpm/.pkg) não são assinados/notarizados** (sem certificado Apple Developer ou chave de assinatura próprios ainda). No macOS, libere via clique-direito > Abrir; no Linux, instale com `dpkg -i`/`rpm -i` diretamente (não há repositório APT/YUM próprio).
           files: |
             sp-service-linux-amd64-binary
             sp-service-linux-arm64-binary
             sp-service-windows-amd64-binary.exe
             sp-service-macos-arm64-binary
+            sp-service-linux-amd64-deb/*.deb
+            sp-service-linux-arm64-deb/*.deb
+            sp-service-linux-amd64-rpm/*.rpm
+            sp-service-linux-arm64-rpm/*.rpm
+            sp-service-macos-arm64-pkg/sp-service-macos-arm64.pkg
 
   publish-stable:
     needs: [build-core]
@@ -277,8 +346,16 @@ jobs:
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe
         with:
           generate_release_notes: true
+          append_body: true
+          body: |
+            **Pacotes nativos (.deb/.rpm/.pkg) não são assinados/notarizados** (sem certificado Apple Developer ou chave de assinatura próprios ainda). No macOS, libere via clique-direito > Abrir; no Linux, instale com `dpkg -i`/`rpm -i` diretamente (não há repositório APT/YUM próprio).
           files: |
             sp-service-linux-amd64-binary
             sp-service-linux-arm64-binary
             sp-service-windows-amd64-binary.exe
             sp-service-macos-arm64-binary
+            sp-service-linux-amd64-deb/*.deb
+            sp-service-linux-arm64-deb/*.deb
+            sp-service-linux-amd64-rpm/*.rpm
+            sp-service-linux-arm64-rpm/*.rpm
+            sp-service-macos-arm64-pkg/sp-service-macos-arm64.pkg

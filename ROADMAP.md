@@ -171,11 +171,16 @@
 
 | Workflow | Status | Observação |
 |----------|--------|------------|
-| CI.yml | ✅ Configurado | Clippy + Unit Tests |
+| CI.yml | ✅ Configurado | Clippy + Unit Tests + `build-core` (4 plataformas) + empacotamento nativo (.deb/.rpm/.pkg) |
 | devsecops.yml | ✅ Configurado | Semgrep + Trivy (fs scan) + Clippy + Pytest |
-| docker.yml | ✅ **Corrigido** | Trivy agora scan local (resolvido UNAUTHORIZED) |
+| docker.yml | ✅ **Corrigido** | Trivy agora scan local (resolvido UNAUTHORIZED) — permanece manual (`workflow_dispatch`), desacoplado do `ci.yml` |
 | deploy-oci.yml | ✅ Configurado | Manual trigger |
 | release_notes.yml | ✅ Configurado | Tag trigger |
+
+### Distribuição do Binário (Releases)
+- **Bruto**: `sovereign-daemon` (Linux amd64/arm64, Windows amd64, macOS arm64) em toda release nightly/estável.
+- **Nativo**: `.deb`+`.rpm` (Linux amd64/arm64, via `cargo-deb`/`cargo-generate-rpm`) e `.pkg` (macOS, via `pkgbuild`) desde 2026-08-05.
+- **Pendente**: assinatura/notarização (Apple Developer ID, Authenticode) — pacotes saem sem assinar até o projeto ter certificado próprio; instalação exige liberação manual do Gatekeeper/`dpkg -i`/`rpm -i`.
 
 ### Secrets/Vars Configuradas
 - 11 secrets na organização
@@ -186,4 +191,4 @@
 > [!TIP]
 > Este roadmap é um documento vivo. Acompanhe os commits para atualizações em tempo real sobre o progresso de cada fase.
 > 
-> **Última atualização:** 2026-05-11 — Micro-frontends desacoplados e pushed.
+> **Última atualização:** 2026-08-05 — Empacotamento nativo (.deb/.rpm/.pkg) adicionado ao `build-core`; CVE `quinn-proto` e clippy `op_ref` corrigidos.

@@ -3,7 +3,36 @@ name = "sp-service"
 version = "1.7.0-dev"
 edition = "2021"
 license = "PolyForm-Noncommercial-1.0.0"
+description = "Sovereign Pair backend daemon: motor local de LLM/RAG, roteamento e telemetria."
 build = "build.rs"
+
+[package.metadata.deb]
+name = "sp-service"
+maintainer = "Jeferson Lopes <jefersonlopes.br@gmail.com>"
+copyright = "2026, Jeferson Lopes"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Backend soberano do Sovereign Pair: orquestra modelos LLM locais (Ollama), \
+o Sovereign Fast-Router, RAG/WAG e telemetria (TTFT/TPS) para os \
+microfrontends federados sp-ui-*."""
+section = "net"
+priority = "optional"
+depends = "$auto"
+assets = [
+    ["target/release/sovereign-daemon", "usr/bin/", "755"],
+    ["LICENSE", "usr/share/doc/sp-service/LICENSE", "644"],
+]
+# Instalador desassinado (sem GPG key/repo APT ainda) — usuário instala via
+# `dpkg -i` local, não `apt`. Avaliar assinatura quando houver key própria.
+
+[package.metadata.generate-rpm]
+name = "sp-service"
+license = "PolyForm-Noncommercial-1.0.0"
+summary = "Sovereign Pair backend daemon"
+assets = [
+    { source = "target/release/sovereign-daemon", dest = "/usr/bin/sovereign-daemon", mode = "755" },
+    { source = "LICENSE", dest = "/usr/share/doc/sp-service/LICENSE", mode = "644", doc = true },
+]
 
 [dependencies]
 # Web Framework & Async Runtime (O novo FastAPI / Uvicorn)
