@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docker (`docker.yml`)**: permanece manual (`workflow_dispatch`), sem mudança — decisão de desacoplamento já registrada anteriormente neste changelog.
 - Validado localmente (ambiente Linux amd64): `cargo deb --no-build` gerou `.deb` instalável com deps corretas; `cargo generate-rpm` gerou `.rpm` válido (`file` reconhece como `RPM v3.0 bin`).
 
+### Fixed — `publish-stable` nunca rodava de verdade (achado cortando a tag `v1.7.0`)
+- **Problema 1**: `ci.yml` só escutava `push:branches:[main]` e `release:types:[created]` — nunca `push:tags` diretamente. O `release_notes.yml` cria a release via `softprops/action-gh-release` usando o `GITHUB_TOKEN` padrão, e por proteção do GitHub contra recursão, eventos gerados por uma Action usando esse token não disparam outros workflows. Resultado: `publish-stable` nunca tinha uma chance real de rodar, mesmo com uma tag de verdade cortada. Fix: `push:tags:['v*.*.*']` adicionado.
+- **Problema 2**: na primeira tentativa real, `build-core` falhou só no runner ARM64 — `cargo-binstall` achou (errado) que `cargo-generate-rpm` já estava instalado ("already installed, use --force to override") e pulou a instalação sem erro, quebrando só no step seguinte ("no such command: generate-rpm"). Sem `fail-fast: false`, isso cancelou as outras 3 plataformas que estavam saudáveis. Fix: `--force` no `cargo binstall` + `fail-fast: false` na matriz.
+- **Resultado real, confirmado em CI**: tag `v1.7.0` recortada sobre o commit corrigido — pipeline completo verde nas 4 plataformas, `publish-stable` publicou a release `v1.7.0` com binário + `.deb`/`.rpm`/`.pkg` de verdade pela primeira vez na história do repositório.
+
 ---
 
 ## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
