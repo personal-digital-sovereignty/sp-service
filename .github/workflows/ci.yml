@@ -3,6 +3,7 @@ name: sp-service CI/CD Pipeline
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
   release:
     types: [created]
   workflow_dispatch:
