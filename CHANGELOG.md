@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.7.0-dev] - 2026-08-01 — Sovereign Fast-Router & Cold-Boot Guard
+## [1.7.0] - 2026-08-06 — Sovereign Fast-Router, Cold-Boot Guard & Empacotamento Nativo
 
-*Tag `v1.5.0-rc.1` cortada em 2026-08-02 (`fa9677d`) sobre este mesmo trabalho, depois renomeada para `v1.7.0-dev` em 2026-08-04 para alinhar com a numeração real da suite (ver `sp-ui-shell/CHANGELOG.md`) — o rótulo `[1.5.0-dev]` original também não refletia a versão do `Cargo.toml` após o bump.*
+*Tag `v1.5.0-rc.1` cortada em 2026-08-02 (`fa9677d`) sobre este mesmo trabalho, depois renomeada para `v1.7.0-dev` em 2026-08-04 para alinhar com a numeração real da suite (ver `sp-ui-shell/CHANGELOG.md`), e lançada como `v1.7.0` de verdade em 2026-08-06 — o rótulo `[1.5.0-dev]` original também não refletia a versão do `Cargo.toml` após o bump.*
 
 ### Security (2026-08-04)
 - **Semgrep (SAST)**: `Gate 1: Semgrep (SAST)` bloqueava toda a pipeline (39 findings da regra `github-actions-mutable-action-tag`) nos 5 workflows (`ci.yml`, `deploy-oci.yml`, `devsecops.yml`, `docker.yml`, `release_notes.yml`) — nenhuma action estava pinada em SHA neste repo. Corrigido: `actions/checkout`, `actions/setup-python`, `actions/{upload,download}-artifact`, `Swatinem/rust-cache`, `docker/{setup-qemu,setup-buildx,login,metadata,build-push}-action` e `softprops/action-gh-release` agora pinados em SHA de commit real (verificado via GitHub API). `dtolnay/rust-toolchain@stable` também pinado — a resolução da versão do Rust é dinâmica em runtime, independente do SHA da action, então pinar o wrapper não congela o compilador. Validado localmente: `semgrep scan` 0 findings (era 39).
@@ -27,22 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Bug real encontrado no mesmo território**: `CAMBIO` e o indicador macro `USD` resolvem, por padrão, para a mesma série BCB SGS 10813 que `DOLAR_PTAX` (`FALLBACK_CHAINS` em `sovereign_matrix.py`), mas o `SEMANTIC_MAP` de `analyze_and_join_time_series.py` dava a cada um sua própria chave — duplicando a mesma série sob três nomes de coluna diferentes em vez de fundir.
 - **Fix**: `CAMBIO` e `"INDICADOR USD"` (match específico, não `"USD"` solto — colide com o aviso `(USD/BRL)` de tickers convertidos) agora são aliases de `DOLAR_PTAX` no `SEMANTIC_MAP`, mergeando via o `combine_first` do FIX-13 em vez de duplicar.
 - **Testes**: 6 testes novos em `test_time_series.py` — trava o cenário raiz (`PTAX` + `BRL=X` nunca fundem, mesmo com alta correlação real) e o bug do `CAMBIO`/`USD` (mergeiam com `DOLAR_PTAX`, sem colidir com o aviso de conversão). 114/114 testes passando (`pytest tests/`).
-## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
-   
-### Fixed — CI/CD e Docker (Forensic Fixes)
-- **GLIBC Noble Migration:** Migrada imagem base do Docker de Debian Bookworm para Ubuntu 24.04 para compatibilidade com símbolos `__isoc23_strtoll` exigidos pelo `ort-sys`.
-- **UID 1000 Collision:** Implementada remoção automática do usuário padrão `ubuntu` nas imagens Ubuntu 24.04 para garantir que o usuário `sovereign` possa assumir o UID 1000.
-- **Binary Name Sync:** Corrigido erro de `COPY` no Dockerfile sincronizando o nome do artefato com o binário `sovereign-daemon` gerado pelo Cargo.
-- **GHCR Permissions:** Adicionada permissão explícita `packages:write` ao job `build-docker` para resolver falhas de push no GitHub Container Registry.
-- **Semgrep Security:** Corrigida vulnerabilidade de `run-shell-injection` no workflow Docker, migrando interpolações diretas `${{ }}` para variáveis de ambiente intermediárias.
-
-### Changed — Arquitetura de Build
-- **Docker Runtime-Only:** Refatorado Dockerfile para eliminar o stage de compilação redundante (~115min economizados no ARM64). A imagem agora consome binários pré-compilados injetados via build context.
-- **Decoupling CI/Docker:** O build de imagens Docker foi desacoplado do pipeline principal `ci.yml`. Agora é executado on-demand via `docker.yml`, consumindo artefatos de releases estáveis ou nightly.
-
----
-
-## [Unreleased] — Hotfix: CVE Patches + Clippy Gate
 
 ### Fixed — Resilience Shield: GAP-RS-02 (UNREACHABLE vs DEAD)
 - **`health_check_apis.py` (`check_yahoo`):** falhas de rede (conexão recusada, timeout, DNS) agora emitem `UNREACHABLE` em vez de serem sempre reportadas como `DEAD`. Também passou a propagar o `timeout` configurado para `yfinance.Ticker.history()`, que antes era ignorado — sem isso, uma falha de rede nunca gerava exceção a tempo de ser classificada.
@@ -67,6 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Validado localmente (ambiente Linux amd64): `cargo deb --no-build` gerou `.deb` instalável com deps corretas; `cargo generate-rpm` gerou `.rpm` válido (`file` reconhece como `RPM v3.0 bin`).
 
 ---
+
+## [1.4.0-rc1] - 2026-05-07 — Estabilização de Pipeline e Docker
+   
+### Fixed — CI/CD e Docker (Forensic Fixes)
+- **GLIBC Noble Migration:** Migrada imagem base do Docker de Debian Bookworm para Ubuntu 24.04 para compatibilidade com símbolos `__isoc23_strtoll` exigidos pelo `ort-sys`.
+- **UID 1000 Collision:** Implementada remoção automática do usuário padrão `ubuntu` nas imagens Ubuntu 24.04 para garantir que o usuário `sovereign` possa assumir o UID 1000.
+- **Binary Name Sync:** Corrigido erro de `COPY` no Dockerfile sincronizando o nome do artefato com o binário `sovereign-daemon` gerado pelo Cargo.
+- **GHCR Permissions:** Adicionada permissão explícita `packages:write` ao job `build-docker` para resolver falhas de push no GitHub Container Registry.
+- **Semgrep Security:** Corrigida vulnerabilidade de `run-shell-injection` no workflow Docker, migrando interpolações diretas `${{ }}` para variáveis de ambiente intermediárias.
+
+### Changed — Arquitetura de Build
+- **Docker Runtime-Only:** Refatorado Dockerfile para eliminar o stage de compilação redundante (~115min economizados no ARM64). A imagem agora consome binários pré-compilados injetados via build context.
+- **Decoupling CI/Docker:** O build de imagens Docker foi desacoplado do pipeline principal `ci.yml`. Agora é executado on-demand via `docker.yml`, consumindo artefatos de releases estáveis ou nightly.
 
 ## [1.4.0-dev] - 2026-05-06 — Estabilizacao Estrutural Critica
 
