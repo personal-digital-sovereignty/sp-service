@@ -149,6 +149,7 @@ jobs:
   build-core:
     needs: [foss-enterprise-devsecops]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -221,7 +222,11 @@ jobs:
 
       - name: Install cargo-generate-rpm (Linux Only)
         if: runner.os == 'Linux'
-        run: cargo binstall cargo-generate-rpm --no-confirm --locked
+        # --force: em runners ARM64 o cargo-binstall às vezes acha (errado) que
+        # o crate já está instalado ("already installed, use --force to
+        # override") e pula silenciosamente — sem o binário de verdade no PATH,
+        # só descoberto no step seguinte ("no such command: generate-rpm").
+        run: cargo binstall cargo-generate-rpm --no-confirm --locked --force
 
       - name: Build .deb Package (Linux Only)
         if: runner.os == 'Linux'
